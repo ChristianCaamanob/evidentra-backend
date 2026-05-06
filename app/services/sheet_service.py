@@ -177,7 +177,7 @@ def generate_answer_sheet_pdf(
         rows = digits_dv if i == 8 else list(range(10))
         for j, d in enumerate(rows):
             cy = top_zone_y - RUT_HDR_H - (j+1)*RUT_GY
-            if cy - RUT_R >= top_zone_y - top_zone_h + 1.5*mm:
+            if cy >= top_zone_y - top_zone_h + RUT_R:
                 _bubble(cv, cx, cy, RUT_R, str(d),
                         color=TEAL if str(d) == 'K' else NAVY)
 
