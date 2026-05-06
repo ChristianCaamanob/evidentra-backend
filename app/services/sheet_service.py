@@ -133,18 +133,7 @@ def generate_answer_sheet_pdf(
 
     # ZONA SUPERIOR
     top_zone_y = hdr_y - 2*mm
-    if N_PER_COL <= 20:
-        top_zone_h = 80*mm
-        RUT_R = 2.6*mm; RUT_GX = 7.0*mm; RUT_GY = 6.2*mm
-        RUT_HDR_H = 6*mm
-    elif N_PER_COL <= 25:
-        top_zone_h = 62*mm
-        RUT_R = 2.2*mm; RUT_GX = 6.4*mm; RUT_GY = 5.0*mm
-        RUT_HDR_H = 5*mm
-    else:
-        top_zone_h = 60*mm
-        RUT_R = 2.0*mm; RUT_GX = 6.0*mm; RUT_GY = 4.8*mm
-        RUT_HDR_H = 10*mm
+    top_zone_h = 80*mm
 
     # RUT (9 columnas: 8 dígitos + DV)
     RUT_R = 2.6*mm; RUT_GX = 7.0*mm; RUT_GY = 6.2*mm
@@ -177,7 +166,7 @@ def generate_answer_sheet_pdf(
         rows = digits_dv if i == 8 else list(range(10))
         for j, d in enumerate(rows):
             cy = top_zone_y - RUT_HDR_H - (j+1)*RUT_GY
-            if cy >= top_zone_y - top_zone_h + RUT_R:
+            if cy - RUT_R >= top_zone_y - top_zone_h + 1.5*mm:
                 _bubble(cv, cx, cy, RUT_R, str(d),
                         color=TEAL if str(d) == 'K' else NAVY)
 
