@@ -46,27 +46,28 @@ def activate_assessment(assessment_id: UUID, db: Session = Depends(get_db)):
 def generate_sheet(
     assessment_id: UUID,
     version: str = Query(default="A", description="Versión de la hoja: A o B"),
+    n_questions: int = Query(default=0, description="N° de preguntas. 0 = usar el configurado en la evaluación"),
     db: Session = Depends(get_db),
 ):
     """
     Genera y devuelve la hoja de respuesta PDF para una evaluación.
-    El docente puede elegir la versión (A o B).
-    Todo lo demás se toma de la evaluación y el curso en la base de datos.
+    El docente puede elegir la versión (A o B) y el número de preguntas.
     """
     assessment = assessment_service.get_assessment(db, assessment_id)
     course = assessment.course
 
-    n_questions = getattr(assessment, 'n_questions', 40)
+    # Usar el n_questions del query param si viene, sino el del modelo
+    nq = n_questions if n_questions > 0 else getattr(assessment, 'n_questions', 40)
     # Asegurar que sea par para las dos columnas
-    if n_questions % 2 != 0:
-        n_questions += 1
+    if nq % 2 != 0:
+        nq += 1
 
     pdf_bytes = generate_answer_sheet_pdf(
         assessment_id=str(assessment_id),
         course_id=str(assessment.course_id),
         course_name=course.name,
         assessment_name=assessment.name,
-        n_questions=n_questions,
+        n_questions=nq,
         version=version.upper(),
         date="2026",
         scale_min=1.0,
@@ -75,7 +76,7 @@ def generate_sheet(
         threshold_pct=getattr(course, 'passing_threshold', 60),
     )
 
-    filename = f"Evidentra_{assessment.name.replace(' ', '_')}_Ver{version.upper()}.pdf"
+    filename = f"Evidentra_{assessment.name.replace(' ', '_')}_Ver{version.upper()}_{nq}P.pdf"
 
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
