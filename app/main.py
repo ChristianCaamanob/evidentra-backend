@@ -16,13 +16,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
-# CORS — en producción acepta cualquier origen para permitir el HTML estático
-cors_origins = settings.cors_origins
+# CORS — allow_origins=["*"] es incompatible con allow_credentials=True.
+# Para demo pública usamos allow_origins=["*"] y allow_credentials=False.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_origin_regex=r".*" if "*" in cors_origins else None,
-    allow_credentials="*" not in cors_origins,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -32,6 +31,5 @@ app.include_router(api_router, prefix="/api/v1")
 
 @app.get("/", tags=["health"])
 def root():
-    """Ruta raíz — confirma que el servidor está vivo."""
     return {"service": "evidentra-backend-mvp", "status": "ok"}
 

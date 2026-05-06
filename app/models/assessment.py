@@ -18,6 +18,8 @@ class Assessment(UUIDMixin, TimestampMixin, Base):
     version_count: Mapped[int] = mapped_column(Integer, default=1)
     has_answer_key: Mapped[bool] = mapped_column(Boolean, default=False)
     briefing_level: Mapped[str] = mapped_column(String(50), default="initial")
+    n_questions: Mapped[int] = mapped_column(Integer, default=40)
+    version: Mapped[str] = mapped_column(String(10), default="A")
 
     course = relationship("Course", back_populates="assessments")
     answer_key = relationship("AnswerKey", back_populates="assessment", uselist=False, cascade="all, delete-orphan")
