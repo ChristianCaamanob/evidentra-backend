@@ -142,8 +142,8 @@ def generate_answer_sheet_pdf(
         RUT_R = 2.2*mm; RUT_GX = 6.4*mm; RUT_GY = 5.0*mm
         RUT_HDR_H = 5*mm
     else:
-        top_zone_h = 52*mm
-        RUT_R = 1.9*mm; RUT_GX = 5.8*mm; RUT_GY = 4.2*mm
+        top_zone_h = 60*mm
+        RUT_R = 2.1*mm; RUT_GX = 6.0*mm; RUT_GY = 4.8*mm
         RUT_HDR_H = 5*mm
 
     # RUT (9 columnas: 8 dígitos + DV)
