@@ -133,20 +133,11 @@ def generate_answer_sheet_pdf(
 
     # ZONA SUPERIOR
     top_zone_y = hdr_y - 2*mm
-    if N_PER_COL <= 20:
-        top_zone_h = 80*mm
-        RUT_R = 2.6*mm; RUT_GX = 7.0*mm; RUT_GY = 6.2*mm
-        RUT_HDR_H = 10*mm
-    elif N_PER_COL <= 25:
-        top_zone_h = 62*mm
-        RUT_R = 2.2*mm; RUT_GX = 6.4*mm; RUT_GY = 5.0*mm
-        RUT_HDR_H = 10*mm
-    else:
-        top_zone_h = 58*mm
-        RUT_R = 2.0*mm; RUT_GX = 5.8*mm; RUT_GY = 4.6*mm
-        RUT_HDR_H = 10*mm
+    top_zone_h = 80*mm
 
-    N_DCOLS = 9
+    # RUT (9 columnas: 8 dígitos + DV)
+    RUT_R = 2.6*mm; RUT_GX = 7.0*mm; RUT_GY = 6.2*mm
+    N_DCOLS = 9; RUT_HDR_H = 6*mm
     rut_x0 = MX + 2*mm
     rut_block_w = (N_DCOLS-1)*RUT_GX + RUT_R*2 + 4*mm
 
@@ -175,7 +166,7 @@ def generate_answer_sheet_pdf(
         rows = digits_dv if i == 8 else list(range(10))
         for j, d in enumerate(rows):
             cy = top_zone_y - RUT_HDR_H - (j+1)*RUT_GY
-            if cy >= top_zone_y - top_zone_h + RUT_R:
+            if cy - RUT_R >= top_zone_y - top_zone_h + 1.5*mm:
                 _bubble(cv, cx, cy, RUT_R, str(d),
                         color=TEAL if str(d) == 'K' else NAVY)
 
@@ -232,7 +223,7 @@ def generate_answer_sheet_pdf(
     GRID_BOT = MY + PIE_H
     HDR_Q = 6*mm
     ROW_H = (GRID_TOP - GRID_BOT - HDR_Q) / N_PER_COL
-    ROW_H = max(6.0*mm, min(ROW_H, 11*mm))
+    ROW_H = max(6.5*mm, min(ROW_H, 11*mm))
 
     BUB_R = 3.4*mm; BUB_GAP = 8.5*mm
     CHOICES = ['A','B','C','D','E']
