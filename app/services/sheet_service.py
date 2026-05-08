@@ -223,7 +223,7 @@ def generate_answer_sheet_pdf(
     GRID_BOT = MY + PIE_H
     HDR_Q = 6*mm
     ROW_H = (GRID_TOP - GRID_BOT - HDR_Q) / N_PER_COL
-    ROW_H = max(6.5*mm, min(ROW_H, 11*mm))
+    ROW_H = max(6.0*mm, min(ROW_H, 11*mm))
 
     BUB_R = 3.4*mm; BUB_GAP = 8.5*mm
     CHOICES = ['A','B','C','D','E']
