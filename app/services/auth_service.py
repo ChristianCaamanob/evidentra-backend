@@ -39,3 +39,32 @@ def login_teacher(db, email, password):
     if not verify_password(password, teacher.hashed_password): return {"error": "Contraseña incorrecta"}
     return {"token": create_token({"sub": str(teacher.id), "email": teacher.email}),
             "teacher": {"id": str(teacher.id), "email": teacher.email, "name": teacher.name}}
+
+import secrets
+from app.models.password_reset import PasswordResetToken
+from app.services.email_service import send_reset_email
+
+def create_reset_token(db, email: str):
+    teacher = get_teacher_by_email(db, email)
+    if not teacher:
+        return {"ok": True}
+    token = secrets.token_urlsafe(32)
+    expires = datetime.utcnow() + timedelta(minutes=15)
+    db.add(PasswordResetToken(teacher_id=str(teacher.id), token=token, expires_at=expires))
+    db.commit()
+    send_reset_email(teacher.email, token, teacher.name)
+    return {"ok": True}
+
+def reset_password(db, token: str, new_password: str):
+    record = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token == token,
+        PasswordResetToken.used == False,
+        PasswordResetToken.expires_at > datetime.utcnow()
+    ).first()
+    if not record:
+        return {"error": "Token inválido o expirado"}
+    teacher = db.query(Teacher).filter(Teacher.id == record.teacher_id).first()
+    teacher.hashed_password = hash_password(new_password)
+    record.used = True
+    db.commit()
+    return {"ok": True}

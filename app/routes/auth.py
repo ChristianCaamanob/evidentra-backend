@@ -30,3 +30,25 @@ def login(payload: LoginIn, db: Session = Depends(get_db)):
     if "error" in result:
         raise HTTPException(status_code=401, detail=result["error"])
     return result
+
+from app.services.auth_service import create_reset_token, reset_password
+
+class ForgotIn(BaseModel):
+    email: str
+
+class ResetIn(BaseModel):
+    token: str
+    password: str
+
+@router.post("/forgot-password")
+def forgot_password(payload: ForgotIn, db: Session = Depends(get_db)):
+    return create_reset_token(db, payload.email.lower().strip())
+
+@router.post("/reset-password")
+def reset_pwd(payload: ResetIn, db: Session = Depends(get_db)):
+    if len(payload.password) < 6:
+        raise HTTPException(status_code=400, detail="Contraseña debe tener al menos 6 caracteres")
+    result = reset_password(db, payload.token, payload.password)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result

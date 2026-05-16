@@ -7,6 +7,8 @@ from app.models.answer_key import AnswerKey, AnswerKeyItem
 from app.models.base import Base
 from app.models.course import Course
 from app.models.scan import Scan
+from app.models.teacher import Teacher
+from app.models.password_reset import PasswordResetToken
 
 connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
 engine = create_engine(settings.database_url, future=True, connect_args=connect_args)
