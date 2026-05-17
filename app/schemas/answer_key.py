@@ -13,3 +13,23 @@ class AnswerKeyValidationOut(BaseModel):
 class ValidateAnswerKeyOut(BaseModel):
     is_valid: bool
     status: str
+
+from typing import List
+class AnswerKeyItemOut(BaseModel):
+    id: str
+    question_number: int
+    version: str
+    correct_answer: str
+    weight: float
+    is_annulled: bool
+    class Config:
+        from_attributes = True
+class AnswerKeyItemsOut(BaseModel):
+    items: List[AnswerKeyItemOut]
+    versions: List[str]
+    n_questions: int
+class SaveItemsIn(BaseModel):
+    version: str
+    n_questions: int
+    answers: List[str]
+    annulled: List[int] = []

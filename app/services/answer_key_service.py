@@ -53,3 +53,42 @@ def validate_answer_key(db: Session, assessment_id):
     answer_key.invalid_partial_rule_count = 0
     repo.save(db, answer_key)
     return {"is_valid": answer_key.is_valid, "status": answer_key.status}
+
+
+def get_items(db, assessment_id):
+    answer_key = repo.get_by_assessment_id(db, assessment_id)
+    if not answer_key:
+        raise not_found("Pauta no encontrada.")
+    versions = repo.get_versions(db, answer_key.id)
+    n_questions = max((i.question_number for i in answer_key.items), default=0)
+    return {
+        "items": [{"id": str(i.id), "question_number": i.question_number,
+                   "version": i.version, "correct_answer": i.correct_answer,
+                   "weight": i.weight, "is_annulled": i.is_annulled}
+                  for i in answer_key.items],
+        "versions": versions,
+        "n_questions": n_questions,
+    }
+
+
+def save_items(db, assessment_id, version: str, n_questions: int, answers: list, annulled: list):
+    from app.models.answer_key import AnswerKeyItem
+    answer_key = repo.get_by_assessment_id(db, assessment_id)
+    if not answer_key:
+        raise not_found("Pauta no encontrada.")
+    repo.delete_items_by_version(db, answer_key.id, version)
+    items = []
+    for i, ans in enumerate(answers[:n_questions], start=1):
+        items.append(AnswerKeyItem(
+            answer_key_id=answer_key.id,
+            question_number=i,
+            version=version.upper(),
+            correct_answer=ans.upper() if ans else "A",
+            weight=1.0,
+            is_annulled=(i in annulled),
+        ))
+    repo.add_items(db, items)
+    answer_key.is_valid = False
+    answer_key.status = "draft"
+    repo.save(db, answer_key)
+    return {"saved": len(items), "version": version}
