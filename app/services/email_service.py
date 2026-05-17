@@ -38,5 +38,10 @@ def send_reset_email(to_email: str, token: str, teacher_name: str):
         },
         method="POST"
     )
-    with urllib.request.urlopen(req) as response:
-        return json.loads(response.read())
+    try:
+        with urllib.request.urlopen(req) as response:
+            return json.loads(response.read())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        print(f"[RESEND FULL ERROR] {e.code}: {body}", flush=True)
+        raise
