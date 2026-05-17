@@ -4,7 +4,7 @@ import re, io
 def validate_rut(rut):
     if not rut:
         return False, ""
-    rut = rut.strip().upper().replace(".", "")
+    rut = str(rut).strip().upper().replace(".", "")
     if "-" not in rut and len(rut) >= 2:
         rut = rut[:-1] + "-" + rut[-1]
     m = re.match(r"^(\d{7,8})-([0-9K])$", rut)
@@ -29,28 +29,27 @@ def parse_nomina_excel(file_bytes):
 
     sheet = next((wb[n] for n in wb.sheetnames if "NOMINA" in n.upper()), wb.active)
 
+    # Buscar fila de encabezado: debe tener "RUT" en una celda Y "APELLIDO" en otra
     hrow = rcol = apcol = amcol = ncol = None
-    for ri in range(1, 11):
-        for ci in range(1, 10):
-            v = sheet.cell(ri, ci).value
-            if v and "RUT" in str(v).upper():
-                hrow = ri
-                rcol = ci
-                break
-        if hrow:
+    for ri in range(1, 15):
+        row_vals = {ci: str(sheet.cell(ri, ci).value or "").upper() for ci in range(1, 10)}
+        has_rut = any("RUT" in v and len(v) < 10 for v in row_vals.values())
+        has_apellido = any("APELLIDO" in v for v in row_vals.values())
+        if has_rut and has_apellido:
+            hrow = ri
+            for ci, v in row_vals.items():
+                if "RUT" in v and len(v) < 10:
+                    rcol = ci
+                if "APELLIDO" in v and "PATERNO" in v:
+                    apcol = ci
+                if "APELLIDO" in v and "MATERNO" in v:
+                    amcol = ci
+                if "NOMBRE" in v and "APELLIDO" not in v:
+                    ncol = ci
             break
 
     if not hrow:
-        return {"error": "No se encontró columna RUT", "students": [], "errors": []}
-
-    for ci in range(1, 10):
-        v = str(sheet.cell(hrow, ci).value or "").upper()
-        if "APELLIDO" in v and "PATERNO" in v:
-            apcol = ci
-        elif "APELLIDO" in v and "MATERNO" in v:
-            amcol = ci
-        elif "NOMBRE" in v and "APELLIDO" not in v:
-            ncol = ci
+        return {"error": "No se encontró fila de encabezado con RUT y APELLIDO", "students": [], "errors": []}
 
     students, errors, seen = [], [], set()
     for ri in range(hrow + 1, sheet.max_row + 1):
