@@ -4,7 +4,7 @@ import re, io
 def validate_rut(rut):
     if not rut:
         return False, ""
-    rut = rut.strip().upper().replace(".", "")
+    rut = str(rut).strip().upper().replace(".", "")
     if "-" not in rut and len(rut) >= 2:
         rut = rut[:-1] + "-" + rut[-1]
     m = re.match(r"^(\d{7,8})-([0-9K])$", rut)
@@ -30,27 +30,23 @@ def parse_nomina_excel(file_bytes):
     sheet = next((wb[n] for n in wb.sheetnames if "NOMINA" in n.upper()), wb.active)
 
     hrow = rcol = apcol = amcol = ncol = None
-    for ri in range(1, 11):
-        for ci in range(1, 10):
-            v = sheet.cell(ri, ci).value
-            if v and "RUT" in str(v).upper():
-                hrow = ri
-                rcol = ci
-                break
-        if hrow:
+    for ri in range(1, 15):
+        row_vals = {ci: str(sheet.cell(ri, ci).value or "").upper() for ci in range(1, 10)}
+        rut_cols = [ci for ci, v in row_vals.items() if "RUT" in v and len(v) < 10]
+        ap_cols = [ci for ci, v in row_vals.items() if "APELLIDO" in v and "PATERNO" in v]
+        if rut_cols and ap_cols:
+            hrow = ri
+            rcol = rut_cols[0]
+            apcol = ap_cols[0]
+            for ci, v in row_vals.items():
+                if "APELLIDO" in v and "MATERNO" in v:
+                    amcol = ci
+                if "NOMBRE" in v and "APELLIDO" not in v:
+                    ncol = ci
             break
 
     if not hrow:
-        return {"error": "No se encontró columna RUT", "students": [], "errors": []}
-
-    for ci in range(1, 10):
-        v = str(sheet.cell(hrow, ci).value or "").upper()
-        if "APELLIDO" in v and "PATERNO" in v:
-            apcol = ci
-        elif "APELLIDO" in v and "MATERNO" in v:
-            amcol = ci
-        elif "NOMBRE" in v and "APELLIDO" not in v:
-            ncol = ci
+        return {"error": "No se encontro fila de encabezado", "students": [], "errors": []}
 
     students, errors, seen = [], [], set()
     for ri in range(hrow + 1, sheet.max_row + 1):
