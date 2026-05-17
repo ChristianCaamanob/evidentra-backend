@@ -45,14 +45,21 @@ from app.models.password_reset import PasswordResetToken
 from app.services.email_service import send_reset_email
 
 def create_reset_token(db, email: str):
+    import logging
+    logger = logging.getLogger(__name__)
     teacher = get_teacher_by_email(db, email)
     if not teacher:
+        logger.warning(f"forgot-password: email no encontrado {email}")
         return {"ok": True}
     token = secrets.token_urlsafe(32)
     expires = datetime.utcnow() + timedelta(minutes=15)
     db.add(PasswordResetToken(teacher_id=str(teacher.id), token=token, expires_at=expires))
     db.commit()
-    send_reset_email(teacher.email, token, teacher.name)
+    try:
+        send_reset_email(teacher.email, token, teacher.name)
+        logger.info(f"Reset email enviado a {teacher.email}")
+    except Exception as e:
+        logger.error(f"ERROR enviando email a {teacher.email}: {e}")
     return {"ok": True}
 
 def reset_password(db, token: str, new_password: str):
