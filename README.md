@@ -41,3 +41,4 @@ uvicorn app.main:app --reload
 - En el arranque se crean tablas y se siembra un dataset mínimo del MVP si no existe.
 - Por defecto usa SQLite para que puedas probarlo al instante.
 - Para PostgreSQL, cambia `DATABASE_URL` en `.env`.
+# force redeploy Sun May 17 13:19:36 -04 2026
