@@ -92,3 +92,44 @@ def save_items(db, assessment_id, version: str, n_questions: int, answers: list,
     answer_key.status = "draft"
     repo.save(db, answer_key)
     return {"saved": len(items), "version": version}
+
+
+def save_items_from_scan(db, scan_result):
+    from app.models.answer_key import AnswerKeyItem
+    import uuid as _uuid
+    qr = scan_result.qr
+    if not qr or not qr.assessment_id:
+        return {"error": "QR no detectado en la imagen"}
+    assessment_id = qr.assessment_id
+    version = qr.version or "A"
+    answers = scan_result.answers or []
+    n_questions = len(answers)
+    if n_questions == 0:
+        return {"error": "No se detectaron respuestas"}
+    answer_key = repo.get_by_assessment_id(db, assessment_id)
+    if not answer_key:
+        return {"error": f"No existe pauta para assessment {assessment_id}"}
+    repo.delete_items_by_version(db, answer_key.id, version.upper())
+    items = []
+    for i, ans in enumerate(answers, start=1):
+        items.append(AnswerKeyItem(
+            answer_key_id=answer_key.id,
+            question_number=i,
+            version=version.upper(),
+            correct_answer=ans.upper() if ans else "A",
+            weight=1.0,
+            is_annulled=False,
+        ))
+    repo.add_items(db, items)
+    answer_key.is_valid = False
+    answer_key.status = "draft"
+    repo.save(db, answer_key)
+    return {
+        "ok": True,
+        "assessment_id": str(assessment_id),
+        "version": version.upper(),
+        "n_questions": n_questions,
+        "answers": [a or "?" for a in answers],
+        "ambiguous": scan_result.ambiguous or [],
+        "debug_image": scan_result.debug_image,
+    }
