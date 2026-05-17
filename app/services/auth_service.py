@@ -57,9 +57,9 @@ def create_reset_token(db, email: str):
     db.commit()
     try:
         send_reset_email(teacher.email, token, teacher.name)
-        logger.info(f"Reset email enviado a {teacher.email}")
+        print(f"[SMTP OK] email enviado a {teacher.email}", flush=True)
     except Exception as e:
-        logger.error(f"ERROR enviando email a {teacher.email}: {e}")
+        print(f"[SMTP ERROR] {teacher.email}: {e}", flush=True)
     return {"ok": True}
 
 def reset_password(db, token: str, new_password: str):
