@@ -23,7 +23,7 @@ def send_reset_email(to_email: str, token: str, teacher_name: str):
     </div>
     """
     payload = json.dumps({
-        "from": "Evalys USS <onboarding@resend.dev>",
+        "from": "onboarding@resend.dev",
         "to": ["mispelis2020@gmail.com"],
         "subject": "Evalys — Recuperación de contraseña",
         "html": html
