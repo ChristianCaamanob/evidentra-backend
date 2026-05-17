@@ -17,3 +17,4 @@ class Course(UUIDMixin, TimestampMixin, Base):
     base_score_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     assessments = relationship("Assessment", back_populates="course", cascade="all, delete-orphan")
+    students = relationship("Student", back_populates="course", cascade="all, delete-orphan")

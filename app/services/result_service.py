@@ -85,8 +85,28 @@ def get_result(db: Session, scan_id):
     final_grade = _grade_chile(percentage, passing_threshold)
     pass_status = "approved" if final_grade >= 4.0 else "failed"
 
+    # Match RUT con nómina
+    student_name = None
+    student_data = None
+    if scan.student_identifier and scan.student_identifier != "desconocido":
+        from app.models.student import Student
+        student = db.query(Student).filter(
+            Student.rut == scan.student_identifier,
+            Student.course_id == assessment.course_id if assessment else True
+        ).first()
+        if student:
+            student_name = f"{student.apellido_paterno} {student.apellido_materno} {student.nombres}".strip()
+            student_data = {
+                "rut": student.rut,
+                "apellido_paterno": student.apellido_paterno,
+                "apellido_materno": student.apellido_materno,
+                "nombres": student.nombres,
+            }
+
     return {
         "scan_id": str(scan.id),
+        "student": student_data,
+        "student_name": student_name or scan.student_identifier,
         "student_identifier": scan.student_identifier,
         "version": version,
         "n_total": n_total,

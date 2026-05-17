@@ -32,3 +32,38 @@ def complete_course_structure(
 @router.post("/{course_id}/activate", response_model=ActivateCourseOut)
 def activate_course(course_id: UUID, db: Session = Depends(get_db)):
     return course_service.activate_course(db, course_id)
+
+from fastapi import UploadFile, File
+from app.services.nomina_service import parse_nomina_excel
+from app.models.student import Student
+
+@router.post("/{course_id}/upload-nomina")
+async def upload_nomina(course_id: UUID, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    file_bytes = await file.read()
+    result = parse_nomina_excel(file_bytes)
+    if "error" in result and result["error"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    # Eliminar nómina anterior del curso
+    db.query(Student).filter(Student.course_id == course_id).delete()
+    db.commit()
+    # Insertar nuevos estudiantes
+    for s in result["students"]:
+        db.add(Student(
+            course_id=course_id,
+            rut=s["rut"],
+            apellido_paterno=s["apellido_paterno"],
+            apellido_materno=s["apellido_materno"],
+            nombres=s["nombres"],
+        ))
+    db.commit()
+    return {
+        "imported": result["valid_count"],
+        "errors": result["error_count"],
+        "error_details": result["errors"],
+    }
+
+@router.get("/{course_id}/students")
+def get_students(course_id: UUID, db: Session = Depends(get_db)):
+    students = db.query(Student).filter(Student.course_id == course_id).all()
+    return [{"rut": s.rut, "apellido_paterno": s.apellido_paterno,
+             "apellido_materno": s.apellido_materno, "nombres": s.nombres} for s in students]
