@@ -3313,8 +3313,11 @@ async function saveAnswerKey() {
     });
     if (res.ok) {
       var cacheKey = IDS.assessment_id + '_' + version;
-      _savedAnswerKeys[cacheKey] = {answers: answers, annulled: annulled};
-      localStorage.setItem('evalys_answers_' + cacheKey, JSON.stringify({answers: answers, annulled: annulled}));
+      // Convertir array 0-based a objeto 1-based para renderAnswerGrid
+      var answersObj = {};
+      answers.forEach(function(ans, idx) { if (ans) answersObj[idx+1] = ans; });
+      _savedAnswerKeys[cacheKey] = {answers: answersObj, annulled: annulled};
+      localStorage.setItem('evalys_answers_' + cacheKey, JSON.stringify({answers: answersObj, annulled: annulled}));
       showToast('Pauta guardada correctamente', 'success');
       var badge = document.getElementById('ak-status-badge');
       if (badge) { badge.textContent = 'Guardada'; badge.style.background = '#d1fae5'; badge.style.color = '#065f46'; }
