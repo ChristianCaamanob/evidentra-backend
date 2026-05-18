@@ -92,7 +92,9 @@ class AssessmentIn(_BaseModel):
     name: str
     course_id: str
     n_questions: int = 40
-    versions: str = "A"  # "A", "AB", "ABC", etc.
+    versions: str = "A"
+    grading_scale: str = "chile_1_7"
+    passing_threshold: float = 60.0
 
 @router.get("/by-course/{course_id}")
 def list_assessments(course_id: UUID, db: Session = Depends(get_db)):
@@ -124,8 +126,11 @@ def create_assessment(payload: AssessmentIn, db: Session = Depends(get_db)):
         status="draft",
         has_versions=len(payload.versions) > 1,
         version_count=payload.n_questions,
+        n_questions=payload.n_questions,
         has_answer_key=False,
         briefing_level="initial",
+        grading_scale=payload.grading_scale,
+        passing_threshold=payload.passing_threshold,
     )
     db.add(a)
     db.flush()
@@ -143,3 +148,44 @@ def create_assessment(payload: AssessmentIn, db: Session = Depends(get_db)):
     db.refresh(a)
     return {"id": str(a.id), "name": a.name, "course_id": str(a.course_id),
             "status": a.status, "n_questions": payload.n_questions}
+
+
+@router.get("/{assessment_id}/config")
+def get_assessment_config(assessment_id: UUID, db: Session = Depends(get_db)):
+    from app.models.assessment import Assessment
+    from app.services.result_service import GRADING_SCALES
+    a = db.query(Assessment).filter(Assessment.id == assessment_id).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="Evaluación no encontrada")
+    return {
+        "id": str(a.id),
+        "name": a.name,
+        "n_questions": a.n_questions or a.version_count or 40,
+        "grading_scale": a.grading_scale or "chile_1_7",
+        "passing_threshold": a.passing_threshold or 60.0,
+        "status": a.status,
+        "course_id": str(a.course_id),
+        "available_scales": GRADING_SCALES,
+    }
+
+@router.patch("/{assessment_id}/config")
+def update_assessment_config(assessment_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    from app.models.assessment import Assessment
+    a = db.query(Assessment).filter(Assessment.id == assessment_id).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="Evaluación no encontrada")
+    if "grading_scale" in payload:
+        a.grading_scale = payload["grading_scale"]
+    if "passing_threshold" in payload:
+        a.passing_threshold = float(payload["passing_threshold"])
+    if "name" in payload:
+        a.name = payload["name"]
+    db.commit()
+    db.refresh(a)
+    return {"id": str(a.id), "name": a.name, "grading_scale": a.grading_scale, "passing_threshold": a.passing_threshold}
+
+
+@router.get("/grading-scales/list")
+def list_grading_scales():
+    from app.services.result_service import GRADING_SCALES
+    return GRADING_SCALES

@@ -20,6 +20,8 @@ class Assessment(UUIDMixin, TimestampMixin, Base):
     briefing_level: Mapped[str] = mapped_column(String(50), default="initial")
     n_questions: Mapped[int] = mapped_column(Integer, default=40)
     version: Mapped[str] = mapped_column(String(10), default="A")
+    grading_scale: Mapped[str] = mapped_column(String(50), default="chile_1_7")
+    passing_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     course = relationship("Course", back_populates="assessments")
     answer_key = relationship("AnswerKey", back_populates="assessment", uselist=False, cascade="all, delete-orphan")
