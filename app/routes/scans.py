@@ -64,6 +64,14 @@ async def process_scan_image(file: UploadFile = File(...), db: Session = Depends
     db.commit()
     db.refresh(new_scan)
 
+    # Calcular resultado automáticamente
+    resultado = None
+    try:
+        from app.services.result_service import get_result
+        resultado = get_result(db, new_scan.id)
+    except Exception as e:
+        resultado = {"error": str(e)}
+
     return {
         "scan_id": str(new_scan.id),
         "rut": result.rut,
@@ -73,4 +81,5 @@ async def process_scan_image(file: UploadFile = File(...), db: Session = Depends
         "ambiguous": result.ambiguous,
         "requires_review": new_scan.requires_review,
         "debug_image": result.debug_image,
+        "resultado": resultado,
     }
