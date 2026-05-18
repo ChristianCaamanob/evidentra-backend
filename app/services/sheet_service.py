@@ -3,6 +3,11 @@ Evidentra — Generador de hoja de respuesta PDF
 Integrado al backend FastAPI. Devuelve el PDF como StreamingResponse.
 """
 import io, json, math, hashlib
+try:
+    import qrcode
+    HAS_QRCODE = True
+except ImportError:
+    HAS_QRCODE = False
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
@@ -28,31 +33,23 @@ def _fiducial(c, x, y, s=8*mm):
     c.setFillColor(BLACK); c.rect(x+o2, y+o2, i2, i2, fill=1, stroke=0)
 
 
-def _qr_matrix(data: str) -> list:
+def _get_qr_matrix(data: str) -> list:
+    """Genera matriz QR real usando qrcode, o simulada como fallback."""
+    if HAS_QRCODE:
+        qr = qrcode.QRCode(version=2, error_correction=qrcode.constants.ERROR_CORRECT_H, box_size=1, border=0)
+        qr.add_data(data)
+        qr.make(fit=True)
+        mat = qr.get_matrix()
+        return mat
+    # Fallback: matriz simulada
     SIZE = 25
     mat = [[False]*SIZE for _ in range(SIZE)]
-    finder = [
-        [1,1,1,1,1,1,1],[1,0,0,0,0,0,1],[1,0,1,1,1,0,1],
-        [1,0,1,1,1,0,1],[1,0,1,1,1,0,1],[1,0,0,0,0,0,1],[1,1,1,1,1,1,1]
-    ]
-    def sb(r, c, p):
-        for dr, row in enumerate(p):
-            for dc, v in enumerate(row):
-                if 0 <= r+dr < SIZE and 0 <= c+dc < SIZE:
-                    mat[r+dr][c+dc] = bool(v)
-    sb(0, 0, finder); sb(0, SIZE-7, finder); sb(SIZE-7, 0, finder)
-    for i in range(8, SIZE-8):
-        mat[6][i] = (i % 2 == 0)
-        mat[i][6] = (i % 2 == 0)
-    mat[SIZE-8][8] = True
     h = hashlib.md5(data.encode()).digest()
     idx = 0
     for r in range(SIZE):
-        for c in range(SIZE):
-            if not any([r < 8 and c < 8, r < 8 and c >= SIZE-7,
-                        r >= SIZE-7 and c < 8, r == 6, c == 6]):
-                mat[r][c] = bool(h[idx % 16] & (1 << (idx % 8)))
-                idx += 1
+        for col in range(SIZE):
+            mat[r][col] = bool(h[idx % 16] & (1 << (idx % 8)))
+            idx += 1
     return mat
 
 
@@ -94,7 +91,7 @@ def generate_answer_sheet_pdf(
     assert n_questions % 2 == 0, "n_questions debe ser par"
     N_PER_COL = n_questions // 2
 
-    qr_mat = _qr_matrix(json.dumps(
+    qr_mat = _get_qr_matrix(json.dumps(
         {'ev': '1', 'aid': assessment_id[:12], 'cid': course_id[:12],
          'nq': n_questions, 'ver': version},
         separators=(',', ':')))
