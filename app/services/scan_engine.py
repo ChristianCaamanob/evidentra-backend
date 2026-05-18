@@ -141,8 +141,13 @@ def read_rut(gray):
 
 def read_answers(gray, n_questions):
     n_per_col = n_questions // 2
-    row_gap = 78 if n_questions <= 40 else (63 if n_questions <= 50 else 58)
-    cfg = {"col1_x":95,"col2_x":1155,"y_start":1050,"choice_gap":83,"bubble_r":28}
+    img_h = gray.shape[0]
+    # row_gap dinámico según alto de imagen para evitar caer en pie de página
+    y_start = 1050
+    y_end = img_h - 120
+    row_gap = int((y_end - y_start) / max(n_per_col - 1, 1))
+    row_gap = max(55, min(row_gap, 95))  # limitar entre 55-95px
+    cfg = {"col1_x":95,"col2_x":1155,"y_start":y_start,"choice_gap":83,"bubble_r":28}
     CHOICES = ["A","B","C","D","E"]
     answers = []
     ambiguous = []
