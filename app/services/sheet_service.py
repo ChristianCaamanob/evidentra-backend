@@ -92,7 +92,7 @@ def generate_answer_sheet_pdf(
     N_PER_COL = n_questions // 2
 
     qr_mat = _get_qr_matrix(json.dumps(
-        {'ev': '1', 'aid': assessment_id[:12], 'cid': course_id[:12],
+        {'ev': '1', 'aid': assessment_id, 'cid': course_id,
          'nq': n_questions, 'ver': version},
         separators=(',', ':')))
 
