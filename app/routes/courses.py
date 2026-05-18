@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -67,3 +68,30 @@ def get_students(course_id: UUID, db: Session = Depends(get_db)):
     students = db.query(Student).filter(Student.course_id == course_id).all()
     return [{"rut": s.rut, "apellido_paterno": s.apellido_paterno,
              "apellido_materno": s.apellido_materno, "nombres": s.nombres} for s in students]
+
+
+class StudentIn(BaseModel):
+    rut: str
+    apellido_paterno: str
+    apellido_materno: str = ""
+    nombres: str
+
+@router.post("/{course_id}/students")
+def add_student(course_id: UUID, payload: StudentIn, db: Session = Depends(get_db)):
+    from app.models.student import Student
+    # Verificar RUT duplicado
+    existing = db.query(Student).filter(Student.rut == payload.rut, Student.course_id == course_id).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Ya existe un estudiante con ese RUT en este curso")
+    student = Student(
+        course_id=course_id,
+        rut=payload.rut,
+        apellido_paterno=payload.apellido_paterno,
+        apellido_materno=payload.apellido_materno,
+        nombres=payload.nombres,
+    )
+    db.add(student)
+    db.commit()
+    db.refresh(student)
+    return {"rut": student.rut, "apellido_paterno": student.apellido_paterno,
+            "apellido_materno": student.apellido_materno, "nombres": student.nombres}
