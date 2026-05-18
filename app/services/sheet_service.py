@@ -170,10 +170,10 @@ def generate_answer_sheet_pdf(
                 _bubble(cv, cx, cy, RUT_R, str(d),
                         color=TEAL if str(d) == 'K' else NAVY)
 
-    # QR
-    QR_SIZE = 22*mm
-    qr_x = W - MX - QR_SIZE - 2*mm
-    qr_y = top_zone_y - top_zone_h + 4*mm
+    # QR — más grande y centrado en zona datos
+    QR_SIZE = 30*mm
+    qr_x = W - MX - QR_SIZE - 3*mm
+    qr_y = top_zone_y - top_zone_h + 8*mm
     _draw_qr(cv, qr_mat, qr_x, qr_y, QR_SIZE)
     cv.setFillColor(MGRAY); cv.setFont('Helvetica', 4.5)
     cv.drawCentredString(qr_x+QR_SIZE/2, qr_y-3*mm, f'ID: {assessment_id}')
