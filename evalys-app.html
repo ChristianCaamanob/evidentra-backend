@@ -1850,11 +1850,19 @@ function showToast(message, type = 'info') {
 async function bootstrap() {
   try {
     const data = await apiRequest('/bootstrap');
+    // Preservar assessment_id y course_id si el profesor ya seleccionó uno
+    var savedAssessmentId = IDS.assessment_id;
+    var savedCourseId = IDS.course_id;
     IDS = data;
+    if (savedAssessmentId) IDS.assessment_id = savedAssessmentId;
+    if (savedCourseId) IDS.course_id = savedCourseId;
     setConnectionStatus(true);
-    await syncAllState();
+    // Solo sincronizar estado si no hay assessment activo seleccionado por el profesor
+    if (!savedAssessmentId) {
+      await syncAllState();
+    }
   } catch (e) {
-    setConnectionStatus(false, `Modo demo — backend no disponible (${e.message})`);
+    setConnectionStatus(false, 'Modo demo — backend no disponible (' + e.message + ')');
   }
 }
 
@@ -1902,7 +1910,24 @@ function navigate(screen) {
   if (screen === 'course') setTimeout(loadCoursesList, 100);
   if (screen === 'answerkey') {
     setTimeout(loadAnswerKeyScreen, 100);
-    setTimeout(loadAnswerKeyGrid, 300);
+    // Solo recargar grilla si no hay cache para el assessment actual
+    setTimeout(function() {
+      var ver = document.getElementById('ak-version-select') ? document.getElementById('ak-version-select').value : 'A';
+      var cacheKey = IDS.assessment_id + '_' + ver;
+      // Recuperar de localStorage si no está en memoria
+  if (!_savedAnswerKeys[cacheKey]) {
+    var stored2 = localStorage.getItem('evalys_answers_' + cacheKey);
+    if (stored2) { try { _savedAnswerKeys[cacheKey] = JSON.parse(stored2); } catch(e) {} }
+  }
+  if (_savedAnswerKeys && _savedAnswerKeys[cacheKey]) {
+        var cached = _savedAnswerKeys[cacheKey];
+        _annulledQuestions = new Set(cached.annulled || []);
+        var nq = (_currentAssessmentConfig && _currentAssessmentConfig.n_questions) || 40;
+        renderAnswerGrid(nq, ver, cached.answers || {});
+      } else {
+        loadAnswerKeyGrid();
+      }
+    }, 300);
   }
   if (screen === 'course-detail') {
     document.getElementById('new-assessment-course-name').textContent = _currentCourseName || '';
@@ -2895,17 +2920,44 @@ const SCALE_NAMES = {
 
 let _currentAssessmentConfig = null;
 
+
+function updateAnswerKeyBanner(cfg) {
+  if (!cfg) return;
+  var nameEl = document.getElementById('ak-assessment-name');
+  var courseEl = document.getElementById('ak-course-name');
+  var nqEl = document.getElementById('ak-n-questions');
+  var scaleEl = document.getElementById('ak-scale-label');
+  var threshEl = document.getElementById('ak-threshold');
+  var badgeEl = document.getElementById('ak-status-badge');
+  if (nameEl) nameEl.textContent = cfg.name || 'Pauta';
+  if (courseEl) courseEl.textContent = _currentCourseName || '';
+  if (nqEl) nqEl.textContent = cfg.n_questions || 40;
+  if (scaleEl) scaleEl.textContent = (typeof SCALE_NAMES !== 'undefined' ? SCALE_NAMES[cfg.grading_scale] : null) || cfg.grading_scale || 'Escala chilena 1.0-7.0';
+  if (threshEl) threshEl.textContent = (cfg.passing_threshold || 60) + '%';
+}
+
 async function loadAnswerKeyScreen() {
   const base = getApiBase();
   const assessmentId = IDS.assessment_id;
   if (!assessmentId) return;
+  // Si ya tenemos config en cache, usarla inmediatamente
+  // Recuperar config de localStorage si no hay en memoria
+  if (!_currentAssessmentConfig || _currentAssessmentConfig.id !== assessmentId) {
+    var stored = localStorage.getItem('evalys_assessment_config');
+    if (stored) {
+      try { _currentAssessmentConfig = JSON.parse(stored); } catch(e) {}
+    }
+  }
+  if (_currentAssessmentConfig) {
+    updateAnswerKeyBanner(_currentAssessmentConfig);
+  }
   try {
-    const res = await fetch(`${base}/assessments/${assessmentId}/config`, {
-      headers: {'Authorization': `Bearer ${_authToken}`}
+    const res = await fetch(base + '/assessments/' + assessmentId + '/config', {
+      headers: {'Authorization': 'Bearer ' + _authToken}
     });
     if (!res.ok) return;
     const cfg = await res.json();
-    _currentAssessmentConfig = cfg;
+    if (cfg.id === assessmentId) { _currentAssessmentConfig = cfg; }
 
     // Actualizar header
     document.getElementById('ak-assessment-name').textContent = cfg.name || 'Pauta';
@@ -2934,8 +2986,21 @@ async function loadAnswerKeyScreen() {
     if (akName) akName.textContent = cfg.name;
     if (akCourse) akCourse.textContent = _currentCourseName || '';
 
-    // Actualizar grilla con n_questions correcto
-    updateAnswerKeyIdentity();
+    // Cargar grilla con respuestas guardadas desde cache
+    var _ver = document.getElementById('ak-version-select') ? document.getElementById('ak-version-select').value : 'A';
+    var _cacheKey = IDS.assessment_id + '_' + _ver;
+    if (!_savedAnswerKeys[_cacheKey]) {
+      var _stored = localStorage.getItem('evalys_answers_' + _cacheKey);
+      if (_stored) { try { _savedAnswerKeys[_cacheKey] = JSON.parse(_stored); } catch(e) {} }
+    }
+    if (_savedAnswerKeys[_cacheKey]) {
+      var _cached = _savedAnswerKeys[_cacheKey];
+      _annulledQuestions = new Set(_cached.annulled || []);
+      var _nq = (cfg && cfg.n_questions) || 40;
+      renderAnswerGrid(_nq, _ver, _cached.answers || {});
+    } else {
+      loadAnswerKeyGrid();
+    }
 
   } catch(e) {
     console.error('Error cargando config:', e);
@@ -2947,23 +3012,45 @@ async function loadAnswerKeyGrid() {
   const nq = _currentAssessmentConfig?.n_questions || 40;
   const base = getApiBase();
   
-  // Intentar cargar pauta guardada
-  let savedAnswers = {};
-  try {
-    const res = await fetch(`${base}/answer-key/${IDS.assessment_id}/${version}`, {
-      headers: {'Authorization': `Bearer ${_authToken}`}
-    });
-    if (res.ok) {
-      const data = await res.json();
-      savedAnswers = data.answers || {};
-    }
-  } catch(e) {}
-
+  // Cargar desde cache primero, luego backend
+  var cacheKey = IDS.assessment_id + '_' + version;
+  var savedAnswers = {};
+  if (_savedAnswerKeys[cacheKey]) {
+    savedAnswers = _savedAnswerKeys[cacheKey].answers || {};
+    var cachedAnnulled = _savedAnswerKeys[cacheKey].annulled || [];
+    _annulledQuestions = new Set(cachedAnnulled);
+  } else {
+    try {
+      // Cargar desde el endpoint real de items
+      var res2 = await fetch(base + '/answer-keys/' + IDS.assessment_id + '/items', {
+        headers: {'Authorization': 'Bearer ' + _authToken}
+      });
+      if (res2.ok) {
+        var data2 = await res2.json();
+        var items = data2.items || [];
+        var annulledFromServer = [];
+        items.forEach(function(item) {
+          if (item.version === version) {
+            if (item.is_annulled) {
+              annulledFromServer.push(item.question_number);
+            } else {
+              savedAnswers[item.question_number] = item.correct_answer;
+            }
+          }
+        });
+        if (annulledFromServer.length > 0) {
+          _annulledQuestions = new Set(annulledFromServer);
+        }
+        // Guardar en cache
+        _savedAnswerKeys[cacheKey] = {answers: savedAnswers, annulled: annulledFromServer};
+        localStorage.setItem('evalys_answers_' + cacheKey, JSON.stringify(_savedAnswerKeys[cacheKey]));
+      }
+    } catch(e) {}
+  }
   renderAnswerGrid(nq, version, savedAnswers);
 }
 
-// Preguntas anuladas (set de números)
-let _annulledQuestions = new Set();
+// Preguntas anuladas (set de números - declaradas arriba, no duplicar)
 
 
 function toggleAnnul(q) {
@@ -3084,6 +3171,9 @@ function getAnswerKeyFromGrid() {
 }
 
 
+let _annulledQuestions = new Set();
+var _savedAnswerKeys = {};
+
 function updateCfgScaleDesc() {
   var descs = {
     chile_1_7: 'Escala nacional chilena 1.0-7.0. Nota minima aprobacion 4.0.',
@@ -3140,6 +3230,7 @@ async function saveAssessmentConfig() {
       _currentAssessmentConfig.grading_scale = scale;
       _currentAssessmentConfig.passing_threshold = threshold;
     }
+    localStorage.setItem('evalys_assessment_config', JSON.stringify(_currentAssessmentConfig));
     document.getElementById('ak-assessment-name').textContent = name;
     document.getElementById('ak-scale-label').textContent = SCALE_NAMES[scale] || scale;
     document.getElementById('ak-threshold').textContent = threshold + '%';
@@ -3221,6 +3312,9 @@ async function saveAnswerKey() {
       body: JSON.stringify({version: version, n_questions: nq, answers: answers, annulled: annulled}),
     });
     if (res.ok) {
+      var cacheKey = IDS.assessment_id + '_' + version;
+      _savedAnswerKeys[cacheKey] = {answers: answers, annulled: annulled};
+      localStorage.setItem('evalys_answers_' + cacheKey, JSON.stringify({answers: answers, annulled: annulled}));
       showToast('Pauta guardada correctamente', 'success');
       var badge = document.getElementById('ak-status-badge');
       if (badge) { badge.textContent = 'Guardada'; badge.style.background = '#d1fae5'; badge.style.color = '#065f46'; }
