@@ -95,3 +95,40 @@ def add_student(course_id: UUID, payload: StudentIn, db: Session = Depends(get_d
     db.refresh(student)
     return {"rut": student.rut, "apellido_paterno": student.apellido_paterno,
             "apellido_materno": student.apellido_materno, "nombres": student.nombres}
+
+
+@router.get("/", response_model=list)
+def list_courses(db: Session = Depends(get_db)):
+    from app.models.course import Course
+    courses = db.query(Course).order_by(Course.created_at.desc()).all()
+    return [{"id": str(c.id), "name": c.name, "code": c.code,
+             "status": c.status, "grading_scale": c.grading_scale,
+             "passing_threshold": c.passing_threshold} for c in courses]
+
+class CourseIn(BaseModel):
+    name: str
+    code: str
+    grading_scale: str = "chile_1_7"
+    passing_threshold: float = 60.0
+
+@router.post("/")
+def create_course(payload: CourseIn, db: Session = Depends(get_db)):
+    from app.models.course import Course
+    existing = db.query(Course).filter(Course.code == payload.code).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Ya existe un curso con ese código")
+    course = Course(
+        name=payload.name,
+        code=payload.code,
+        status="active",
+        grading_scale=payload.grading_scale,
+        passing_threshold=payload.passing_threshold,
+        has_learning_structure=False,
+        base_score_type="raw_points",
+    )
+    db.add(course)
+    db.commit()
+    db.refresh(course)
+    return {"id": str(course.id), "name": course.name, "code": course.code,
+            "status": course.status, "grading_scale": course.grading_scale,
+            "passing_threshold": course.passing_threshold}

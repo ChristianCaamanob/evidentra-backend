@@ -84,3 +84,62 @@ def generate_sheet(
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
+
+
+from pydantic import BaseModel as _BaseModel
+
+class AssessmentIn(_BaseModel):
+    name: str
+    course_id: str
+    n_questions: int = 40
+    versions: str = "A"  # "A", "AB", "ABC", etc.
+
+@router.get("/by-course/{course_id}")
+def list_assessments(course_id: UUID, db: Session = Depends(get_db)):
+    from app.models.assessment import Assessment
+    from app.models.answer_key import AnswerKey
+    assessments = db.query(Assessment).filter(Assessment.course_id == course_id).order_by(Assessment.created_at.desc()).all()
+    result = []
+    for a in assessments:
+        ak = db.query(AnswerKey).filter(AnswerKey.assessment_id == a.id).first()
+        result.append({
+            "id": str(a.id),
+            "name": a.name,
+            "status": a.status,
+            "n_questions": a.version_count or 40,
+            "has_answer_key": ak is not None,
+            "answer_key_valid": ak.is_valid if ak else False,
+            "created_at": str(a.created_at)[:10] if a.created_at else None,
+        })
+    return result
+
+@router.post("/")
+def create_assessment(payload: AssessmentIn, db: Session = Depends(get_db)):
+    import uuid as _uuid
+    from app.models.assessment import Assessment
+    from app.models.answer_key import AnswerKey
+    a = Assessment(
+        course_id=_uuid.UUID(payload.course_id),
+        name=payload.name,
+        status="draft",
+        has_versions=len(payload.versions) > 1,
+        version_count=payload.n_questions,
+        has_answer_key=False,
+        briefing_level="initial",
+    )
+    db.add(a)
+    db.flush()
+    ak = AnswerKey(
+        assessment_id=a.id,
+        status="draft",
+        is_valid=False,
+        version_coverage_ok=True,
+        annulled_items_count=0,
+        invalid_weight_count=0,
+        invalid_partial_rule_count=0,
+    )
+    db.add(ak)
+    db.commit()
+    db.refresh(a)
+    return {"id": str(a.id), "name": a.name, "course_id": str(a.course_id),
+            "status": a.status, "n_questions": payload.n_questions}
