@@ -79,13 +79,27 @@
     border-right: 1px solid var(--border); padding: 24px; z-index: 10;
     display: flex; flex-direction: column; gap: 8px;
   }
-  .sidebar-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+  .sidebar-brand {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 24px;
+    /* reset de estilos default de button + interactividad */
+    background: transparent; border: 0; padding: 6px 4px;
+    width: 100%; text-align: left;
+    font: inherit; color: inherit;
+    cursor: pointer; border-radius: 12px;
+    transition: background 0.15s, transform 0.12s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .sidebar-brand:hover { background: rgba(15, 139, 141, 0.06); }
+  .sidebar-brand:hover .brand-mark { transform: scale(1.04); box-shadow: 0 4px 14px rgba(15, 139, 141, 0.25); }
+  .sidebar-brand:active { transform: scale(0.99); }
+  .sidebar-brand:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
   .brand-mark {
     width: 40px; height: 40px; border-radius: 12px;
     background: linear-gradient(135deg, var(--dark) 0%, #18345b 50%, var(--teal) 100%);
     display: flex; align-items: center; justify-content: center;
     font-size: 18px; font-weight: 700; color: white; letter-spacing: -1px;
     flex-shrink: 0;
+    transition: transform 0.15s, box-shadow 0.15s;
   }
   .brand-name { font-size: 18px; font-weight: 600; letter-spacing: -0.02em; color: var(--dark); line-height: 1.2; }
   .brand-desc { font-size: 10px; text-transform: uppercase; letter-spacing: 0.22em; color: var(--text2); }
@@ -379,6 +393,330 @@
   .feedback-item-title { font-size: 14px; font-weight: 600; color: white; }
   .feedback-item-desc { font-size: 13px; color: #94a3b8; line-height: 1.6; margin-top: 6px; }
 
+  /* ══════════════════════════════════════════════════
+     MÓDULO BRIEFINGS · navegación estratificada
+     curso → prueba → estudiante → informe
+     ══════════════════════════════════════════════════ */
+  .brf-breadcrumb {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+    padding: 14px 20px; margin-bottom: 18px;
+    background: linear-gradient(135deg, rgba(15,139,141,0.04), rgba(124,92,255,0.02));
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    font-size: 13px;
+  }
+  .brf-crumb {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 12px; border-radius: 7px;
+    background: transparent; border: 0; cursor: pointer;
+    color: var(--text2); font-size: 13px; font-weight: 500;
+    font-family: inherit;
+    transition: all 0.15s;
+  }
+  .brf-crumb:hover { background: rgba(15,139,141,0.08); color: var(--teal); }
+  .brf-crumb.current { color: var(--dark); font-weight: 600; cursor: default; }
+  .brf-crumb.current:hover { background: transparent; }
+  .brf-crumb-sep { color: var(--text3); font-size: 12px; opacity: 0.5; padding: 0 2px; }
+  .brf-level-tag {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--teal); padding: 3px 8px; border-radius: 5px;
+    background: rgba(15,139,141,0.1); margin-left: auto;
+  }
+
+  /* Stepper lateral de niveles */
+  .brf-stepper {
+    background: white; border: 1px solid var(--border);
+    border-radius: 18px; padding: 6px;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .brf-step {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 14px; border-radius: 12px;
+    background: transparent; border: 0; cursor: pointer;
+    font-family: inherit; font-size: 13px; color: var(--text2);
+    text-align: left; width: 100%;
+    transition: all 0.15s;
+  }
+  .brf-step:disabled { opacity: 0.35; cursor: not-allowed; }
+  .brf-step:not(:disabled):hover { background: rgba(15,139,141,0.06); color: var(--dark); }
+  .brf-step.active { background: var(--dark); color: white; }
+  .brf-step.active .brf-step-icon { background: rgba(141,240,234,0.2); color: var(--teal-soft); border-color: var(--teal-soft); }
+  .brf-step-icon {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: rgba(15,139,141,0.08); color: var(--teal);
+    border: 1.5px solid rgba(15,139,141,0.2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; flex-shrink: 0;
+  }
+  .brf-step-label { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+  .brf-step-name { font-weight: 600; font-size: 13px; line-height: 1.2; }
+  .brf-step-current { font-size: 11px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text3); }
+  .brf-step.active .brf-step-current { color: rgba(255,255,255,0.55); }
+
+  /* Grid de cards */
+  .brf-grid {
+    display: grid; gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
+  .brf-card {
+    background: white; border: 1.5px solid var(--border);
+    border-radius: 18px; padding: 22px;
+    cursor: pointer; transition: all 0.18s;
+    text-align: left; font-family: inherit;
+    position: relative; overflow: hidden;
+  }
+  .brf-card:hover {
+    border-color: var(--teal); transform: translateY(-3px);
+    box-shadow: 0 14px 32px rgba(15,139,141,0.12);
+  }
+  .brf-card.featured { border-color: rgba(15,139,141,0.4); background: linear-gradient(135deg, rgba(15,139,141,0.04), white 60%); }
+  .brf-card-eyebrow {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--text3); margin-bottom: 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .brf-card-eyebrow strong { color: var(--teal); font-weight: 700; }
+  .brf-card-title {
+    font-size: 18px; font-weight: 700; letter-spacing: -0.015em;
+    color: var(--dark); line-height: 1.25; margin-bottom: 6px;
+    padding-right: 36px;
+  }
+  .brf-card-meta {
+    font-size: 12px; color: var(--text2); line-height: 1.5;
+  }
+  .brf-card-stats {
+    display: flex; gap: 18px; margin-top: 16px;
+    padding-top: 14px; border-top: 1px solid var(--border);
+  }
+  .brf-card-stat { display: flex; flex-direction: column; gap: 1px; }
+  .brf-card-stat .v { font-size: 18px; font-weight: 700; color: var(--dark); line-height: 1; }
+  .brf-card-stat .l { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.12em; margin-top: 4px; }
+  .brf-card-arrow {
+    position: absolute; top: 22px; right: 22px;
+    width: 26px; height: 26px; border-radius: 50%;
+    background: rgba(15,139,141,0.08); color: var(--teal);
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.18s; font-size: 13px;
+  }
+  .brf-card:hover .brf-card-arrow {
+    background: var(--teal); color: white; transform: translateX(3px);
+  }
+
+  /* Lista de estudiantes compacta */
+  .brf-student-list {
+    background: white; border: 1px solid var(--border);
+    border-radius: 18px; overflow: hidden;
+  }
+  .brf-student-row {
+    display: grid; grid-template-columns: 40px 1fr auto 70px 100px 28px;
+    align-items: center; gap: 16px;
+    padding: 14px 20px;
+    cursor: pointer; transition: background 0.15s;
+    border: 0; background: transparent; width: 100%; font-family: inherit; text-align: left;
+  }
+  .brf-student-row:not(:last-child) { border-bottom: 1px solid var(--border); }
+  .brf-student-row:hover { background: rgba(15,139,141,0.04); }
+  .brf-student-row.featured { background: linear-gradient(90deg, rgba(15,139,141,0.06), transparent); }
+  .brf-student-avatar {
+    width: 36px; height: 36px; border-radius: 12px;
+    background: linear-gradient(135deg, var(--dark), var(--teal));
+    color: white; font-size: 13px; font-weight: 700; letter-spacing: -0.5px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .brf-student-name-block { min-width: 0; }
+  .brf-student-name { font-size: 14px; font-weight: 600; color: var(--dark); }
+  .brf-student-rut { font-size: 11px; color: var(--text3); margin-top: 2px; font-family: 'JetBrains Mono', monospace; }
+  .brf-student-grade { font-size: 20px; font-weight: 700; color: var(--dark); font-variant-numeric: tabular-nums; line-height: 1; }
+  .brf-student-grade-l { font-size: 9.5px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.12em; margin-top: 4px; }
+  .brf-student-logro { font-size: 13px; font-weight: 600; color: var(--text2); font-variant-numeric: tabular-nums; }
+  .brf-student-logro-l { font-size: 9.5px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.12em; margin-top: 4px; }
+  .brf-student-trend {
+    font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 20px;
+    display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
+  }
+  .brf-student-trend.up { background: rgba(20,148,116,0.12); color: var(--green); }
+  .brf-student-trend.down { background: rgba(220,52,75,0.1); color: #b91c2c; }
+  .brf-student-trend.flat { background: rgba(178,138,73,0.12); color: var(--gold); }
+  .brf-student-arrow {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: rgba(15,139,141,0.08); color: var(--teal);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; flex-shrink: 0;
+  }
+
+  /* Tabs de artefactos */
+  .brf-artifact-tabs {
+    display: flex; gap: 6px; margin-bottom: 14px;
+    padding: 5px; background: white; border: 1px solid var(--border);
+    border-radius: 14px;
+  }
+  .brf-tab {
+    flex: 1; padding: 10px 14px; border-radius: 10px;
+    background: transparent; border: 0; cursor: pointer; font-family: inherit;
+    font-size: 13px; font-weight: 600; color: var(--text2);
+    transition: all 0.15s; text-align: center;
+  }
+  .brf-tab:hover { background: rgba(15,139,141,0.06); color: var(--dark); }
+  .brf-tab.active { background: var(--dark); color: white; }
+
+  /* Tarjetas de contenido del briefing (claro) */
+  .brf-content {
+    background: white; border: 1px solid var(--border);
+    border-radius: 18px; padding: 28px 30px;
+  }
+  .brf-content-eyebrow {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--teal); margin-bottom: 10px;
+  }
+  .brf-content-title {
+    font-size: 22px; font-weight: 600; color: var(--dark);
+    letter-spacing: -0.015em; margin-bottom: 6px;
+  }
+  .brf-content-subtitle {
+    font-size: 13px; color: var(--text2); margin-bottom: 22px;
+  }
+  .brf-content-item {
+    padding: 18px 0;
+    border-top: 1px solid var(--border);
+  }
+  .brf-content-item:first-of-type { border-top: 1.5px solid var(--dark); padding-top: 22px; }
+  .brf-content-item h4 {
+    font-size: 14.5px; font-weight: 600; color: var(--dark);
+    margin-bottom: 8px; letter-spacing: -0.005em;
+  }
+  .brf-content-item p {
+    font-size: 13.5px; line-height: 1.65; color: var(--text2); margin: 0;
+  }
+
+  /* Informe robusto del estudiante */
+  .brf-report {
+    background: white; border: 1px solid var(--border);
+    border-radius: 22px; overflow: hidden;
+    box-shadow: 0 4px 20px rgba(15,23,42,0.04);
+  }
+  .brf-report-head {
+    background: linear-gradient(135deg, #0F8B8D 0%, #08101D 100%);
+    color: white; padding: 32px 36px;
+    position: relative; overflow: hidden;
+  }
+  .brf-report-head::before {
+    content: ''; position: absolute; top: -20%; right: -10%;
+    width: 280px; height: 280px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(141,240,234,0.18) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .brf-report-eyebrow {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.22em;
+    text-transform: uppercase; color: rgba(141,240,234,0.9);
+    margin-bottom: 14px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .brf-report-eyebrow::before {
+    content: ''; width: 24px; height: 1.5px; background: rgba(141,240,234,0.6);
+  }
+  .brf-report-title {
+    font-size: 28px; font-weight: 300; line-height: 1.1; letter-spacing: -0.02em;
+    margin-bottom: 8px; color: white;
+  }
+  .brf-report-title strong { font-weight: 600; }
+  .brf-report-subtitle {
+    font-size: 14px; line-height: 1.5; color: rgba(255,255,255,0.78);
+    max-width: 580px;
+  }
+  .brf-report-folio {
+    margin-top: 20px; padding-top: 18px;
+    border-top: 1px solid rgba(255,255,255,0.12);
+    display: flex; flex-wrap: wrap; gap: 26px;
+    font-size: 11px;
+  }
+  .brf-report-folio div { display: flex; flex-direction: column; gap: 3px; }
+  .brf-report-folio .l { color: rgba(255,255,255,0.5); letter-spacing: 0.12em; text-transform: uppercase; font-size: 9.5px; }
+  .brf-report-folio .v { color: white; font-weight: 600; font-size: 12.5px; }
+
+  .brf-report-body { padding: 32px 36px; }
+  .brf-report-section { padding: 22px 0; border-bottom: 1px solid var(--border); }
+  .brf-report-section:last-child { border-bottom: 0; }
+  .brf-report-section h3 {
+    font-size: 18px; font-weight: 600; color: var(--dark);
+    margin-bottom: 12px; letter-spacing: -0.01em;
+  }
+  .brf-report-section p {
+    font-size: 14px; line-height: 1.65; color: var(--text2);
+    max-width: 740px;
+  }
+  .brf-report-section p + p { margin-top: 10px; }
+  .brf-report-section p strong { color: var(--dark); font-weight: 600; }
+
+  .brf-report-metrics {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 0; margin: 20px 0;
+    border-top: 1.5px solid var(--dark);
+    border-bottom: 1px solid var(--border);
+  }
+  .brf-metric { padding: 18px 16px; border-right: 1px solid var(--border); }
+  .brf-metric:last-child { border-right: 0; }
+  .brf-metric .l {
+    font-size: 9.5px; font-weight: 600; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--text3); margin-bottom: 8px;
+  }
+  .brf-metric .v {
+    font-size: 28px; font-weight: 300; color: var(--dark); line-height: 1;
+    letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+    margin-bottom: 4px;
+  }
+  .brf-metric .u { font-size: 10.5px; color: var(--text2); }
+  @media (max-width: 768px) {
+    .brf-report-metrics { grid-template-columns: repeat(2, 1fr); }
+    .brf-metric:nth-child(2) { border-right: 0; }
+    .brf-metric:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
+  }
+
+  .brf-ra-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+  .brf-ra-row {
+    display: grid; grid-template-columns: 70px 1fr 110px 70px;
+    gap: 14px; align-items: center;
+    padding: 12px 16px;
+    background: white; border: 1px solid var(--border); border-radius: 10px;
+  }
+  .brf-ra-row .code { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; font-weight: 700; color: var(--teal); }
+  .brf-ra-row .name { font-size: 13.5px; color: var(--dark); line-height: 1.3; }
+  .brf-ra-row .bar {
+    height: 6px; border-radius: 3px; background: rgba(15,139,141,0.1); position: relative; overflow: hidden;
+  }
+  .brf-ra-row .bar::after {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+    background: var(--teal); border-radius: 3px;
+    width: var(--w, 50%);
+  }
+  .brf-ra-row.low .bar::after { background: #b91c2c; }
+  .brf-ra-row.med .bar::after { background: var(--gold); }
+  .brf-ra-row .pct { font-size: 13.5px; font-weight: 700; color: var(--dark); font-variant-numeric: tabular-nums; text-align: right; }
+
+  .brf-report-actions {
+    display: flex; gap: 10px; padding: 20px 36px;
+    background: linear-gradient(180deg, rgba(15,139,141,0.02), white);
+    border-top: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .brf-action-btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 10px 18px; border-radius: 10px;
+    background: white; border: 1.5px solid var(--border);
+    color: var(--dark); font-family: inherit; font-size: 13px; font-weight: 600;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .brf-action-btn:hover { border-color: var(--teal); color: var(--teal); }
+  .brf-action-btn.primary { background: var(--dark); color: white; border-color: var(--dark); }
+  .brf-action-btn.primary:hover { background: var(--teal); border-color: var(--teal); color: white; }
+
+  .brf-empty {
+    text-align: center; padding: 60px 30px;
+    color: var(--text3); font-size: 14px;
+    background: white; border: 1px dashed var(--border); border-radius: 18px;
+  }
+  .brf-empty-icon { font-size: 36px; opacity: 0.3; margin-bottom: 14px; }
+  .brf-empty-title { font-size: 16px; font-weight: 600; color: var(--text2); margin-bottom: 6px; }
+
   @keyframes toastIn { from { opacity:0; transform: translateY(10px); } to { opacity:1; transform: translateY(0); } }
   @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -531,13 +869,13 @@
 
   <!-- SIDEBAR -->
   <aside class="sidebar" id="sidebar">
-    <div class="sidebar-brand">
+    <button type="button" class="sidebar-brand" onclick="navigate('login')" aria-label="Ir a la portada de Evalys">
       <div class="brand-mark">Ev</div>
       <div>
         <div class="brand-name">Evalys</div>
         <div class="brand-desc">Inteligencia Académica</div>
       </div>
-    </div>
+    </button>
 
     <div class="sidebar-manifest">
       <div class="manifest-dots">
@@ -1381,43 +1719,32 @@
       </div>
     </div>
 
-    <!-- ─────────────── FEEDBACK ─────────────── -->
+    <!-- ─────────────── FEEDBACK / BRIEFINGS ─────────────── -->
     <div class="screen" id="screen-feedback">
       <div class="page-header">
         <div class="page-eyebrow">Corazón diferencial del producto</div>
         <h1 class="page-title">Briefings, retroalimentación e informe de calidad</h1>
-        <p class="page-desc">Briefing académico, estudiantil, informe de calidad y capa Research autónoma. No un resumen — inteligencia aplicada.</p>
+        <p class="page-desc">Navega por curso, prueba y estudiante para acceder a briefings diferenciados. Inteligencia aplicada, no resumen.</p>
         <div class="page-actions">
-          <button class="btn btn-outline">Generar briefing estudiantil</button>
-          <button class="btn btn-primary">Generar briefing académico</button>
+          <button class="btn btn-outline" onclick="brfBackToCourses()">↩ Volver a cursos</button>
+          <button class="btn btn-primary" onclick="brfExportCurrent()">Exportar PDF</button>
         </div>
       </div>
-      <div class="workspace">
+
+      <!-- Breadcrumb dinámico -->
+      <div id="brf-breadcrumb" class="brf-breadcrumb"></div>
+
+      <div class="workspace" style="grid-template-columns: 240px 1fr;">
+        <!-- Stepper de niveles a la izquierda -->
         <div class="sticky-col">
-          <div class="card">
-            <div class="card-header"><div class="card-title">Artefactos</div><div class="card-desc">Selecciona el tipo de salida</div></div>
-            <div class="card-content space-y-3">
-              <div class="source-card" style="cursor:pointer;border-color:rgba(15,139,141,0.3);background:rgba(15,139,141,0.04);" onclick="showFeedback('academic')"><div class="flex justify-between items-start gap-2"><div><div class="source-card-title">Briefing académico</div><div class="source-card-meta">Para docente y coordinación</div></div><span class="pill pill-success"><span class="pill-dot"></span>Listo</span></div></div>
-              <div class="source-card" style="cursor:pointer;" onclick="showFeedback('student')"><div class="source-card-title">Briefing estudiantil</div><div class="source-card-meta">Para el estudiante · formato orientador</div></div>
-              <div class="source-card" style="cursor:pointer;" onclick="showFeedback('quality')"><div class="source-card-title">Informe de calidad</div><div class="source-card-meta">Aseguramiento y mejora curricular</div></div>
-              <div class="source-card" style="cursor:pointer;" onclick="showFeedback('research')"><div class="source-card-title">Capa Research</div><div class="source-card-meta">Dataset autónomo · no depende del curso</div></div>
-            </div>
+          <div class="brf-stepper" id="brf-stepper">
+            <!-- generado por JS -->
           </div>
         </div>
-        <div class="space-y-6" id="feedback-content">
-          <!-- Dynamic content -->
-        </div>
-        <div class="sticky-col">
-          <div class="card card-dark studio-wrap">
-            <div class="studio-glow"></div>
-            <div class="studio-content">
-              <div class="card-header"><div class="card-title">Studio</div><div class="card-desc" style="color:#94a3b8;">Producción de artefactos</div></div>
-              <div class="card-content space-y-3">
-                <button class="studio-item w-full active"><div class="flex justify-between items-center gap-2"><div class="studio-item-title">Briefing académico</div><div class="studio-item-dot"></div></div><div class="studio-item-meta">Comité de asignatura · prioridades</div></button>
-                <button class="studio-item w-full"><div class="flex justify-between items-center gap-2"><div class="studio-item-title">Manuscrito Research</div><div class="studio-item-dot"></div></div><div class="studio-item-meta">Hallazgos + literatura + conclusiones</div></button>
-              </div>
-            </div>
-          </div>
+
+        <!-- Contenido principal -->
+        <div id="brf-main" class="space-y-4">
+          <!-- generado por JS según _briefingState.level -->
         </div>
       </div>
     </div>
@@ -1800,6 +2127,7 @@ async function syncAllState() {
 function navigate(screen) {
   if (screen === 'answerkey') setTimeout(updateAnswerKeyIdentity, 150);
   if (screen === 'course') setTimeout(loadCoursesList, 100);
+  if (screen === 'feedback') setTimeout(brfRender, 50);
   if (screen === 'answerkey') {
     setTimeout(loadAnswerKeyScreen, 100);
     // Solo recargar grilla si no hay cache para el assessment actual
@@ -2290,53 +2618,583 @@ async function loadResult() {
   }
 }
 
-const FEEDBACK_DEMO = {
-  academic: { title: 'Briefing académico', subtitle: 'Morfología · Solemne 1 · Para docente y coordinación académica', items: [{ title: 'Síntesis ejecutiva', desc: 'Promedio 5,4 con tasa de aprobación 78%. La tendencia del curso es positiva. La Unidad II muestra un patrón de bajo logro recurrente que requiere atención pedagógica.' }, { title: 'Brechas críticas por unidad', desc: 'Unidad II (tejido epitelial) presenta el promedio más bajo: 4,7 vs. media general 5,4. Tercer año consecutivo con esta brecha. Se sugiere revisar la secuencia didáctica.' }, { title: 'Perfil de riesgo', desc: '7 estudiantes en seguimiento activo. Nicolás Muñoz y 6 más requieren intervención diferenciada antes de la Solemne 2.' }, { title: 'Recomendaciones para el docente', desc: 'Priorizar reforzamiento de tejido epitelial. Considerar actividad de práctica adicional en la semana 8. Revisar la ambigüedad del ítem 15 para próximas versiones.' }] },
-  student: { title: 'Briefing estudiantil', subtitle: 'Morfología · Solemne 1 · Orientación para el estudiante', items: [{ title: 'Tu resultado', desc: 'Obtuviste un 6,2 — excelente desempeño. Estás en el percentil 82 del curso.' }, { title: 'Fortalezas identificadas', desc: 'Desempeño sobresaliente en Unidades I, III y IV. Tu dominio de la terminología morfológica es consistente.' }, { title: 'Área a reforzar', desc: 'La Unidad II (tejido epitelial) fue tu área más débil esta evaluación. Repasa el material de la semana 5 y resuelve los ejercicios del módulo complementario.' }, { title: 'Próximos pasos', desc: 'Mantén tu ritmo de estudio. Completa las actividades de práctica dentro de las primeras 48h para mantener tu ventaja demostrada.' }] },
-  quality: { title: 'Informe de calidad académica', subtitle: 'Aseguramiento de la calidad · Morfología · USS 2026', items: [{ title: 'Trazabilidad RA → Evaluación', desc: 'Los 6 resultados de aprendizaje declarados en el programa están alineados con los ítems de la Solemne 1. La cobertura es del 100%.' }, { title: 'Coherencia con el perfil de egreso', desc: 'Las competencias evaluadas se articulan directamente con 3 de los 5 dominios del perfil de egreso de la carrera.' }, { title: 'Indicadores de efectividad educativa', desc: 'Tasa de aprobación: 78% (meta institucional: 75%). Brecha de género: no significativa. Brecha por sección: 0,3 puntos (dentro del rango aceptable).' }, { title: 'Observación para mejora curricular', desc: 'La Unidad II requiere revisión. Se recomienda incorporar en el análisis curricular del próximo proceso de rediseño de la asignatura.' }] },
-  research: { title: 'Capa Research autónoma', subtitle: 'Dataset independiente · Perfil investigador · No requiere nómina ni curso', items: [{ title: 'Hallazgo principal', desc: 'En 3 cohortes consecutivas (2024–2026), el rendimiento en tejido epitelial muestra una correlación negativa con el tiempo de exposición previa al contenido (r = -0.42, p < 0.05).' }, { title: 'Confrontación con literatura', desc: 'Este patrón es consistente con los hallazgos de Hattie & Timperley (2007) sobre el efecto de la retroalimentación tardía. Se sugiere revisar el timing de las actividades formativas.' }, { title: 'Conclusión tentativa', desc: 'La reorganización de la secuencia de contenidos de la Unidad II podría mejorar el logro promedio en 0,4–0,7 puntos, basado en la evidencia disponible.' }, { title: 'Proyección del manuscrito', desc: 'Datos suficientes para un artículo en revista de educación médica. El sistema ha preparado un borrador en estructura IMRaD listo para revisión.' }] },
+// ══════════════════════════════════════════════════════
+//  DATOS DEL MÓDULO BRIEFINGS · estructura estratificada
+//  curso → prueba → estudiante → informe robusto
+// ══════════════════════════════════════════════════════
+
+const BRIEFING_UNIVERSE = {
+  courses: [
+    {
+      id: 'DER-301',
+      code: 'DER-301',
+      name: 'Derecho Penal I · Parte General',
+      program: 'Licenciatura en Ciencias Jurídicas',
+      year: '3° año',
+      teacher: 'Prof. M. Soledad Cárdenas',
+      enrolled: 52,
+      term: '2026 · primer semestre',
+      avgGrade: 5.1,
+      passRate: 73,
+      assessments: 5,
+      featured: true,
+      tests: [
+        {
+          id: 'DER-301-C1',
+          code: 'C1',
+          name: 'Certamen N°1',
+          date: '14 may 2026',
+          dateISO: '2026-05-14',
+          type: 'Selección múltiple',
+          questions: 25,
+          coverage: 'Unidades 1 a 4 · Teoría del delito · Antijuridicidad · Culpabilidad',
+          mean: 5.1,
+          passRate: 73,
+          studentsCount: 52,
+          ra: ['RA-1', 'RA-2', 'RA-3'],
+          status: 'graded',
+          featured: true
+        },
+        {
+          id: 'DER-301-CL1',
+          code: 'CL1',
+          name: 'Control de lectura · Unidad 1',
+          date: '28 mar 2026',
+          dateISO: '2026-03-28',
+          type: 'Control formativo',
+          questions: 12,
+          coverage: 'Ley penal y principios fundantes',
+          mean: 5.6,
+          passRate: 84,
+          studentsCount: 52,
+          ra: ['RA-1'],
+          status: 'graded'
+        },
+        {
+          id: 'DER-301-EF1',
+          code: 'EF1',
+          name: 'Ensayo formativo',
+          date: '11 abr 2026',
+          dateISO: '2026-04-11',
+          type: 'Desarrollo',
+          questions: 1,
+          coverage: 'Teoría del delito: introducción',
+          mean: 5.3,
+          passRate: 76,
+          studentsCount: 51,
+          ra: ['RA-2'],
+          status: 'graded'
+        }
+      ],
+      students: [
+        { id: 'rojas-tomas', name: 'Tomás Andrés Rojas Valenzuela', rut: '20.314.582-7', currentGrade: 4.3, currentLogro: 56, trend: 'down', risk: 'medium', featured: true },
+        { id: 'soto-camila', name: 'Camila Andrea Soto Henríquez', rut: '20.418.103-K', currentGrade: 6.4, currentLogro: 88, trend: 'up', risk: 'low' },
+        { id: 'morales-felipe', name: 'Felipe Ignacio Morales Cea', rut: '20.295.674-2', currentGrade: 5.7, currentLogro: 76, trend: 'up', risk: 'low' },
+        { id: 'paredes-josefa', name: 'Josefa Belén Paredes Lazcano', rut: '20.503.291-5', currentGrade: 3.8, currentLogro: 48, trend: 'down', risk: 'high' },
+        { id: 'cabrera-matias', name: 'Matías Esteban Cabrera Reyes', rut: '20.327.842-1', currentGrade: 5.2, currentLogro: 68, trend: 'flat', risk: 'low' }
+      ]
+    },
+    {
+      id: 'DMOR-0030',
+      code: 'DMOR-0030',
+      name: 'Morfología Humana',
+      program: 'Carrera de Medicina',
+      year: '1° año',
+      teacher: 'Prof. R. Saavedra · ayudantía equipo CA',
+      enrolled: 46,
+      term: '2026 · primer semestre',
+      avgGrade: 5.4,
+      passRate: 78,
+      assessments: 3,
+      tests: [
+        {
+          id: 'DMOR-0030-S1',
+          code: 'S1',
+          name: 'Solemne 1',
+          date: '02 may 2026',
+          dateISO: '2026-05-02',
+          type: 'Mixta',
+          questions: 40,
+          coverage: 'Unidades I a IV · Tejidos · Sistema esquelético',
+          mean: 5.4,
+          passRate: 78,
+          studentsCount: 46,
+          ra: ['RA-1', 'RA-2', 'RA-3'],
+          status: 'graded'
+        }
+      ],
+      students: [
+        { id: 'arroyo-catalina', name: 'Catalina Arroyo', currentGrade: 6.1, currentLogro: 84, trend: 'up', risk: 'low' },
+        { id: 'figueroa-valentina', name: 'Valentina Figueroa', currentGrade: 5.1, currentLogro: 68, trend: 'up', risk: 'low' },
+        { id: 'munoz-nicolas', name: 'Nicolás Muñoz', currentGrade: 3.9, currentLogro: 51, trend: 'down', risk: 'high' },
+        { id: 'vera-daniela', name: 'Daniela Vera', currentGrade: 6.4, currentLogro: 89, trend: 'up', risk: 'low' }
+      ]
+    }
+  ]
 };
 
-async function showFeedback(type) {
-  const container = document.getElementById('feedback-content');
-  container.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text2);font-size:13px;">Cargando briefing...</div>`;
+// Contenido de los 4 artefactos por (curso, prueba)
+const FEEDBACK_DEMO = {
+  academic: {
+    title: 'Briefing académico',
+    audience: 'Para docente y coordinación académica',
+    items: [
+      { title: 'Síntesis ejecutiva', desc: 'El curso obtuvo un promedio de 5,1 con tasa de aprobación 73%. La tendencia general es positiva respecto del control de lectura previo. Tres unidades muestran patrones de bajo logro consistentes que requieren intervención focalizada.' },
+      { title: 'Brechas críticas por unidad', desc: 'Las Unidades 3 (Antijuridicidad) y 4 (Culpabilidad y Error) presentan los promedios más bajos: 48% y 41% respectivamente. La brecha es transversal: 38 de 52 estudiantes fallan al menos un ítem de error de prohibición. Se sugiere revisar la secuencia didáctica.' },
+      { title: 'Perfil de riesgo del curso', desc: '8 estudiantes en seguimiento activo. Josefa Paredes (3,8) y Tomás Rojas (4,3) requieren intervención diferenciada antes de la evaluación integradora. 5 más están en zona límite con tendencias descendentes.' },
+      { title: 'Recomendaciones', desc: 'Priorizar reforzamiento de error de prohibición y excluyentes de culpabilidad. Considerar taller de resolución de casos en semana 11. Revisar la formulación de los ítems 19 y 21 — distractores con bajo poder discriminativo.' }
+    ]
+  },
+  student: {
+    title: 'Briefing estudiantil',
+    audience: 'Orientación individual para el estudiante',
+    items: [
+      { title: 'Tu desempeño', desc: 'Tu calificación final fue de 4,3 (56% de logro), equivalente al percentil 38 del curso. Apruebas la evaluación, pero el resultado refleja brechas específicas que conviene atender antes de la integradora.' },
+      { title: 'Fortalezas identificadas', desc: 'Tu dominio de conceptos fundamentales es sólido (Recordar 86%, sobre el curso). Excelente desempeño en tipicidad subjetiva: la estructura mental para discriminar dolo y culpa está consolidada.' },
+      { title: 'Áreas a reforzar', desc: 'Las brechas se concentran en aplicación analítica: error de prohibición (las tres preguntas falladas), distinción justificación/exculpación, e imputación objetiva. No es problema teórico, es transición desde conceptos hacia operación dogmática.' },
+      { title: 'Plan de consolidación · 3 semanas', desc: 'Itinerario personalizado de 6 sesiones (~8 horas), apoyado en tu fortaleza demostrada en tipicidad. Disponible en el informe individual completo, con bibliografía y casos espejo.' }
+    ]
+  },
+  quality: {
+    title: 'Informe de calidad académica',
+    audience: 'Aseguramiento de la calidad · USS 2026',
+    items: [
+      { title: 'Trazabilidad RA → Evaluación', desc: 'Los 3 resultados de aprendizaje declarados en el programa están alineados con los ítems del Certamen N°1. La cobertura es del 100%. Cada pregunta tiene RA asignado, nivel de Bloom y unidad.' },
+      { title: 'Coherencia con el perfil de egreso', desc: 'Las competencias evaluadas se articulan directamente con 2 de las 5 competencias específicas del perfil de egreso de Licenciatura en Ciencias Jurídicas (operacionalización jurídica y razonamiento dogmático).' },
+      { title: 'Indicadores institucionales', desc: 'Aprobación: 73% (meta institucional ≥ 70%). Discriminación promedio del instrumento: 0,38 (rango aceptable). Brecha por sección: 0,4 puntos. Confiabilidad KR-20: 0,82.' },
+      { title: 'Recomendación curricular', desc: 'La Unidad 4 requiere revisión sistemática. Se observa el mismo patrón en 3 cohortes consecutivas. Se recomienda incorporar este hallazgo al próximo ciclo de rediseño del programa.' }
+    ]
+  },
+  research: {
+    title: 'Capa Research autónoma',
+    audience: 'Perfil investigador · dataset independiente',
+    items: [
+      { title: 'Hallazgo principal', desc: 'En 3 cohortes consecutivas (2024–2026), el rendimiento en error de prohibición muestra correlación negativa con el orden de aparición del contenido en el semestre (r = -0,46, p < 0,01).' },
+      { title: 'Confrontación con literatura', desc: 'El patrón es consistente con la teoría del "olvido productivo" (Bjork, 1994) y los hallazgos de Carpenter et al. (2012) sobre espaciado óptimo. Sugiere reordenar la secuencia.' },
+      { title: 'Conclusión tentativa', desc: 'La reorganización de las Unidades 3 y 4 podría mejorar el logro promedio en 0,3–0,6 puntos, ajustado por covariables previas. Datos suficientes para análisis longitudinal multivariado.' },
+      { title: 'Proyección del manuscrito', desc: 'Dataset listo para artículo en revista Q1 de educación jurídica. Pre-registro OSF preparado. Borrador IMRaD generado con secciones de método y resultados ya pobladas.' }
+    ]
+  }
+};
 
-  let data = null;
+// Estado actual del módulo de briefings (navegación)
+let _briefingState = {
+  level: 'courses', // 'courses' | 'tests' | 'students' | 'report'
+  courseId: null,
+  testId: null,
+  studentId: null,
+  artifact: 'academic' // 'academic' | 'student' | 'quality' | 'research'
+};
 
-  if (IDS.assessment_id) {
-    try {
-      const raw = await apiRequest(`/feedback/${IDS.assessment_id}?artifact=${type}`);
-      // Mapear formato del backend al formato de la UI
-      data = {
-        title: raw.title,
-        subtitle: `Morfología · Solemne 1 · ${type}`,
-        items: (raw.items || []).map(item => ({ title: '', desc: item })),
-      };
-    } catch (e) {
-      data = FEEDBACK_DEMO[type] || FEEDBACK_DEMO.academic;
-    }
-  } else {
-    data = FEEDBACK_DEMO[type] || FEEDBACK_DEMO.academic;
+// ══════════════════════════════════════════════════════
+//  MÓDULO BRIEFINGS · sistema de navegación estratificada
+// ══════════════════════════════════════════════════════
+
+function brfFindCourse(id) { return BRIEFING_UNIVERSE.courses.find(c => c.id === id); }
+function brfFindTest(course, id) { return course && course.tests.find(t => t.id === id); }
+function brfFindStudent(course, id) { return course && course.students.find(s => s.id === id); }
+
+function brfRender() {
+  brfRenderBreadcrumb();
+  brfRenderStepper();
+  brfRenderMain();
+}
+
+function brfRenderBreadcrumb() {
+  const el = document.getElementById('brf-breadcrumb');
+  if (!el) return;
+  const s = _briefingState;
+  const course = brfFindCourse(s.courseId);
+  const test = brfFindTest(course, s.testId);
+  const student = brfFindStudent(course, s.studentId);
+
+  const crumbs = [];
+  crumbs.push(`<button class="brf-crumb ${s.level === 'courses' ? 'current' : ''}" onclick="brfNavigate('courses')">📚 Cursos</button>`);
+  if (course) {
+    crumbs.push(`<span class="brf-crumb-sep">›</span>`);
+    crumbs.push(`<button class="brf-crumb ${s.level === 'tests' ? 'current' : ''}" onclick="brfNavigate('tests', { courseId: '${course.id}' })">${course.name}</button>`);
+  }
+  if (test) {
+    crumbs.push(`<span class="brf-crumb-sep">›</span>`);
+    crumbs.push(`<button class="brf-crumb ${s.level === 'students' ? 'current' : ''}" onclick="brfNavigate('students', { courseId: '${course.id}', testId: '${test.id}' })">${test.name}</button>`);
+  }
+  if (student) {
+    crumbs.push(`<span class="brf-crumb-sep">›</span>`);
+    crumbs.push(`<button class="brf-crumb current">${student.name.split(' ').slice(0,2).join(' ')}</button>`);
   }
 
-  container.innerHTML = `
-    <div class="card card-dark studio-wrap">
-      <div class="studio-glow"></div>
-      <div class="studio-content">
-        <div class="card-header">
-          <div class="card-title" style="font-size:24px;">${data.title}</div>
-          <div class="card-desc" style="color:#94a3b8;">${data.subtitle}</div>
+  const levelNames = { courses: 'Nivel curso', tests: 'Nivel prueba', students: 'Nivel estudiante', report: 'Informe individual' };
+  crumbs.push(`<span class="brf-level-tag">${levelNames[s.level]}</span>`);
+
+  el.innerHTML = crumbs.join('');
+}
+
+function brfRenderStepper() {
+  const el = document.getElementById('brf-stepper');
+  if (!el) return;
+  const s = _briefingState;
+  const course = brfFindCourse(s.courseId);
+  const test = brfFindTest(course, s.testId);
+  const student = brfFindStudent(course, s.studentId);
+
+  const steps = [
+    {
+      key: 'courses', icon: '01', name: 'Cursos',
+      current: course ? course.name : 'Seleccionar curso',
+      enabled: true
+    },
+    {
+      key: 'tests', icon: '02', name: 'Pruebas',
+      current: test ? test.name : (course ? 'Seleccionar prueba' : '—'),
+      enabled: !!course
+    },
+    {
+      key: 'students', icon: '03', name: 'Estudiantes',
+      current: student ? student.name.split(' ').slice(0,2).join(' ') : (test ? 'Seleccionar estudiante' : '—'),
+      enabled: !!test
+    },
+    {
+      key: 'report', icon: '04', name: 'Informe',
+      current: student ? 'Informe individual' : '—',
+      enabled: !!student
+    }
+  ];
+
+  el.innerHTML = steps.map(step => `
+    <button class="brf-step ${s.level === step.key ? 'active' : ''}"
+      ${step.enabled ? `onclick="brfNavigate('${step.key}')"` : 'disabled'}>
+      <span class="brf-step-icon">${step.icon}</span>
+      <span class="brf-step-label">
+        <span class="brf-step-name">${step.name}</span>
+        <span class="brf-step-current">${step.current}</span>
+      </span>
+    </button>
+  `).join('');
+}
+
+function brfNavigate(level, params) {
+  const p = params || {};
+  if (p.courseId !== undefined) _briefingState.courseId = p.courseId;
+  if (p.testId !== undefined) _briefingState.testId = p.testId;
+  if (p.studentId !== undefined) _briefingState.studentId = p.studentId;
+  _briefingState.level = level;
+
+  // Limpiar selecciones aguas abajo si retrocedemos
+  if (level === 'courses') {
+    _briefingState.testId = null;
+    _briefingState.studentId = null;
+  } else if (level === 'tests') {
+    _briefingState.studentId = null;
+  }
+
+  brfRender();
+}
+
+function brfBackToCourses() {
+  _briefingState = { level: 'courses', courseId: null, testId: null, studentId: null, artifact: 'academic' };
+  brfRender();
+}
+
+function brfRenderMain() {
+  const el = document.getElementById('brf-main');
+  if (!el) return;
+  const s = _briefingState;
+  if (s.level === 'courses') return brfRenderCoursesList(el);
+  if (s.level === 'tests') return brfRenderTestsList(el);
+  if (s.level === 'students') return brfRenderStudentsList(el);
+  if (s.level === 'report') return brfRenderReport(el);
+}
+
+function brfRenderCoursesList(el) {
+  el.innerHTML = `
+    <div class="brf-grid">
+      ${BRIEFING_UNIVERSE.courses.map(c => `
+        <button class="brf-card ${c.featured ? 'featured' : ''}" onclick="brfNavigate('tests', { courseId: '${c.id}' })">
+          <div class="brf-card-eyebrow">
+            <strong>${c.code}</strong>
+            ${c.featured ? '<span style="color:var(--gold);">★ Destacado</span>' : ''}
+          </div>
+          <div class="brf-card-title">${c.name}</div>
+          <div class="brf-card-meta">${c.program} · ${c.year}<br>${c.teacher}</div>
+          <div class="brf-card-stats">
+            <div class="brf-card-stat"><div class="v">${c.enrolled}</div><div class="l">Estudiantes</div></div>
+            <div class="brf-card-stat"><div class="v">${c.assessments}</div><div class="l">Evaluaciones</div></div>
+            <div class="brf-card-stat"><div class="v">${c.passRate}%</div><div class="l">Aprobación</div></div>
+          </div>
+          <div class="brf-card-arrow">→</div>
+        </button>
+      `).join('')}
+    </div>
+  `;
+}
+
+function brfRenderTestsList(el) {
+  const course = brfFindCourse(_briefingState.courseId);
+  if (!course) return brfBackToCourses();
+
+  el.innerHTML = `
+    <div class="brf-grid">
+      ${course.tests.map(t => `
+        <button class="brf-card ${t.featured ? 'featured' : ''}" onclick="brfNavigate('students', { testId: '${t.id}' })">
+          <div class="brf-card-eyebrow">
+            <strong>${t.code}</strong> · ${t.type} · ${t.date}
+            ${t.featured ? '<span style="color:var(--gold);">★</span>' : ''}
+          </div>
+          <div class="brf-card-title">${t.name}</div>
+          <div class="brf-card-meta">${t.coverage}</div>
+          <div class="brf-card-stats">
+            <div class="brf-card-stat"><div class="v">${t.questions}</div><div class="l">Preguntas</div></div>
+            <div class="brf-card-stat"><div class="v">${t.mean.toFixed(1)}</div><div class="l">Promedio</div></div>
+            <div class="brf-card-stat"><div class="v">${t.passRate}%</div><div class="l">Aprobación</div></div>
+          </div>
+          <div class="brf-card-arrow">→</div>
+        </button>
+      `).join('')}
+    </div>
+  `;
+}
+
+function brfRenderStudentsList(el) {
+  const course = brfFindCourse(_briefingState.courseId);
+  const test = brfFindTest(course, _briefingState.testId);
+  if (!course || !test) return brfBackToCourses();
+
+  // Vista de prueba: tabs de artefactos arriba + lista de estudiantes abajo
+  el.innerHTML = `
+    <div class="brf-artifact-tabs">
+      <button class="brf-tab ${_briefingState.artifact === 'academic' ? 'active' : ''}" onclick="brfSelectArtifact('academic')">Briefing académico</button>
+      <button class="brf-tab ${_briefingState.artifact === 'quality' ? 'active' : ''}" onclick="brfSelectArtifact('quality')">Informe de calidad</button>
+      <button class="brf-tab ${_briefingState.artifact === 'research' ? 'active' : ''}" onclick="brfSelectArtifact('research')">Capa Research</button>
+      <button class="brf-tab ${_briefingState.artifact === 'student' ? 'active' : ''}" onclick="brfSelectArtifact('student')">Por estudiante ↓</button>
+    </div>
+
+    <div id="brf-artifact-content"></div>
+
+    <div style="margin-top:24px;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;padding:0 4px;">
+        <h3 style="font-size:16px;font-weight:700;color:var(--dark);letter-spacing:-0.01em;">Briefings estudiantiles · ${test.studentsCount} alumnos</h3>
+        <span style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.14em;font-weight:600;">click para ver informe individual</span>
+      </div>
+      <div class="brf-student-list">
+        ${course.students.map(st => {
+          const trendIcon = st.trend === 'up' ? '↑' : st.trend === 'down' ? '↓' : '→';
+          const trendDelta = st.trend === 'up' ? '+0.4' : st.trend === 'down' ? '−0.6' : '0.0';
+          const initials = st.name.split(' ').slice(0,2).map(w => w[0]).join('');
+          return `
+            <button class="brf-student-row ${st.featured ? 'featured' : ''}" onclick="brfNavigate('report', { studentId: '${st.id}' })">
+              <div class="brf-student-avatar">${initials}</div>
+              <div class="brf-student-name-block">
+                <div class="brf-student-name">${st.name}</div>
+                ${st.rut ? `<div class="brf-student-rut">${st.rut}</div>` : ''}
+              </div>
+              <div style="text-align:right;">
+                <div class="brf-student-grade">${st.currentGrade.toFixed(1).replace('.', ',')}</div>
+                <div class="brf-student-grade-l">Nota</div>
+              </div>
+              <div style="text-align:right;">
+                <div class="brf-student-logro">${st.currentLogro}%</div>
+                <div class="brf-student-logro-l">Logro</div>
+              </div>
+              <span class="brf-student-trend ${st.trend}">${trendIcon} ${trendDelta}</span>
+              <div class="brf-student-arrow">→</div>
+            </button>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+
+  brfRenderArtifact();
+}
+
+function brfSelectArtifact(type) {
+  if (type === 'student') {
+    // Llevar a foco la lista de estudiantes
+    const list = document.querySelector('.brf-student-list');
+    if (list) list.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+  _briefingState.artifact = type;
+  // Re-renderizar tabs
+  document.querySelectorAll('.brf-tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  brfRenderArtifact();
+}
+
+function brfRenderArtifact() {
+  const target = document.getElementById('brf-artifact-content');
+  if (!target) return;
+  const type = _briefingState.artifact;
+  if (type === 'student') {
+    target.innerHTML = '';
+    return;
+  }
+  const data = FEEDBACK_DEMO[type] || FEEDBACK_DEMO.academic;
+  const course = brfFindCourse(_briefingState.courseId);
+  const test = brfFindTest(course, _briefingState.testId);
+
+  target.innerHTML = `
+    <div class="brf-content">
+      <div class="brf-content-eyebrow">${course.code} · ${test.name}</div>
+      <div class="brf-content-title">${data.title}</div>
+      <div class="brf-content-subtitle">${data.audience}</div>
+      ${data.items.map(item => `
+        <div class="brf-content-item">
+          <h4>${item.title}</h4>
+          <p>${item.desc}</p>
         </div>
-        <div class="card-content space-y-3">
-          ${data.items.map(item => `
-            <div class="feedback-item">
-              ${item.title ? `<div class="feedback-item-title">${item.title}</div>` : ''}
-              <div class="feedback-item-desc">${item.desc}</div>
-            </div>
-          `).join('')}
+      `).join('')}
+    </div>
+  `;
+}
+
+function brfRenderReport(el) {
+  const course = brfFindCourse(_briefingState.courseId);
+  const test = brfFindTest(course, _briefingState.testId);
+  const student = brfFindStudent(course, _briefingState.studentId);
+  if (!course || !test || !student) return brfBackToCourses();
+
+  // Caso especial: Tomás Rojas tiene contenido completo del informe doctoral
+  const isFeatured = student.id === 'rojas-tomas';
+
+  el.innerHTML = `
+    <div class="brf-report">
+      <div class="brf-report-head">
+        <div class="brf-report-eyebrow">Informe individual de aprendizaje</div>
+        <h2 class="brf-report-title">Diagnóstico pedagógico personalizado<br><strong>sobre el ${test.name} de ${course.name.split(' · ')[0]}</strong></h2>
+        <div class="brf-report-subtitle">Análisis cualitativo del desempeño, brechas de contenido identificadas y plan de consolidación personalizado.</div>
+        <div class="brf-report-folio">
+          <div><span class="l">Estudiante</span><span class="v">${student.name}</span></div>
+          ${student.rut ? `<div><span class="l">RUT</span><span class="v">${student.rut}</span></div>` : ''}
+          <div><span class="l">Programa</span><span class="v">${course.program} · ${course.year}</span></div>
+          <div><span class="l">Folio</span><span class="v">EVL · 2026 · ${course.code.split('-')[0]} · 0287</span></div>
         </div>
       </div>
-    </div>`;
+
+      <div class="brf-report-body">
+        <!-- Métricas -->
+        <div class="brf-report-metrics">
+          <div class="brf-metric">
+            <div class="l">Nota</div>
+            <div class="v">${student.currentGrade.toFixed(1).replace('.', ',')}</div>
+            <div class="u">escala 1,0 – 7,0</div>
+          </div>
+          <div class="brf-metric">
+            <div class="l">Logro</div>
+            <div class="v">${student.currentLogro}%</div>
+            <div class="u">${Math.round(student.currentLogro * test.questions / 100)} / ${test.questions} correctas</div>
+          </div>
+          <div class="brf-metric">
+            <div class="l">Percentil</div>
+            <div class="v">P${isFeatured ? '38' : Math.round(student.currentLogro * 0.9)}</div>
+            <div class="u">n = ${test.studentsCount}</div>
+          </div>
+          <div class="brf-metric">
+            <div class="l">Estado</div>
+            <div class="v" style="font-size:18px;color:${student.currentGrade >= 4 ? 'var(--green)' : '#b91c2c'};padding-top:9px;">${student.currentGrade >= 4 ? 'Aprobado' : 'Reprobado'}</div>
+            <div class="u">exigencia 60%</div>
+          </div>
+        </div>
+
+        ${isFeatured ? brfReportRojasContent(course, test) : brfReportGenericContent(course, test, student)}
+
+        <!-- RA -->
+        <div class="brf-report-section">
+          <h3>Desempeño por resultado de aprendizaje</h3>
+          <p>Logro alcanzado en cada uno de los resultados de aprendizaje que la evaluación operacionaliza. Las barras muestran porcentaje de logro respecto al máximo esperado.</p>
+          <div class="brf-ra-list">
+            ${brfRADataFor(student, test).map(ra => `
+              <div class="brf-ra-row ${ra.level}" style="--w: ${ra.pct}%;">
+                <span class="code">${ra.code}</span>
+                <span class="name">${ra.name}</span>
+                <div class="bar"></div>
+                <span class="pct">${ra.pct}%</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+
+      <div class="brf-report-actions">
+        <button class="brf-action-btn primary" onclick="brfExportCurrent()">📄 Descargar PDF</button>
+        <button class="brf-action-btn" onclick="brfShareReport()">↗ Compartir con el estudiante</button>
+        <button class="brf-action-btn" onclick="brfNavigate('students')">← Volver a la lista</button>
+      </div>
+    </div>
+  `;
+}
+
+function brfReportRojasContent(course, test) {
+  return `
+    <div class="brf-report-section">
+      <h3>Síntesis ejecutiva del desempeño</h3>
+      <p>El presente informe analiza el desempeño de <strong>Tomás Andrés Rojas Valenzuela</strong> en el ${test.name} de ${course.name}, aplicado el ${test.date} con un instrumento de ${test.questions} preguntas de selección múltiple sobre los contenidos de las unidades 1 a 4 del programa.</p>
+      <p>El estudiante obtuvo una calificación final de <strong>4,3</strong> en escala chilena, equivalente a <strong>14 respuestas correctas de 25 (56% de logro)</strong>, ubicándose en el percentil 38 del curso. Su desempeño revela un dominio sólido de los conceptos fundamentales de la teoría del delito, pero muestra dos brechas conceptuales específicas en culpabilidad y en error de prohibición que conviene atender antes de la evaluación integradora.</p>
+    </div>
+
+    <div class="brf-report-section">
+      <h3>Análisis cualitativo de las brechas</h3>
+      <p>Las siete preguntas en las que demuestras dominio de conceptos (Recordar 86%) confirman que has estudiado y que has internalizado la nomenclatura técnica de la cátedra. Las preguntas donde fallaste, en cambio, comparten una característica revelada por tu patrón de respuestas: <strong>en todas elegiste alternativas que son técnicamente correctas como definición pero que no son la respuesta pertinente al caso planteado</strong>.</p>
+      <p>Es decir, no equivocaste el concepto; equivocaste su <em>aplicación</em>. Esto es, dogmáticamente hablando, un problema de subsunción, no de teoría. Tu desempeño sugiere que el aprendizaje de la unidad 3 se quedó en el nivel del <em>listado</em> sin haber transitado al nivel del <em>criterio</em>.</p>
+    </div>
+
+    <div class="brf-report-section">
+      <h3>Plan de consolidación · 3 semanas</h3>
+      <p>Propuesta de trabajo personalizada de seis sesiones (~8 horas) para las tres semanas previas al examen final. El plan integra las brechas identificadas con tu fortaleza demostrada en tipicidad subjetiva como punto de apoyo. Cada sesión tiene un objetivo de aprendizaje verificable y bibliografía específica.</p>
+      <p><strong>Sesiones priorizadas:</strong> reconstrucción del esqueleto de la teoría del delito (S1), causas de justificación con resolución guiada (S2), separación deliberada de causas de exculpación (S3), error de tipo vs error de prohibición con tabla comparativa (S4), revisión integradora con casos espejo (S5), simulacro de evaluación (S6).</p>
+    </div>
+  `;
+}
+
+function brfReportGenericContent(course, test, student) {
+  return `
+    <div class="brf-report-section">
+      <h3>Síntesis ejecutiva</h3>
+      <p>El presente informe analiza el desempeño de <strong>${student.name}</strong> en el ${test.name} de ${course.name}, aplicado el ${test.date}.</p>
+      <p>El estudiante obtuvo una calificación de <strong>${student.currentGrade.toFixed(1).replace('.', ',')}</strong>, equivalente a un <strong>${student.currentLogro}% de logro</strong>. ${student.risk === 'high' ? 'Su desempeño requiere intervención diferenciada antes de la evaluación integradora.' : student.risk === 'medium' ? 'Su desempeño es aceptable pero presenta brechas específicas que conviene atender.' : 'Su desempeño es sólido y consistente con su trayectoria del semestre.'}</p>
+    </div>
+
+    <div class="brf-report-section">
+      <h3>Recomendaciones individualizadas</h3>
+      <p>Las recomendaciones específicas para este estudiante están en construcción por el motor de IA con calibración multicapa. Estarán disponibles al completarse el procesamiento de la evaluación.</p>
+    </div>
+  `;
+}
+
+function brfRADataFor(student, test) {
+  // Datos simulados — en backend real vendrían del análisis
+  const baseLogro = student.currentLogro;
+  if (test.id === 'DER-301-C1') {
+    return [
+      { code: 'RA-1', name: 'Reconocer fuentes y principios del Derecho Penal', pct: Math.min(100, baseLogro + 30), level: 'high' },
+      { code: 'RA-2', name: 'Analizar la estructura del delito (tipicidad)', pct: Math.min(100, baseLogro + 15), level: 'high' },
+      { code: 'RA-3', name: 'Aplicar excluyentes de responsabilidad penal', pct: Math.max(20, baseLogro - 20), level: 'low' }
+    ];
+  }
+  return [
+    { code: 'RA-1', name: 'Resultado de aprendizaje 1', pct: Math.min(100, baseLogro + 12), level: 'high' },
+    { code: 'RA-2', name: 'Resultado de aprendizaje 2', pct: baseLogro, level: baseLogro > 60 ? 'high' : 'med' },
+    { code: 'RA-3', name: 'Resultado de aprendizaje 3', pct: Math.max(25, baseLogro - 15), level: baseLogro > 70 ? 'med' : 'low' }
+  ];
+}
+
+function brfExportCurrent() {
+  showToast('Generando PDF del informe...', 'info');
+  setTimeout(() => showToast('✓ PDF disponible (demo)', 'success'), 1200);
+}
+function brfShareReport() {
+  showToast('Enlace seguro generado · válido 72h (demo)', 'success');
+}
+
+// Compatibilidad con código viejo
+function showFeedback(type) {
+  // Si llaman a showFeedback fuera del nuevo flujo, abrir el módulo
+  if (!_briefingState.courseId) {
+    _briefingState = { level: 'courses', courseId: null, testId: null, studentId: null, artifact: type || 'academic' };
+  } else {
+    _briefingState.artifact = type;
+  }
+  brfRender();
 }
 
 
@@ -3360,12 +4218,14 @@ function doLogout() {
 }
 
 // Auto-login si hay token guardado
-window.addEventListener('DOMContentLoaded', () => {
-  if (_authToken && _currentTeacher) {
-    updateDashboardGreeting();
-    navigate('dashboard');
-  }
-});
+// DESACTIVADO temporalmente: la app siempre arranca en la portada de identificación.
+// Para reactivar (cuando el backend valide tokens vía endpoint /me), descomentar:
+// window.addEventListener('DOMContentLoaded', () => {
+//   if (_authToken && _currentTeacher) {
+//     updateDashboardGreeting();
+//     navigate('dashboard');
+//   }
+// });
 
 // ══════════════════════════════════════════════════════
 //  MÓDULO DE CURSO — TABS Y MODALES
