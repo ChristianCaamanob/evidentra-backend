@@ -9,4 +9,4 @@ class ImmediateResultOut(BaseModel):
     percentage: float
     final_grade: float
     pass_status: str
-    percentile: int
+    percentile: int | None = None
