@@ -32,3 +32,8 @@ env/
 .vscode/
 .idea/
 *.swp
+
+# Archivos antiguos
+_archivo_viejo/
+.DS_Store
+*.png

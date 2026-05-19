@@ -6,6 +6,36 @@
 <title>Evalys — Plataforma de Inteligencia Académica</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<!-- D3.js con fallback robusto para gráficos del informe -->
+<script>
+(function loadD3(){
+  const cdns = [
+    'https://d3js.org/d3.v7.min.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js',
+    'https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js',
+    'https://unpkg.com/d3@7/dist/d3.min.js'
+  ];
+  let i = 0;
+  function tryNext(){
+    if (i >= cdns.length) {
+      console.warn('Evalys: D3 no pudo cargarse desde ningún CDN. Los gráficos no se mostrarán.');
+      return;
+    }
+    const s = document.createElement('script');
+    s.src = cdns[i++];
+    s.async = false;
+    s.onload = function(){
+      window.dispatchEvent(new Event('d3-ready'));
+    };
+    s.onerror = function(){
+      tryNext();
+    };
+    document.head.appendChild(s);
+  }
+  tryNext();
+})();
+</script>
 <style>
   :root {
     --bg: #f5f0e8;
@@ -717,6 +747,472 @@
   .brf-empty-icon { font-size: 36px; opacity: 0.3; margin-bottom: 14px; }
   .brf-empty-title { font-size: 16px; font-weight: 600; color: var(--text2); margin-bottom: 6px; }
 
+  /* ── Archivo de informes (lista persistente por prueba) ── */
+  .brf-archive-header {
+    display: flex; flex-wrap: wrap; gap: 16px; align-items: center;
+    padding: 16px 22px; margin-bottom: 14px;
+    background: white; border: 1px solid var(--border); border-radius: 14px;
+  }
+  .brf-archive-header h3 {
+    font-size: 15px; font-weight: 700; color: var(--dark);
+    letter-spacing: -0.01em; margin: 0;
+  }
+  .brf-archive-stats {
+    display: flex; gap: 18px; margin-left: auto; flex-wrap: wrap;
+  }
+  .brf-archive-stat {
+    display: flex; flex-direction: column; gap: 1px; padding-right: 18px;
+    border-right: 1px solid var(--border);
+  }
+  .brf-archive-stat:last-child { border-right: 0; padding-right: 0; }
+  .brf-archive-stat .v { font-size: 17px; font-weight: 700; color: var(--dark); line-height: 1; font-variant-numeric: tabular-nums; }
+  .brf-archive-stat .l { font-size: 9.5px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.12em; margin-top: 4px; }
+  .brf-archive-stat.success .v { color: var(--green); }
+  .brf-archive-stat.warning .v { color: var(--gold); }
+
+  .brf-filters {
+    display: flex; gap: 6px; padding: 5px; margin-bottom: 12px;
+    background: white; border: 1px solid var(--border); border-radius: 12px;
+    width: fit-content;
+  }
+  .brf-filter-btn {
+    padding: 8px 16px; border-radius: 8px;
+    background: transparent; border: 0; cursor: pointer; font-family: inherit;
+    font-size: 12.5px; font-weight: 600; color: var(--text2);
+    transition: all 0.15s;
+  }
+  .brf-filter-btn:hover { background: rgba(15,139,141,0.06); color: var(--dark); }
+  .brf-filter-btn.active { background: var(--dark); color: white; }
+  .brf-filter-count {
+    margin-left: 6px; padding: 1px 7px; border-radius: 10px;
+    font-size: 10px; background: rgba(15,139,141,0.12); color: var(--teal);
+  }
+  .brf-filter-btn.active .brf-filter-count { background: rgba(141,240,234,0.25); color: var(--teal-soft); }
+
+  /* Lista del archivo */
+  .brf-archive-list {
+    background: white; border: 1px solid var(--border);
+    border-radius: 18px; overflow: hidden;
+  }
+  .brf-archive-row {
+    display: grid;
+    grid-template-columns: 36px minmax(0,1.4fr) minmax(0,1.2fr) 90px 100px auto;
+    align-items: center; gap: 14px;
+    padding: 14px 20px;
+    border: 0; background: transparent; width: 100%; font-family: inherit; text-align: left;
+    transition: background 0.15s;
+  }
+  .brf-archive-row:not(:last-child) { border-bottom: 1px solid var(--border); }
+  .brf-archive-row:hover { background: rgba(15,139,141,0.03); }
+  .brf-archive-row.featured { background: linear-gradient(90deg, rgba(15,139,141,0.05), transparent 50%); }
+  .brf-archive-avatar {
+    width: 32px; height: 32px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--dark), var(--teal));
+    color: white; font-size: 11.5px; font-weight: 700; letter-spacing: -0.5px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .brf-archive-name { font-size: 13.5px; font-weight: 600; color: var(--dark); line-height: 1.2; }
+  .brf-archive-folio { font-size: 10.5px; color: var(--text3); margin-top: 3px; font-family: 'JetBrains Mono', monospace; }
+  .brf-archive-meta { font-size: 11.5px; color: var(--text2); line-height: 1.5; }
+  .brf-archive-meta .lbl { color: var(--text3); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.12em; margin-right: 4px; }
+  .brf-archive-grade {
+    font-size: 18px; font-weight: 700; color: var(--dark); font-variant-numeric: tabular-nums;
+    line-height: 1; text-align: center;
+  }
+  .brf-archive-grade-l { font-size: 9.5px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.12em; margin-top: 3px; text-align: center; }
+
+  /* Pills de estado */
+  .brf-status-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 10px; border-radius: 20px;
+    font-size: 11px; font-weight: 600; white-space: nowrap;
+  }
+  .brf-status-pill.pending { background: rgba(178,138,73,0.12); color: var(--gold); }
+  .brf-status-pill.delivered { background: rgba(15,139,141,0.12); color: var(--teal); }
+  .brf-status-pill.opened { background: rgba(20,148,116,0.14); color: var(--green); }
+  .brf-status-pill::before {
+    content: ''; width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor;
+  }
+
+  /* Botones de acción inline (icon only) */
+  .brf-row-actions { display: flex; gap: 4px; }
+  .brf-icon-btn {
+    width: 32px; height: 32px; border-radius: 8px;
+    background: rgba(15,139,141,0.06); color: var(--teal);
+    border: 0; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; transition: all 0.15s;
+  }
+  .brf-icon-btn:hover { background: var(--teal); color: white; transform: translateY(-1px); }
+  .brf-icon-btn.primary { background: var(--dark); color: white; }
+  .brf-icon-btn.primary:hover { background: var(--teal); }
+
+  /* Barra de acciones superior del informe individual */
+  .brf-report-toolbar {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 14px 20px; margin-bottom: 14px;
+    background: white; border: 1px solid var(--border); border-radius: 14px;
+  }
+  .brf-toolbar-meta { display: flex; flex-direction: column; gap: 2px; margin-right: auto; }
+  .brf-toolbar-meta .top { font-size: 10.5px; color: var(--text3); letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+  .brf-toolbar-meta .bot { font-size: 12px; color: var(--text2); }
+  .brf-toolbar-meta .bot strong { color: var(--dark); font-weight: 600; }
+  .brf-toolbar-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  /* Bloque de nota del docente */
+  .brf-teacher-note {
+    margin: 18px 0;
+    padding: 16px 20px;
+    background: linear-gradient(135deg, rgba(178,138,73,0.05), rgba(178,138,73,0.02));
+    border: 1px solid rgba(178,138,73,0.25);
+    border-left: 3px solid var(--gold);
+    border-radius: 12px;
+  }
+  .brf-teacher-note-label {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--gold); margin-bottom: 8px;
+  }
+  .brf-teacher-note-content {
+    font-size: 13.5px; line-height: 1.55; color: var(--text2);
+    font-style: italic;
+  }
+  .brf-teacher-note-content[contenteditable="true"] {
+    background: white; outline: 0; border-radius: 8px;
+    padding: 8px 12px; min-height: 40px;
+    border: 1px dashed rgba(178,138,73,0.4);
+    font-style: normal;
+  }
+  .brf-teacher-note-content[contenteditable="true"]:focus {
+    border-color: var(--gold); border-style: solid;
+  }
+  .brf-teacher-note-footer {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 8px;
+    font-size: 10.5px; color: var(--text3);
+  }
+  .brf-teacher-note-save {
+    padding: 4px 10px; border-radius: 6px;
+    background: var(--gold); color: white; border: 0;
+    font-family: inherit; font-size: 11px; font-weight: 600;
+    cursor: pointer;
+  }
+
+  /* Pie del informe con metadata institucional */
+  .brf-report-metadata {
+    margin-top: 24px; padding: 20px 36px;
+    background: rgba(15,23,42,0.02);
+    border-top: 1px solid var(--border);
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
+    font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+  }
+  @media (max-width: 768px) { .brf-report-metadata { grid-template-columns: repeat(2, 1fr); } }
+  .brf-report-metadata div { display: flex; flex-direction: column; gap: 3px; }
+  .brf-report-metadata .l { color: var(--text3); text-transform: uppercase; letter-spacing: 0.12em; font-size: 9px; }
+  .brf-report-metadata .v { color: var(--dark); font-weight: 600; font-size: 11.5px; word-break: break-all; }
+
+  /* ════════════════════════════════════════════════════════════════
+     INFORME DOCTORAL · contenido completo del PDF
+     Adaptado a paleta de la app (teal/dark) en vez de paleta serif marrón
+     ════════════════════════════════════════════════════════════════ */
+  .doc-section { padding: 28px 0; border-bottom: 1px solid var(--border); }
+  .doc-section:last-child { border-bottom: 0; }
+  .doc-section-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--teal); font-weight: 700; margin-bottom: 6px;
+  }
+  .doc-section-num::before { content: "§ "; }
+  .doc-section-title {
+    font-size: 24px; font-weight: 700; color: var(--dark);
+    letter-spacing: -0.018em; line-height: 1.15; margin-bottom: 4px;
+  }
+  .doc-section-deck {
+    font-size: 13.5px; line-height: 1.55; color: var(--text2);
+    max-width: 720px; margin-bottom: 22px;
+  }
+  .doc-prose {
+    font-size: 14.5px; line-height: 1.7; color: var(--dark);
+    max-width: 720px;
+  }
+  .doc-prose p { margin-bottom: 14px; }
+  .doc-prose p:last-child { margin-bottom: 0; }
+  .doc-prose p strong { font-weight: 600; }
+  .doc-prose em { font-style: italic; color: var(--teal); }
+  .doc-prose .dropcap::first-letter {
+    font-size: 3em; float: left; line-height: 0.85;
+    margin: 4px 10px 0 0; color: var(--teal); font-weight: 700;
+  }
+
+  /* Distribution chart (figura 1) */
+  .doc-figure {
+    margin: 24px 0;
+    background: white; border: 1px solid var(--border); border-radius: 14px;
+    padding: 24px 28px;
+  }
+  .doc-figure-frame { width: 100%; }
+  .doc-figure-frame svg { width: 100%; height: auto; display: block; }
+  .doc-figure-caption {
+    margin-top: 12px; padding-top: 12px;
+    border-top: 1px solid var(--border);
+    font-size: 11.5px; color: var(--text2); line-height: 1.55;
+    max-width: 700px;
+  }
+  .doc-figure-caption strong { color: var(--dark); font-weight: 600; }
+  .doc-figure-caption .source {
+    display: block; margin-top: 4px;
+    font-size: 10.5px; color: var(--text3); font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* Tabla dimensiones cognitivas */
+  .doc-table {
+    width: 100%; border-collapse: collapse; margin: 16px 0;
+    font-size: 13px;
+  }
+  .doc-table thead th {
+    padding: 10px 14px; text-align: left;
+    border-bottom: 2px solid var(--dark);
+    font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--text2); font-weight: 600;
+  }
+  .doc-table thead th.num { text-align: right; }
+  .doc-table tbody td {
+    padding: 14px; border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .doc-table tbody td:first-child { font-weight: 600; color: var(--dark); }
+  .doc-table tbody td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: 'JetBrains Mono', monospace; }
+  .doc-table tbody td.num.pos { color: var(--green); font-weight: 600; }
+  .doc-table tbody td.num.neg { color: #b91c2c; font-weight: 600; }
+  .doc-table tbody td .ex {
+    display: block; font-size: 11.5px; color: var(--text3);
+    font-style: italic; margin-top: 3px; font-weight: 400;
+  }
+  .doc-table tfoot td {
+    padding: 12px 14px; font-size: 11px; color: var(--text3);
+    font-style: italic; border-top: 1px solid var(--border);
+  }
+
+  /* Mapa de 25 preguntas */
+  .doc-questions-legend {
+    display: flex; gap: 18px; margin: 16px 0 14px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: var(--text2);
+  }
+  .doc-questions-legend span { display: flex; align-items: center; gap: 6px; }
+  .doc-questions-legend .dot {
+    width: 12px; height: 12px; border-radius: 3px;
+  }
+  .doc-questions-legend .dot.correct { background: rgba(20,148,116,0.2); border: 1px solid var(--green); }
+  .doc-questions-legend .dot.incorrect { background: rgba(220,52,75,0.15); border: 1px solid #b91c2c; }
+  .doc-questions-legend .dot.empty { background: var(--paper); border: 1px solid var(--border); }
+  .doc-questions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
+    gap: 8px;
+    max-width: 700px;
+  }
+  .doc-q-cell {
+    aspect-ratio: 1;
+    border-radius: 6px;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; font-weight: 600;
+    color: var(--dark); cursor: default;
+    border: 1px solid transparent;
+    transition: transform 0.12s;
+    position: relative;
+  }
+  .doc-q-cell.correct {
+    background: rgba(20,148,116,0.14);
+    border-color: rgba(20,148,116,0.35);
+    color: var(--green);
+  }
+  .doc-q-cell.incorrect {
+    background: rgba(220,52,75,0.1);
+    border-color: rgba(220,52,75,0.3);
+    color: #b91c2c;
+  }
+  .doc-q-cell:hover { transform: translateY(-2px); }
+  .doc-q-cell .num { font-size: 13px; }
+  .doc-q-cell .ans {
+    font-size: 9px; font-weight: 500; margin-top: 2px;
+    color: inherit; opacity: 0.85;
+  }
+
+  /* Gap cards */
+  .doc-gap-card {
+    background: white; border: 1px solid var(--border);
+    border-radius: 16px; padding: 28px 30px; margin: 18px 0;
+  }
+  .doc-gap-card.priority-high { border-left: 3px solid #b91c2c; }
+  .doc-gap-card.priority-medium { border-left: 3px solid var(--gold); }
+  .doc-gap-card.strength { border-left: 3px solid var(--green); background: linear-gradient(135deg, rgba(20,148,116,0.04), white 70%); }
+  .doc-gap-header {
+    display: flex; align-items: flex-start; gap: 18px;
+    padding-bottom: 14px; border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+  .doc-gap-number {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 32px; font-weight: 400; line-height: 1;
+    color: var(--teal); flex-shrink: 0;
+  }
+  .doc-gap-card.strength .doc-gap-number { color: var(--green); }
+  .doc-gap-eyebrow {
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--text3); margin-bottom: 4px;
+  }
+  .doc-gap-card.priority-high .doc-gap-eyebrow { color: #b91c2c; }
+  .doc-gap-card.priority-medium .doc-gap-eyebrow { color: var(--gold); }
+  .doc-gap-card.strength .doc-gap-eyebrow { color: var(--green); }
+  .doc-gap-title {
+    font-size: 17px; font-weight: 700; color: var(--dark);
+    letter-spacing: -0.015em; line-height: 1.3;
+  }
+  .doc-gap-meta {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+    margin-bottom: 18px; padding: 12px 0;
+    border-top: 1px dashed var(--border); border-bottom: 1px dashed var(--border);
+  }
+  @media (max-width: 600px) { .doc-gap-meta { grid-template-columns: 1fr; } }
+  .doc-gap-meta-item { font-size: 11.5px; }
+  .doc-gap-meta-item .label {
+    font-size: 9px; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--text3); margin-bottom: 3px;
+  }
+  .doc-gap-meta-item .val { color: var(--dark); font-weight: 600; }
+  .doc-gap-section { margin-bottom: 18px; }
+  .doc-gap-section:last-child { margin-bottom: 0; }
+  .doc-gap-section h5 {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--teal); margin-bottom: 8px;
+  }
+  .doc-gap-card.strength .doc-gap-section h5 { color: var(--green); }
+  .doc-gap-section p {
+    font-size: 14px; line-height: 1.7; color: var(--dark);
+    margin-bottom: 10px; max-width: 700px;
+  }
+  .doc-gap-section p:last-child { margin-bottom: 0; }
+  .doc-gap-example {
+    margin-top: 10px; padding: 14px 18px;
+    background: rgba(15,139,141,0.05);
+    border-left: 2px solid var(--teal); border-radius: 4px;
+    font-size: 13.5px; line-height: 1.6; color: var(--text2);
+  }
+  .doc-gap-example strong { color: var(--dark); }
+  .doc-gap-tags {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px;
+  }
+  .doc-gap-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px; padding: 4px 10px; border-radius: 4px;
+    background: rgba(220,52,75,0.1); color: #b91c2c;
+    letter-spacing: 0.02em;
+  }
+  .doc-gap-card.strength .doc-gap-tag {
+    background: rgba(20,148,116,0.14); color: var(--green);
+  }
+
+  /* Plan de estudio (6 sesiones) */
+  .doc-plan {
+    background: white; border: 1px solid var(--border);
+    border-radius: 16px; overflow: hidden;
+  }
+  .doc-plan-header {
+    padding: 18px 28px;
+    border-bottom: 2px solid var(--dark);
+    display: flex; justify-content: space-between; align-items: baseline;
+    flex-wrap: wrap; gap: 12px;
+  }
+  .doc-plan-header h3 {
+    font-size: 17px; font-weight: 700; color: var(--dark);
+    letter-spacing: -0.01em;
+  }
+  .doc-plan-header .total {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: var(--text2); letter-spacing: 0.04em;
+  }
+  .doc-plan-item {
+    display: grid; grid-template-columns: 90px 1fr 180px;
+    gap: 22px; padding: 22px 28px;
+    border-bottom: 1px solid var(--border);
+    align-items: start;
+  }
+  .doc-plan-item:last-child { border-bottom: 0; }
+  @media (max-width: 700px) { .doc-plan-item { grid-template-columns: 1fr; } }
+  .doc-plan-time {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: var(--text2); letter-spacing: 0.04em;
+  }
+  .doc-plan-time .duration {
+    font-size: 22px; color: var(--teal); font-weight: 700;
+    display: block; margin-bottom: 2px;
+    font-family: 'IBM Plex Sans', sans-serif;
+  }
+  .doc-plan-content h4 {
+    font-size: 15px; font-weight: 700; color: var(--dark);
+    margin-bottom: 6px; letter-spacing: -0.01em;
+  }
+  .doc-plan-content p {
+    font-size: 13.5px; line-height: 1.65; color: var(--text2);
+    margin-bottom: 8px;
+  }
+  .doc-plan-content .method {
+    font-size: 11.5px; color: var(--teal); font-style: italic;
+  }
+  .doc-plan-material {
+    font-size: 11.5px; color: var(--text2); line-height: 1.55;
+    padding: 12px 14px; background: rgba(15,139,141,0.04);
+    border-radius: 8px;
+  }
+  .doc-plan-material .lbl {
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--teal);
+    display: block; margin-bottom: 4px;
+  }
+
+  /* Cierre y mensaje final */
+  .doc-message {
+    margin: 24px 0; padding: 28px 32px;
+    background: linear-gradient(135deg, rgba(15,139,141,0.06), rgba(15,139,141,0.02));
+    border: 1px solid rgba(15,139,141,0.25);
+    border-radius: 16px;
+  }
+  .doc-message-eyebrow {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--teal); margin-bottom: 10px;
+  }
+  .doc-message p {
+    font-size: 16px; line-height: 1.65; color: var(--dark);
+    font-style: italic;
+  }
+  .doc-message p strong { color: var(--teal); font-style: normal; font-weight: 700; }
+  .doc-methodology {
+    margin-top: 20px; padding: 18px 22px;
+    background: rgba(15,23,42,0.03); border-radius: 10px;
+    font-size: 11.5px; line-height: 1.6; color: var(--text2);
+  }
+  .doc-methodology h5 {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--text3); margin-bottom: 8px;
+  }
+  .doc-methodology p { margin-bottom: 8px; }
+  .doc-methodology p:last-child { margin-bottom: 0; }
+
+  /* Strength stats inline */
+  .doc-strength-stats {
+    display: flex; gap: 24px; margin-top: 14px;
+    padding-top: 14px; border-top: 1px dashed rgba(20,148,116,0.3);
+  }
+  .doc-strength-stats div {
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: var(--green); font-weight: 600;
+  }
+
   @keyframes toastIn { from { opacity:0; transform: translateY(10px); } to { opacity:1; transform: translateY(0); } }
   @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -912,6 +1408,10 @@
       <button class="nav-item" onclick="navigate('result')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
         Resultados
+      </button>
+      <button class="nav-item" onclick="navigate('feedback')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        Briefings
       </button>
     </nav>
   </aside>
@@ -1175,30 +1675,6 @@
 
       </div>
 
-      <!-- Cursos activos -->
-      <div style="padding:0 48px 40px;">
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.22em;color:#475569;margin-bottom:14px;">Cursos activos</div>
-        <div style="background:#08101D;border-radius:20px;overflow:hidden;border:1.5px solid rgba(255,255,255,0.06);">
-          <table style="width:100%;border-collapse:collapse;">
-            <thead>
-              <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
-                <th style="text-align:left;padding:14px 24px;font-size:11px;font-weight:600;color:#475569;text-transform:uppercase;letter-spacing:.14em;">Nombre</th>
-                <th style="text-align:left;padding:14px 24px;font-size:11px;font-weight:600;color:#475569;text-transform:uppercase;letter-spacing:.14em;">Estudiantes</th>
-                <th style="text-align:left;padding:14px 24px;font-size:11px;font-weight:600;color:#475569;text-transform:uppercase;letter-spacing:.14em;">Evaluaciones</th>
-                <th style="text-align:left;padding:14px 24px;font-size:11px;font-weight:600;color:#475569;text-transform:uppercase;letter-spacing:.14em;">Promedio</th>
-              </tr>
-            </thead>
-            <tbody id="dash-courses-table">
-              <tr style="cursor:pointer;transition:background .15s;" onmouseover="this.style.background='rgba(15,139,141,0.06)'" onmouseout="this.style.background='none'" onclick="navigate('course')">
-                <td style="padding:18px 24px;font-size:15px;color:#0F8B8D;font-weight:600;">Morfología Humana · DMOR-0030</td>
-                <td style="padding:18px 24px;font-size:15px;color:#94a3b8;">46</td>
-                <td style="padding:18px 24px;font-size:15px;color:#94a3b8;">3</td>
-                <td style="padding:18px 24px;font-size:15px;color:white;font-weight:700;">5,4</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
     </div>
     <!-- ─────────────── CURSO ─────────────── -->
 <!-- ── CURSOS ─────────────── -->
@@ -2168,7 +2644,6 @@ function navigate(screen) {
   // Screen-specific updates
   if (screen === 'course') renderMvpFlow('mvp-flow-course', 'course');
   if (screen === 'assessment') renderMvpFlow('mvp-flow-assessment', 'assessment');
-  if (screen === 'feedback') showFeedback('academic');
   if (screen === 'result') {
     var sr = document.getElementById('screen-result');
     if (sr) sr.scrollTop = 0;
@@ -2783,8 +3258,86 @@ let _briefingState = {
   courseId: null,
   testId: null,
   studentId: null,
-  artifact: 'academic' // 'academic' | 'student' | 'quality' | 'research'
+  artifact: 'archive', // 'archive' | 'academic' | 'quality' | 'research'
+  archiveFilter: 'all'
 };
+
+// Notas del docente sobre informes (persistencia en localStorage demo)
+let _teacherNotes = (function(){
+  try { return JSON.parse(localStorage.getItem('evalys_teacher_notes') || '{}'); }
+  catch(e) { return {}; }
+})();
+
+// Estado de entrega de informes (persistencia en localStorage demo)
+let _reportDelivery = (function(){
+  try { return JSON.parse(localStorage.getItem('evalys_report_delivery') || '{}'); }
+  catch(e) { return {}; }
+})();
+
+function brfSaveTeacherNote(reportKey, note) {
+  _teacherNotes[reportKey] = { note: note, savedAt: new Date().toISOString() };
+  try { localStorage.setItem('evalys_teacher_notes', JSON.stringify(_teacherNotes)); } catch(e) {}
+}
+
+function brfSaveDelivery(reportKey, status) {
+  _reportDelivery[reportKey] = {
+    status: status, // 'pending' | 'delivered' | 'opened'
+    deliveredAt: status === 'delivered' || status === 'opened' ? new Date().toISOString() : null
+  };
+  try { localStorage.setItem('evalys_report_delivery', JSON.stringify(_reportDelivery)); } catch(e) {}
+}
+
+// Genera metadata determinística del informe para (estudiante, prueba)
+function brfReportMeta(student, test, course) {
+  if (!student || !test) return null;
+  const reportKey = `${test.id}__${student.id}`;
+  // Folio: combinación de código de curso + correlativo derivado del nombre
+  const nameHash = student.name.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+  const correlative = String(nameHash % 9000 + 100).padStart(4, '0');
+  const codePrefix = course.code.split('-')[0];
+  const folio = `EVL · 2026 · ${codePrefix} · ${correlative}`;
+
+  // Fecha de generación: día siguiente a la prueba + offset según estudiante
+  const testDate = new Date(test.dateISO);
+  const genDate = new Date(testDate.getTime() + (4 * 24 * 60 * 60 * 1000) + ((nameHash % 200) * 60 * 1000));
+
+  // Estado de entrega (default: delivered para featured, pending para algunos otros)
+  const delivery = _reportDelivery[reportKey] || (
+    student.featured
+      ? { status: 'opened', deliveredAt: new Date(testDate.getTime() + 6*24*60*60*1000).toISOString() }
+      : (nameHash % 3 === 0
+          ? { status: 'pending', deliveredAt: null }
+          : { status: 'delivered', deliveredAt: new Date(testDate.getTime() + 5*24*60*60*1000).toISOString() })
+  );
+
+  return {
+    reportKey,
+    folio,
+    generatedAt: genDate,
+    delivery,
+    teacherNote: _teacherNotes[reportKey] || null,
+    calibration: course.code === 'DER-301' ? 'cátedra Cárdenas v2.1' : 'cátedra Saavedra v1.3',
+    hash: 'sha256:' + nameHash.toString(16).padStart(8, '0').slice(0, 8) + correlative,
+    version: '1.0',
+    aiModel: 'Claude · Anthropic'
+  };
+}
+
+function brfFormatDate(date, withTime) {
+  if (!date) return '—';
+  const d = (date instanceof Date) ? date : new Date(date);
+  const months = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  const dd = d.getDate().toString().padStart(2,'0');
+  const mm = months[d.getMonth()];
+  const yyyy = d.getFullYear();
+  let out = `${dd} ${mm} ${yyyy}`;
+  if (withTime) {
+    const hh = d.getHours().toString().padStart(2,'0');
+    const mi = d.getMinutes().toString().padStart(2,'0');
+    out += ` · ${hh}:${mi}`;
+  }
+  return out;
+}
 
 // ══════════════════════════════════════════════════════
 //  MÓDULO BRIEFINGS · sistema de navegación estratificada
@@ -2891,7 +3444,7 @@ function brfNavigate(level, params) {
 }
 
 function brfBackToCourses() {
-  _briefingState = { level: 'courses', courseId: null, testId: null, studentId: null, artifact: 'academic' };
+  _briefingState = { level: 'courses', courseId: null, testId: null, studentId: null, artifact: 'archive', archiveFilter: 'all' };
   brfRender();
 }
 
@@ -2959,65 +3512,28 @@ function brfRenderStudentsList(el) {
   const test = brfFindTest(course, _briefingState.testId);
   if (!course || !test) return brfBackToCourses();
 
+  // Filtros activos (se mantienen en sesión)
+  if (!_briefingState.archiveFilter) _briefingState.archiveFilter = 'all';
+
   // Vista de prueba: tabs de artefactos arriba + lista de estudiantes abajo
   el.innerHTML = `
     <div class="brf-artifact-tabs">
+      <button class="brf-tab ${_briefingState.artifact === 'archive' ? 'active' : ''}" onclick="brfSelectArtifact('archive')">📁 Archivo de informes</button>
       <button class="brf-tab ${_briefingState.artifact === 'academic' ? 'active' : ''}" onclick="brfSelectArtifact('academic')">Briefing académico</button>
       <button class="brf-tab ${_briefingState.artifact === 'quality' ? 'active' : ''}" onclick="brfSelectArtifact('quality')">Informe de calidad</button>
       <button class="brf-tab ${_briefingState.artifact === 'research' ? 'active' : ''}" onclick="brfSelectArtifact('research')">Capa Research</button>
-      <button class="brf-tab ${_briefingState.artifact === 'student' ? 'active' : ''}" onclick="brfSelectArtifact('student')">Por estudiante ↓</button>
     </div>
 
     <div id="brf-artifact-content"></div>
-
-    <div style="margin-top:24px;">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;padding:0 4px;">
-        <h3 style="font-size:16px;font-weight:700;color:var(--dark);letter-spacing:-0.01em;">Briefings estudiantiles · ${test.studentsCount} alumnos</h3>
-        <span style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.14em;font-weight:600;">click para ver informe individual</span>
-      </div>
-      <div class="brf-student-list">
-        ${course.students.map(st => {
-          const trendIcon = st.trend === 'up' ? '↑' : st.trend === 'down' ? '↓' : '→';
-          const trendDelta = st.trend === 'up' ? '+0.4' : st.trend === 'down' ? '−0.6' : '0.0';
-          const initials = st.name.split(' ').slice(0,2).map(w => w[0]).join('');
-          return `
-            <button class="brf-student-row ${st.featured ? 'featured' : ''}" onclick="brfNavigate('report', { studentId: '${st.id}' })">
-              <div class="brf-student-avatar">${initials}</div>
-              <div class="brf-student-name-block">
-                <div class="brf-student-name">${st.name}</div>
-                ${st.rut ? `<div class="brf-student-rut">${st.rut}</div>` : ''}
-              </div>
-              <div style="text-align:right;">
-                <div class="brf-student-grade">${st.currentGrade.toFixed(1).replace('.', ',')}</div>
-                <div class="brf-student-grade-l">Nota</div>
-              </div>
-              <div style="text-align:right;">
-                <div class="brf-student-logro">${st.currentLogro}%</div>
-                <div class="brf-student-logro-l">Logro</div>
-              </div>
-              <span class="brf-student-trend ${st.trend}">${trendIcon} ${trendDelta}</span>
-              <div class="brf-student-arrow">→</div>
-            </button>
-          `;
-        }).join('')}
-      </div>
-    </div>
   `;
 
   brfRenderArtifact();
 }
 
 function brfSelectArtifact(type) {
-  if (type === 'student') {
-    // Llevar a foco la lista de estudiantes
-    const list = document.querySelector('.brf-student-list');
-    if (list) list.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    return;
-  }
   _briefingState.artifact = type;
-  // Re-renderizar tabs
   document.querySelectorAll('.brf-tab').forEach(t => t.classList.remove('active'));
-  event.target.classList.add('active');
+  if (event && event.target) event.target.classList.add('active');
   brfRenderArtifact();
 }
 
@@ -3025,13 +3541,16 @@ function brfRenderArtifact() {
   const target = document.getElementById('brf-artifact-content');
   if (!target) return;
   const type = _briefingState.artifact;
-  if (type === 'student') {
-    target.innerHTML = '';
-    return;
-  }
-  const data = FEEDBACK_DEMO[type] || FEEDBACK_DEMO.academic;
   const course = brfFindCourse(_briefingState.courseId);
   const test = brfFindTest(course, _briefingState.testId);
+
+  // Modo "archivo" — lista persistente de informes
+  if (type === 'archive') {
+    return brfRenderArchive(target, course, test);
+  }
+
+  // Modos académico/calidad/research — contenido del briefing
+  const data = FEEDBACK_DEMO[type] || FEEDBACK_DEMO.academic;
 
   target.innerHTML = `
     <div class="brf-content">
@@ -3048,16 +3567,176 @@ function brfRenderArtifact() {
   `;
 }
 
+function brfRenderArchive(target, course, test) {
+  // Construir todos los registros del archivo
+  const records = course.students.map(s => {
+    const meta = brfReportMeta(s, test, course);
+    return { student: s, meta };
+  });
+
+  // Conteos para filtros
+  const counts = {
+    all: records.length,
+    pending: records.filter(r => r.meta.delivery.status === 'pending').length,
+    delivered: records.filter(r => r.meta.delivery.status === 'delivered').length,
+    opened: records.filter(r => r.meta.delivery.status === 'opened').length,
+    risk: records.filter(r => r.student.risk === 'high' || r.student.risk === 'medium').length
+  };
+
+  // Aplicar filtro
+  const f = _briefingState.archiveFilter;
+  let filtered = records;
+  if (f === 'pending') filtered = records.filter(r => r.meta.delivery.status === 'pending');
+  else if (f === 'delivered') filtered = records.filter(r => r.meta.delivery.status === 'delivered' || r.meta.delivery.status === 'opened');
+  else if (f === 'opened') filtered = records.filter(r => r.meta.delivery.status === 'opened');
+  else if (f === 'risk') filtered = records.filter(r => r.student.risk === 'high' || r.student.risk === 'medium');
+
+  target.innerHTML = `
+    <div class="brf-archive-header">
+      <div>
+        <h3>Archivo de informes generados</h3>
+        <div style="font-size:11.5px;color:var(--text2);margin-top:3px;">${course.code} · ${test.name} · ${course.teacher}</div>
+      </div>
+      <div class="brf-archive-stats">
+        <div class="brf-archive-stat"><div class="v">${counts.all}</div><div class="l">Generados</div></div>
+        <div class="brf-archive-stat success"><div class="v">${counts.delivered + counts.opened}</div><div class="l">Entregados</div></div>
+        <div class="brf-archive-stat warning"><div class="v">${counts.pending}</div><div class="l">Pendientes</div></div>
+        <div class="brf-archive-stat"><div class="v">${counts.opened}</div><div class="l">Abiertos por el estudiante</div></div>
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:12px;">
+      <div class="brf-filters">
+        <button class="brf-filter-btn ${f==='all'?'active':''}" onclick="brfSetFilter('all')">Todos <span class="brf-filter-count">${counts.all}</span></button>
+        <button class="brf-filter-btn ${f==='pending'?'active':''}" onclick="brfSetFilter('pending')">Pendientes <span class="brf-filter-count">${counts.pending}</span></button>
+        <button class="brf-filter-btn ${f==='delivered'?'active':''}" onclick="brfSetFilter('delivered')">Entregados <span class="brf-filter-count">${counts.delivered + counts.opened}</span></button>
+        <button class="brf-filter-btn ${f==='risk'?'active':''}" onclick="brfSetFilter('risk')">En riesgo <span class="brf-filter-count">${counts.risk}</span></button>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="brf-action-btn" onclick="brfBulkSend()">📨 Enviar pendientes (${counts.pending})</button>
+        <button class="brf-action-btn primary" onclick="brfExportArchive()">⤓ Exportar archivo</button>
+      </div>
+    </div>
+
+    ${filtered.length === 0 ? `
+      <div class="brf-empty">
+        <div class="brf-empty-icon">📁</div>
+        <div class="brf-empty-title">No hay informes con este filtro</div>
+        <div>Cambia el filtro para ver otros registros.</div>
+      </div>
+    ` : `
+      <div class="brf-archive-list">
+        ${filtered.map(({student: s, meta}) => {
+          const initials = s.name.split(' ').slice(0,2).map(w => w[0]).join('');
+          const statusLabels = { pending: 'Pendiente', delivered: 'Entregado', opened: 'Visto por estudiante' };
+          return `
+            <div class="brf-archive-row ${s.featured ? 'featured' : ''}">
+              <div class="brf-archive-avatar">${initials}</div>
+              <div>
+                <div class="brf-archive-name">${s.name}</div>
+                <div class="brf-archive-folio">${meta.folio}</div>
+              </div>
+              <div class="brf-archive-meta">
+                <div><span class="lbl">Generado</span>${brfFormatDate(meta.generatedAt, true)}</div>
+                <div style="margin-top:3px;"><span class="lbl">Estado</span><span class="brf-status-pill ${meta.delivery.status}">${statusLabels[meta.delivery.status]}</span></div>
+              </div>
+              <div>
+                <div class="brf-archive-grade">${s.currentGrade.toFixed(1).replace('.', ',')}</div>
+                <div class="brf-archive-grade-l">${s.currentLogro}%</div>
+              </div>
+              <div style="font-size:11px;color:var(--text3);font-family:'JetBrains Mono',monospace;">${meta.calibration}</div>
+              <div class="brf-row-actions">
+                <button class="brf-icon-btn primary" title="Ver informe" onclick="brfNavigate('report', { studentId: '${s.id}' })">👁</button>
+                <button class="brf-icon-btn" title="Descargar PDF" onclick="brfExportReport('${s.id}')">⤓</button>
+                ${meta.delivery.status === 'pending'
+                  ? `<button class="brf-icon-btn" title="Enviar al estudiante" onclick="brfSendReport('${s.id}')">📨</button>`
+                  : `<button class="brf-icon-btn" title="Reenviar al estudiante" onclick="brfSendReport('${s.id}')">↻</button>`}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `}
+  `;
+}
+
+function brfSetFilter(f) {
+  _briefingState.archiveFilter = f;
+  brfRenderArtifact();
+}
+
+function brfSendReport(studentId) {
+  const course = brfFindCourse(_briefingState.courseId);
+  const test = brfFindTest(course, _briefingState.testId);
+  const student = brfFindStudent(course, studentId);
+  const meta = brfReportMeta(student, test, course);
+  brfSaveDelivery(meta.reportKey, 'delivered');
+  showToast(`✓ Informe enviado a ${student.name.split(' ')[0]} (demo)`, 'success');
+  brfRenderArtifact();
+}
+
+function brfExportReport(studentId) {
+  showToast('Generando PDF del informe...', 'info');
+  setTimeout(() => showToast('✓ PDF descargado (demo)', 'success'), 1200);
+}
+
+function brfBulkSend() {
+  const course = brfFindCourse(_briefingState.courseId);
+  const test = brfFindTest(course, _briefingState.testId);
+  let sent = 0;
+  course.students.forEach(s => {
+    const meta = brfReportMeta(s, test, course);
+    if (meta.delivery.status === 'pending') {
+      brfSaveDelivery(meta.reportKey, 'delivered');
+      sent++;
+    }
+  });
+  showToast(`✓ ${sent} informes enviados (demo)`, 'success');
+  brfRenderArtifact();
+}
+
+function brfExportArchive() {
+  showToast('Exportando archivo completo (ZIP con PDFs + metadata CSV)... (demo)', 'info');
+  setTimeout(() => showToast('✓ Archivo exportado', 'success'), 1500);
+}
+
 function brfRenderReport(el) {
   const course = brfFindCourse(_briefingState.courseId);
   const test = brfFindTest(course, _briefingState.testId);
   const student = brfFindStudent(course, _briefingState.studentId);
   if (!course || !test || !student) return brfBackToCourses();
 
-  // Caso especial: Tomás Rojas tiene contenido completo del informe doctoral
+  const meta = brfReportMeta(student, test, course);
   const isFeatured = student.id === 'rojas-tomas';
+  const statusLabels = { pending: 'Pendiente de envío', delivered: 'Entregado al estudiante', opened: 'Visto por el estudiante' };
+  const noteHtml = meta.teacherNote
+    ? `<div class="brf-teacher-note-content">${meta.teacherNote.note}</div>
+       <div class="brf-teacher-note-footer">
+         <span>Guardado el ${brfFormatDate(meta.teacherNote.savedAt, true)}</span>
+         <button class="brf-teacher-note-save" onclick="brfEditNote('${meta.reportKey}')">Editar</button>
+       </div>`
+    : `<div class="brf-teacher-note-content" contenteditable="true" id="note-${meta.reportKey}" data-placeholder="Escribe aquí una nota privada del docente (no se envía al estudiante)..."></div>
+       <div class="brf-teacher-note-footer">
+         <span>Solo visible para el docente · no aparece en el PDF del estudiante</span>
+         <button class="brf-teacher-note-save" onclick="brfSaveNote('${meta.reportKey}')">Guardar nota</button>
+       </div>`;
 
   el.innerHTML = `
+    <!-- Toolbar superior con metadata y acciones del docente -->
+    <div class="brf-report-toolbar">
+      <div class="brf-toolbar-meta">
+        <div class="top">${meta.folio}</div>
+        <div class="bot"><strong>${statusLabels[meta.delivery.status]}</strong>${meta.delivery.deliveredAt ? ' · ' + brfFormatDate(meta.delivery.deliveredAt, true) : ''}</div>
+      </div>
+      <div class="brf-toolbar-actions">
+        <button class="brf-action-btn" onclick="brfNavigate('students')">← Volver al archivo</button>
+        ${meta.delivery.status === 'pending'
+          ? `<button class="brf-action-btn primary" onclick="brfSendReport('${student.id}'); brfRender();">📨 Enviar al estudiante</button>`
+          : `<button class="brf-action-btn" onclick="brfSendReport('${student.id}'); brfRender();">↻ Reenviar</button>`}
+        <button class="brf-action-btn" onclick="brfExportReport('${student.id}')">⤓ PDF</button>
+      </div>
+    </div>
+
     <div class="brf-report">
       <div class="brf-report-head">
         <div class="brf-report-eyebrow">Informe individual de aprendizaje</div>
@@ -3067,11 +3746,19 @@ function brfRenderReport(el) {
           <div><span class="l">Estudiante</span><span class="v">${student.name}</span></div>
           ${student.rut ? `<div><span class="l">RUT</span><span class="v">${student.rut}</span></div>` : ''}
           <div><span class="l">Programa</span><span class="v">${course.program} · ${course.year}</span></div>
-          <div><span class="l">Folio</span><span class="v">EVL · 2026 · ${course.code.split('-')[0]} · 0287</span></div>
+          <div><span class="l">Folio</span><span class="v">${meta.folio}</span></div>
         </div>
       </div>
 
       <div class="brf-report-body">
+        <!-- Nota privada del docente -->
+        <div class="brf-teacher-note">
+          <div class="brf-teacher-note-label">
+            <span>✎</span> NOTA PRIVADA DEL DOCENTE
+          </div>
+          ${noteHtml}
+        </div>
+
         <!-- Métricas -->
         <div class="brf-report-metrics">
           <div class="brf-metric">
@@ -3115,33 +3802,563 @@ function brfRenderReport(el) {
         </div>
       </div>
 
+      <!-- Metadata institucional al pie -->
+      <div class="brf-report-metadata">
+        <div><span class="l">Generado</span><span class="v">${brfFormatDate(meta.generatedAt, true)}</span></div>
+        <div><span class="l">Calibración</span><span class="v">${meta.calibration}</span></div>
+        <div><span class="l">Modelo IA</span><span class="v">${meta.aiModel}</span></div>
+        <div><span class="l">Hash · v${meta.version}</span><span class="v">${meta.hash}</span></div>
+      </div>
+
       <div class="brf-report-actions">
-        <button class="brf-action-btn primary" onclick="brfExportCurrent()">📄 Descargar PDF</button>
-        <button class="brf-action-btn" onclick="brfShareReport()">↗ Compartir con el estudiante</button>
-        <button class="brf-action-btn" onclick="brfNavigate('students')">← Volver a la lista</button>
+        <button class="brf-action-btn primary" onclick="brfExportReport('${student.id}')">📄 Descargar PDF</button>
+        ${meta.delivery.status === 'pending'
+          ? `<button class="brf-action-btn" onclick="brfSendReport('${student.id}'); brfRender();">📨 Enviar al estudiante</button>`
+          : `<button class="brf-action-btn" onclick="brfSendReport('${student.id}'); brfRender();">↻ Reenviar al estudiante</button>`}
+        <button class="brf-action-btn" onclick="brfNavigate('students')">← Volver al archivo</button>
       </div>
     </div>
   `;
+
+  // Renderizar gráficos D3 del informe completo (solo Tomás)
+  if (isFeatured) {
+    function renderGraphs() {
+      try { brfRenderDistribution('doc-distribution-' + test.id); } catch(e) { console.error('distribution:', e); }
+      try { brfRenderBloomRadar('doc-radar-' + test.id); } catch(e) { console.error('radar:', e); }
+    }
+    if (typeof d3 !== 'undefined') {
+      setTimeout(renderGraphs, 50);
+    } else {
+      // Esperar a que D3 cargue desde CDN, con red de seguridad
+      window.addEventListener('d3-ready', renderGraphs, { once: true });
+      let tries = 0;
+      const iv = setInterval(function(){
+        tries++;
+        if (typeof d3 !== 'undefined') {
+          renderGraphs();
+          clearInterval(iv);
+        } else if (tries > 30) { // 6 segundos
+          clearInterval(iv);
+          console.warn('Evalys: D3 no disponible, gráficos del informe no renderizados.');
+        }
+      }, 200);
+    }
+  }
+}
+
+// ── Gráfico de distribución del curso (figura 1) ──
+function brfRenderDistribution(svgId) {
+  if (typeof d3 === 'undefined') return;
+  const svg = d3.select('#' + svgId);
+  if (svg.empty()) return;
+
+  const data = [
+    {band: '0–9%', count: 0},  {band: '10–19%', count: 0}, {band: '20–29%', count: 0},
+    {band: '30–39%', count: 2}, {band: '40–49%', count: 6}, {band: '50–59%', count: 9},
+    {band: '60–69%', count: 14}, {band: '70–79%', count: 12}, {band: '80–89%', count: 7},
+    {band: '90–100%', count: 2}
+  ];
+  const w = 760, h = 220, m = { t: 30, r: 30, b: 40, l: 40 };
+  const iw = w - m.l - m.r, ih = h - m.t - m.b;
+
+  svg.html('');
+  const g = svg.append('g').attr('transform', `translate(${m.l},${m.t})`);
+
+  const x = d3.scaleBand().domain(data.map(d => d.band)).range([0, iw]).padding(0.22);
+  const y = d3.scaleLinear().domain([0, 16]).range([ih, 0]);
+
+  // Promedio del curso (línea discontinua) — banda 50-59% destacada para Tomás (56%)
+  const tomasBandIdx = 5; // 50-59%
+
+  // Eje X
+  g.append('g').attr('transform', `translate(0,${ih})`)
+    .call(d3.axisBottom(x).tickSize(0).tickPadding(8))
+    .call(s => s.selectAll('text').style('font-family', 'JetBrains Mono, monospace').style('font-size', '10px').style('fill', '#64748b'))
+    .call(s => s.select('.domain').remove());
+
+  // Barras
+  g.selectAll('.bar').data(data).enter().append('rect')
+    .attr('x', d => x(d.band))
+    .attr('y', d => y(d.count))
+    .attr('width', x.bandwidth())
+    .attr('height', d => ih - y(d.count))
+    .attr('fill', (d, i) => i === tomasBandIdx ? '#0F8B8D' : '#cbd5e1')
+    .attr('rx', 3);
+
+  // Etiquetas de valor encima
+  g.selectAll('.label').data(data).enter().append('text')
+    .attr('x', d => x(d.band) + x.bandwidth() / 2)
+    .attr('y', d => y(d.count) - 6)
+    .attr('text-anchor', 'middle')
+    .style('font-family', 'JetBrains Mono, monospace')
+    .style('font-size', '11px')
+    .style('fill', '#1e293b')
+    .style('font-weight', '600')
+    .text(d => d.count > 0 ? d.count : '');
+
+  // Línea promedio curso (5,1 ≈ 58% logro)
+  const avgX = x('50–59%') + x.bandwidth();
+  g.append('line')
+    .attr('x1', avgX).attr('x2', avgX)
+    .attr('y1', 0).attr('y2', ih)
+    .attr('stroke', '#0a2540')
+    .attr('stroke-width', 1)
+    .attr('stroke-dasharray', '4,3');
+
+  g.append('text')
+    .attr('x', avgX + 6).attr('y', 12)
+    .style('font-family', 'JetBrains Mono, monospace')
+    .style('font-size', '9.5px')
+    .style('fill', '#0a2540')
+    .style('font-weight', '700')
+    .text('PROMEDIO CURSO 5,1');
+
+  // Marcador "Tomás · 56%"
+  const tomasX = x('50–59%') + x.bandwidth() * 0.6;
+  g.append('text')
+    .attr('x', tomasX).attr('y', y(9) - 24)
+    .attr('text-anchor', 'middle')
+    .style('font-family', 'JetBrains Mono, monospace')
+    .style('font-size', '10px')
+    .style('fill', '#0F8B8D')
+    .style('font-weight', '700')
+    .text('TOMÁS · 56%');
+}
+
+// ── Radar de Bloom (figura 2) ──
+function brfRenderBloomRadar(svgId) {
+  if (typeof d3 === 'undefined') return;
+  const svg = d3.select('#' + svgId);
+  if (svg.empty()) return;
+
+  const dimensions = [
+    { name: 'Recordar',    student: 86, course: 78 },
+    { name: 'Comprender',  student: 67, course: 62 },
+    { name: 'Aplicar',     student: 29, course: 51 },
+    { name: 'Analizar',    student: 25, course: 44 },
+    { name: 'Evaluar',     student: 100, course: 38 }
+  ];
+
+  const w = 700, h = 380, cx = w/2, cy = h/2 + 10;
+  const r = 130;
+
+  svg.html('');
+  const g = svg.append('g').attr('transform', `translate(${cx},${cy})`);
+
+  // Anillos
+  [25, 50, 75, 100].forEach(p => {
+    g.append('circle').attr('r', r * p/100)
+      .attr('fill', 'none').attr('stroke', '#cbd5e1').attr('stroke-width', 0.8);
+    g.append('text').attr('x', 3).attr('y', -r*p/100 + 3)
+      .style('font-family', 'JetBrains Mono, monospace').style('font-size', '9px').style('fill', '#94a3b8')
+      .text(p + '%');
+  });
+
+  const angle = (Math.PI * 2) / dimensions.length;
+
+  // Ejes + etiquetas
+  dimensions.forEach((d, i) => {
+    const a = i * angle - Math.PI / 2;
+    g.append('line')
+      .attr('x1', 0).attr('y1', 0)
+      .attr('x2', Math.cos(a) * r).attr('y2', Math.sin(a) * r)
+      .attr('stroke', '#cbd5e1').attr('stroke-width', 0.6);
+    const lx = Math.cos(a) * (r + 22), ly = Math.sin(a) * (r + 22);
+    g.append('text').attr('x', lx).attr('y', ly)
+      .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
+      .style('font-family', 'IBM Plex Sans, sans-serif').style('font-size', '12px').style('font-weight', '600').style('fill', '#1e293b')
+      .text(d.name);
+  });
+
+  // Polígono del curso
+  const coursePts = dimensions.map((d, i) => {
+    const a = i * angle - Math.PI / 2;
+    const rr = r * d.course / 100;
+    return [Math.cos(a) * rr, Math.sin(a) * rr];
+  });
+  g.append('path')
+    .attr('d', 'M ' + coursePts.map(p => p.join(',')).join(' L ') + ' Z')
+    .attr('fill', '#94a3b8').attr('fill-opacity', 0.18)
+    .attr('stroke', '#64748b').attr('stroke-width', 1).attr('stroke-dasharray', '3,3');
+
+  // Polígono del estudiante
+  const studentPts = dimensions.map((d, i) => {
+    const a = i * angle - Math.PI / 2;
+    const rr = r * d.student / 100;
+    return [Math.cos(a) * rr, Math.sin(a) * rr];
+  });
+  g.append('path')
+    .attr('d', 'M ' + studentPts.map(p => p.join(',')).join(' L ') + ' Z')
+    .attr('fill', '#0F8B8D').attr('fill-opacity', 0.18)
+    .attr('stroke', '#0F8B8D').attr('stroke-width', 2);
+
+  // Vértices
+  dimensions.forEach((d, i) => {
+    const a = i * angle - Math.PI / 2;
+    const rr = r * d.student / 100;
+    g.append('circle')
+      .attr('cx', Math.cos(a) * rr).attr('cy', Math.sin(a) * rr)
+      .attr('r', 4).attr('fill', '#0F8B8D').attr('stroke', 'white').attr('stroke-width', 1.5);
+  });
+
+  // Leyenda
+  const lg = svg.append('g').attr('transform', `translate(${w - 180}, ${h - 32})`);
+  lg.append('rect').attr('width', 14).attr('height', 8).attr('fill', '#0F8B8D').attr('fill-opacity', 0.4).attr('stroke', '#0F8B8D');
+  lg.append('text').attr('x', 22).attr('y', 8)
+    .style('font-family', 'IBM Plex Sans, sans-serif').style('font-size', '11px').style('fill', '#1e293b')
+    .text('Tomás Rojas');
+  lg.append('rect').attr('x', 86).attr('width', 14).attr('height', 8).attr('fill', '#94a3b8').attr('fill-opacity', 0.4).attr('stroke', '#64748b').attr('stroke-dasharray', '2,2');
+  lg.append('text').attr('x', 108).attr('y', 8)
+    .style('font-family', 'IBM Plex Sans, sans-serif').style('font-size', '11px').style('fill', '#64748b')
+    .text('Curso (n=52)');
+}
+
+function brfSaveNote(reportKey) {
+  const el = document.getElementById(`note-${reportKey}`);
+  if (!el) return;
+  const note = el.innerText.trim();
+  if (!note) { showToast('Escribe algo antes de guardar', 'info'); return; }
+  brfSaveTeacherNote(reportKey, note);
+  showToast('✓ Nota guardada', 'success');
+  brfRender();
+}
+
+function brfEditNote(reportKey) {
+  delete _teacherNotes[reportKey];
+  try { localStorage.setItem('evalys_teacher_notes', JSON.stringify(_teacherNotes)); } catch(e) {}
+  brfRender();
 }
 
 function brfReportRojasContent(course, test) {
   return `
-    <div class="brf-report-section">
-      <h3>Síntesis ejecutiva del desempeño</h3>
-      <p>El presente informe analiza el desempeño de <strong>Tomás Andrés Rojas Valenzuela</strong> en el ${test.name} de ${course.name}, aplicado el ${test.date} con un instrumento de ${test.questions} preguntas de selección múltiple sobre los contenidos de las unidades 1 a 4 del programa.</p>
-      <p>El estudiante obtuvo una calificación final de <strong>4,3</strong> en escala chilena, equivalente a <strong>14 respuestas correctas de 25 (56% de logro)</strong>, ubicándose en el percentil 38 del curso. Su desempeño revela un dominio sólido de los conceptos fundamentales de la teoría del delito, pero muestra dos brechas conceptuales específicas en culpabilidad y en error de prohibición que conviene atender antes de la evaluación integradora.</p>
+    <!-- §I.b · Distribución del curso (gráfico) -->
+    <div class="doc-section" style="border-bottom: 0; padding-top: 0;">
+      <div class="doc-figure">
+        <div class="doc-figure-frame">
+          <svg id="doc-distribution-${test.id}" viewBox="0 0 760 220"></svg>
+        </div>
+        <div class="doc-figure-caption">
+          <strong>Figura 1.</strong> Distribución de calificaciones del curso (n = 52) por banda de logro porcentual. La banda en la que se encuentra el estudiante aparece destacada. La línea discontinua indica el promedio del grupo (5,1).
+          <span class="source">Fuente: Certamen N°1 de Derecho Penal I, aplicación del 14 de mayo de 2026, cátedra Cárdenas.</span>
+        </div>
+      </div>
     </div>
 
-    <div class="brf-report-section">
-      <h3>Análisis cualitativo de las brechas</h3>
-      <p>Las siete preguntas en las que demuestras dominio de conceptos (Recordar 86%) confirman que has estudiado y que has internalizado la nomenclatura técnica de la cátedra. Las preguntas donde fallaste, en cambio, comparten una característica revelada por tu patrón de respuestas: <strong>en todas elegiste alternativas que son técnicamente correctas como definición pero que no son la respuesta pertinente al caso planteado</strong>.</p>
-      <p>Es decir, no equivocaste el concepto; equivocaste su <em>aplicación</em>. Esto es, dogmáticamente hablando, un problema de subsunción, no de teoría. Tu desempeño sugiere que el aprendizaje de la unidad 3 se quedó en el nivel del <em>listado</em> sin haber transitado al nivel del <em>criterio</em>.</p>
+    <!-- §II · Dimensiones cognitivas -->
+    <div class="doc-section">
+      <div class="doc-section-num">II · Dimensiones cognitivas</div>
+      <h3 class="doc-section-title">Análisis por tipo de tarea intelectual</h3>
+      <p class="doc-section-deck">Cada pregunta del instrumento exige un proceso cognitivo distinto. La taxonomía de Bloom revisada por Anderson y Krathwohl (2001) distingue seis niveles. A continuación, tu desempeño desagregado según el nivel exigido por cada ítem.</p>
+
+      <div class="doc-figure">
+        <div class="doc-figure-frame">
+          <svg id="doc-radar-${test.id}" viewBox="0 0 700 380"></svg>
+        </div>
+        <div class="doc-figure-caption">
+          <strong>Figura 2.</strong> Perfil radial de desempeño del estudiante en cada nivel de la taxonomía cognitiva, contrastado con el desempeño promedio del curso (n = 52). Los valores corresponden al porcentaje de logro en cada dimensión.
+        </div>
+      </div>
+
+      <table class="doc-table">
+        <thead>
+          <tr><th>Dimensión cognitiva</th><th>Habilidad que demanda</th><th class="num">Ítems</th><th class="num">Logro</th><th class="num">Curso</th><th class="num">Δ</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Recordar</td><td>Identificar conceptos y categorías de la dogmática<span class="ex">tipicidad, autoría, formas de culpabilidad</span></td><td class="num">7</td><td class="num">86%</td><td class="num">78%</td><td class="num pos">+8</td></tr>
+          <tr><td>Comprender</td><td>Explicar relaciones entre conceptos<span class="ex">elementos del tipo, distinción dolo/culpa</span></td><td class="num">6</td><td class="num">67%</td><td class="num">62%</td><td class="num pos">+5</td></tr>
+          <tr><td>Aplicar</td><td>Subsumir un hecho bajo la categoría dogmática correcta<span class="ex">resolución de casos: ¿es tipo objetivo? ¿hay dolo?</span></td><td class="num">7</td><td class="num">29%</td><td class="num">51%</td><td class="num neg">−22</td></tr>
+          <tr><td>Analizar</td><td>Distinguir entre figuras dogmáticas semejantes<span class="ex">justificación vs. exculpantes, error de tipo vs. prohibición</span></td><td class="num">4</td><td class="num">25%</td><td class="num">44%</td><td class="num neg">−19</td></tr>
+          <tr><td>Evaluar</td><td>Juzgar la pertinencia jurídica de una solución</td><td class="num">1</td><td class="num">100%</td><td class="num">38%</td><td class="num pos">+62</td></tr>
+        </tbody>
+        <tfoot>
+          <tr><td colspan="6">El instrumento no contiene ítems del nivel "crear"; este nivel se evalúa típicamente en pruebas de desarrollo.</td></tr>
+        </tfoot>
+      </table>
+
+      <div class="doc-prose" style="margin-top: 18px;">
+        <p>El patrón es nítido y clínicamente interpretable: tu desempeño desciende abruptamente a medida que las tareas exigen <strong>operar</strong> con el conocimiento dogmático, no solo recordarlo o explicarlo. Reconoces los conceptos (86%), los puedes definir (67%), pero al momento de aplicarlos a un supuesto de hecho (29%) o de distinguirlos entre sí (25%) el rendimiento cae por debajo del promedio del curso. Esta es la marca, muy frecuente en el tercer año, del <strong>conocimiento declarativo no transferido aún al razonamiento jurídico</strong>. No es un problema de estudio: es un momento esperable de la curva de aprendizaje del Derecho Penal, que se cruza precisamente con este certamen.</p>
+      </div>
     </div>
 
-    <div class="brf-report-section">
-      <h3>Plan de consolidación · 3 semanas</h3>
-      <p>Propuesta de trabajo personalizada de seis sesiones (~8 horas) para las tres semanas previas al examen final. El plan integra las brechas identificadas con tu fortaleza demostrada en tipicidad subjetiva como punto de apoyo. Cada sesión tiene un objetivo de aprendizaje verificable y bibliografía específica.</p>
-      <p><strong>Sesiones priorizadas:</strong> reconstrucción del esqueleto de la teoría del delito (S1), causas de justificación con resolución guiada (S2), separación deliberada de causas de exculpación (S3), error de tipo vs error de prohibición con tabla comparativa (S4), revisión integradora con casos espejo (S5), simulacro de evaluación (S6).</p>
+    <!-- §III · Detalle ítem por ítem -->
+    <div class="doc-section">
+      <div class="doc-section-num">III · Detalle ítem por ítem</div>
+      <h3 class="doc-section-title">Mapa completo de tus respuestas</h3>
+      <p class="doc-section-deck">Cada celda representa una pregunta del certamen. Las correctas aparecen en verde; las incorrectas, en rojo, con la indicación de tu respuesta y la respuesta correcta.</p>
+
+      <div class="doc-questions-legend">
+        <span><span class="dot correct"></span> Respuesta correcta (14)</span>
+        <span><span class="dot incorrect"></span> Respuesta incorrecta (11)</span>
+        <span><span class="dot empty"></span> Sin respuesta (0)</span>
+      </div>
+
+      <div class="doc-questions-grid">
+        ${[
+          {n:1,c:true},{n:2,c:true},{n:3,c:true},{n:4,c:true},{n:5,c:true},
+          {n:6,c:false,r:'A',ok:'C'},{n:7,c:true},{n:8,c:true},
+          {n:9,c:false,r:'B',ok:'D'},{n:10,c:true},
+          {n:11,c:false,r:'B',ok:'A'},{n:12,c:false,r:'A',ok:'C'},
+          {n:13,c:true},{n:14,c:false,r:'A',ok:'B'},{n:15,c:true},
+          {n:16,c:true},{n:17,c:true},{n:18,c:false,r:'C',ok:'D'},
+          {n:19,c:false,r:'B',ok:'D'},{n:20,c:true},
+          {n:21,c:false,r:'A',ok:'C'},{n:22,c:true},
+          {n:23,c:false,r:'B',ok:'A'},{n:24,c:true},
+          {n:25,c:false,r:'D',ok:'C'}
+        ].map(q => `
+          <div class="doc-q-cell ${q.c?'correct':'incorrect'}" title="${q.c?'Correcta':'Incorrecta · respondiste '+q.r+', correcta '+q.ok}">
+            <span class="num">${String(q.n).padStart(2,'0')}</span>
+            ${!q.c?`<span class="ans">${q.r}→${q.ok}</span>`:''}
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
+    <!-- §IV · Diagnóstico cualitativo -->
+    <div class="doc-section">
+      <div class="doc-section-num">IV · Diagnóstico cualitativo</div>
+      <h3 class="doc-section-title">Lectura pedagógica de tu desempeño</h3>
+      <p class="doc-section-deck">Lo que el análisis cuantitativo apenas insinúa, esta sección lo desarrolla. Cada brecha identificada se acompaña de su naturaleza conceptual, el patrón de error que la revela y la conexión con tu trayectoria como estudiante de Derecho Penal.</p>
+
+      <div class="doc-prose">
+        <p>Tomás, antes de entrar a las brechas específicas, una lectura general que me parece importante compartirte: tu desempeño no muestra un problema de comprensión del Derecho Penal, sino un momento muy concreto del aprendizaje que la dogmática alemana clásica conoce bien. Permíteme explicártelo.</p>
+
+        <p class="dropcap">Cuando un estudiante de Derecho se enfrenta por primera vez a la teoría del delito sistemáticamente expuesta —tipicidad, antijuridicidad, culpabilidad— ocurre algo cognitivamente muy específico: incorpora una arquitectura conceptual sofisticada antes de haber tenido la oportunidad de habitarla resolviendo casos. El resultado, predecible, es que el estudiante reconoce los pisos del edificio pero todavía no se mueve con soltura entre ellos. Sabe que existen, sabe sus nombres, pero al momento de subir del piso 1 (tipicidad) al piso 2 (antijuridicidad) titubea, porque la operación dogmática que conecta ambos pisos —la subsunción— no se aprende leyendo sino practicando.</p>
+
+        <p>Tu certamen es, leído con atención, un retrato muy fiel de ese momento. Las siete preguntas en las que demuestras dominio de conceptos (Recordar 86%) confirman que has estudiado y que has internalizado la nomenclatura técnica de la cátedra. Las preguntas donde fallaste, en cambio, comparten una característica revelada por tu patrón de respuestas: <strong>en todas elegiste alternativas que son técnicamente correctas como definición pero que no son la respuesta pertinente al caso planteado</strong>. Es decir, no equivocaste el concepto; equivocaste su <em>aplicación</em>. Esto es, dogmáticamente hablando, un problema de subsunción, no de teoría.</p>
+
+        <p>Esta distinción es importante porque cambia completamente la estrategia de estudio. Si tu problema fuera de teoría, deberías releer Roxin, Mir Puig o el manual de la cátedra. Pero tu problema no es ese. Tu problema es que necesitas resolver más casos, y resolverlos siguiendo el método que la cátedra propone. A continuación, identifico las dos brechas específicas donde esta dinámica se manifiesta con más claridad.</p>
+      </div>
+
+      <!-- Brecha 1 -->
+      <div class="doc-gap-card priority-high" style="margin-top: 30px;">
+        <div class="doc-gap-header">
+          <div class="doc-gap-number">01</div>
+          <div style="flex:1;">
+            <div class="doc-gap-eyebrow">Brecha conceptual · prioridad alta</div>
+            <div class="doc-gap-title">Distinción operativa entre causas de justificación y causas de exculpación</div>
+          </div>
+        </div>
+        <div class="doc-gap-meta">
+          <div class="doc-gap-meta-item"><div class="label">Resultado de aprendizaje</div><div class="val">RA-2 · Estructura analítica del delito</div></div>
+          <div class="doc-gap-meta-item"><div class="label">Unidad del programa</div><div class="val">Unidad 3 · Antijuridicidad</div></div>
+          <div class="doc-gap-meta-item"><div class="label">Preguntas afectadas</div><div class="val">4 de 4 (P 09, P 12, P 14, P 18)</div></div>
+        </div>
+
+        <div class="doc-gap-section">
+          <h5>Qué muestran tus respuestas</h5>
+          <p>En las cuatro preguntas que evaluaban la diferencia entre causas de justificación (legítima defensa, estado de necesidad justificante, ejercicio legítimo de un derecho) y causas de exculpación (estado de necesidad exculpante, miedo insuperable, no exigibilidad de otra conducta), tu patrón fue consistente: identificaste que algo eximía de pena, pero ubicaste la eximente en el nivel dogmático equivocado. En las preguntas 9 y 14 elegiste "estado de necesidad" cuando la respuesta correcta era "estado de necesidad justificante"; en la 12 elegiste "miedo insuperable" cuando debías distinguir si actuaba como causa de exculpación o como atenuante.</p>
+        </div>
+
+        <div class="doc-gap-section">
+          <h5>Por qué importa esta distinción</h5>
+          <p>No es una sutileza terminológica. Una causa de <strong>justificación</strong> opera en el nivel de la antijuridicidad: la conducta es típica, pero el ordenamiento autoriza su realización (el médico que opera no comete lesiones; quien se defiende legítimamente no comete homicidio antijurídico). Una causa de <strong>exculpación</strong>, en cambio, opera en el nivel de la culpabilidad: la conducta sigue siendo antijurídica —el ordenamiento la sigue prohibiendo— pero no se reprocha al autor porque no se le podía exigir actuar de otro modo.</p>
+          <p>Las consecuencias prácticas son muy distintas. Si la conducta está justificada, el tercero no puede defenderse legítimamente de ella (no hay agresión ilegítima); si solo está exculpada, sí puede defenderse. Si hay justificación, no hay responsabilidad civil; si solo hay exculpación, puede haberla. Por eso la dogmática separa los planos con cuidado: son consecuencias materialmente distintas, no etiquetas intercambiables.</p>
+        </div>
+
+        <div class="doc-gap-section">
+          <h5>Ilustración pedagógica</h5>
+          <div class="doc-gap-example">
+            Considera el clásico caso del náufrago en la tabla de Carnéades (dos náufragos, una sola tabla que soporta a uno). Si interpretas el caso como estado de necesidad <strong>justificante</strong>, estás afirmando que el ordenamiento autoriza al sobreviviente a empujar al otro. Si lo interpretas como <strong>exculpante</strong>, estás afirmando que la conducta sigue prohibida pero no se le puede reprochar. La doctrina mayoritaria en Chile, siguiendo a Cury y Etcheberry, lo trata como exculpante, no como justificante, porque los bienes en conflicto son equivalentes (vida contra vida).
+          </div>
+        </div>
+
+        <div class="doc-gap-section">
+          <h5>Hipótesis sobre el origen de la confusión</h5>
+          <p>Tu desempeño sugiere que el aprendizaje de la unidad 3 se quedó en el nivel del <em>listado</em> ("estas son las causas de justificación, estas son las de exculpación") sin haber transitado al nivel del <em>criterio</em> ("cómo distingo, en un caso concreto, dónde ubicar la eximente"). Esta es una transición que requiere casos, no solo lectura.</p>
+        </div>
+
+        <div class="doc-gap-tags">
+          <span class="doc-gap-tag">P 09 — Estado de necesidad</span>
+          <span class="doc-gap-tag">P 12 — Miedo insuperable</span>
+          <span class="doc-gap-tag">P 14 — Legítima defensa putativa</span>
+          <span class="doc-gap-tag">P 18 — Causas mixtas</span>
+        </div>
+      </div>
+
+      <!-- Brecha 2 -->
+      <div class="doc-gap-card priority-high">
+        <div class="doc-gap-header">
+          <div class="doc-gap-number">02</div>
+          <div style="flex:1;">
+            <div class="doc-gap-eyebrow">Brecha conceptual · prioridad alta</div>
+            <div class="doc-gap-title">El error de prohibición y su tratamiento dogmático bajo la teoría estricta de la culpabilidad</div>
+          </div>
+        </div>
+        <div class="doc-gap-meta">
+          <div class="doc-gap-meta-item"><div class="label">Resultado de aprendizaje</div><div class="val">RA-3 · Excluyentes de responsabilidad penal</div></div>
+          <div class="doc-gap-meta-item"><div class="label">Unidad del programa</div><div class="val">Unidad 4 · Culpabilidad</div></div>
+          <div class="doc-gap-meta-item"><div class="label">Preguntas afectadas</div><div class="val">3 de 3 (P 19, P 21, P 23)</div></div>
+        </div>
+
+        <div class="doc-gap-section">
+          <h5>Qué muestran tus respuestas</h5>
+          <p>Las tres preguntas sobre error de prohibición fueron incorrectas, y en las tres elegiste tratarlo como <strong>error de tipo</strong>. La pregunta 19 planteaba a un sujeto que dispara contra otro creyendo erróneamente que el ordenamiento lo permite por una situación específica (error sobre la antijuridicidad de la conducta). La 21 distinguía entre error directo e indirecto. La 23 evaluaba las consecuencias dogmáticas del error invencible versus vencible.</p>
+        </div>
+
+        <div class="doc-gap-section">
+          <h5>La diferencia fundamental que conviene fijar</h5>
+          <p>El <strong>error de tipo</strong> opera en la tipicidad: el sujeto no sabe que está realizando un elemento del tipo (cree que dispara a un animal, no a una persona). Su efecto es <em>excluir el dolo</em>. El <strong>error de prohibición</strong>, en cambio, opera en la culpabilidad: el sujeto sabe perfectamente qué está haciendo, pero ignora que está prohibido o cree erróneamente que su conducta está justificada (cree, equivocadamente, que está actuando en legítima defensa). Su efecto, según la teoría estricta de la culpabilidad que sigue Cury, es <em>excluir o atenuar la culpabilidad, no el dolo</em>.</p>
+          <p>Confundir ambos errores cambia radicalmente la solución del caso. Mientras el error de tipo vencible conduce a culpa (delito imprudente si existe la figura culposa), el error de prohibición vencible conduce a una atenuación de pena dentro del delito doloso.</p>
+        </div>
+
+        <div class="doc-gap-section">
+          <h5>Ilustración pedagógica</h5>
+          <div class="doc-gap-example">
+            Imagina dos casos paralelos. <strong>Caso A:</strong> Pedro dispara contra un bulto entre los arbustos creyendo que es un jabalí; resulta ser una persona. <strong>Caso B:</strong> Pedro dispara contra una persona que avanza hacia él creyendo erróneamente que lo va a atacar; la persona en realidad solo se acercaba a saludar. En el caso A hay error de tipo (sobre el objeto material del delito). En el caso B hay error de prohibición indirecto (legítima defensa putativa). La distinción no es un detalle: define si Pedro responde por homicidio culposo (caso A vencible) o por homicidio doloso con atenuante (caso B vencible).
+          </div>
+        </div>
+
+        <div class="doc-gap-section">
+          <h5>Por qué esta brecha es estratégicamente crítica</h5>
+          <p>Estas tres preguntas representan, conjuntamente, contenido nuclear de la evaluación integradora de fin de semestre. La cátedra Cárdenas ha consignado en el programa que la unidad 4 es <em>conditio sine qua non</em> para Derecho Penal II, donde se trabaja la teoría de la pena y la determinación judicial. No cerrar esta brecha implica arrastrar una debilidad estructural a la siguiente asignatura. <strong>Es la brecha en la que conviene invertir más tiempo de aquí al examen final.</strong></p>
+        </div>
+
+        <div class="doc-gap-tags">
+          <span class="doc-gap-tag">P 19 — Error sobre la antijuridicidad</span>
+          <span class="doc-gap-tag">P 21 — Error directo vs. indirecto</span>
+          <span class="doc-gap-tag">P 23 — Error vencible / invencible</span>
+        </div>
+      </div>
+
+      <!-- Atención puntual -->
+      <div class="doc-gap-card priority-medium">
+        <div class="doc-gap-header">
+          <div class="doc-gap-number">03</div>
+          <div style="flex:1;">
+            <div class="doc-gap-eyebrow">Atención puntual · prioridad media</div>
+            <div class="doc-gap-title">Imputación objetiva: criterios de Roxin y su aplicación al riesgo permitido</div>
+          </div>
+        </div>
+        <div class="doc-gap-meta">
+          <div class="doc-gap-meta-item"><div class="label">Resultado de aprendizaje</div><div class="val">RA-2 · Estructura del delito</div></div>
+          <div class="doc-gap-meta-item"><div class="label">Unidad del programa</div><div class="val">Unidad 2 · Tipicidad objetiva</div></div>
+          <div class="doc-gap-meta-item"><div class="label">Preguntas afectadas</div><div class="val">2 de 3 (P 06, P 11)</div></div>
+        </div>
+        <div class="doc-gap-section">
+          <h5>Qué muestran tus respuestas</h5>
+          <p>En las preguntas que evaluaban imputación objetiva, dos de tres fueron incorrectas. En ambas, identificaste correctamente la relación de causalidad fáctica pero <strong>no aplicaste los filtros normativos de Roxin</strong> (creación de riesgo no permitido, realización del riesgo en el resultado, alcance del tipo). Es decir, te quedaste en la teoría de la equivalencia y no avanzaste hacia la imputación normativa que el programa exige.</p>
+        </div>
+        <div class="doc-gap-section">
+          <h5>Lectura pedagógica</h5>
+          <p>Esta no es propiamente una brecha conceptual sino una <em>brecha de integración del método</em>. Conoces los conceptos (la pregunta 6 sobre el concepto de riesgo permitido la respondiste correctamente como definición); lo que aún no haces es incorporar la imputación objetiva como paso obligado del análisis de tipicidad. Es una omisión metodológica de fácil corrección con práctica guiada.</p>
+        </div>
+        <div class="doc-gap-tags">
+          <span class="doc-gap-tag">P 06 — Imputación normativa</span>
+          <span class="doc-gap-tag">P 11 — Riesgo permitido en deportes</span>
+        </div>
+      </div>
+
+      <!-- Fortaleza -->
+      <div class="doc-gap-card strength">
+        <div class="doc-gap-header">
+          <div class="doc-gap-number">★</div>
+          <div style="flex:1;">
+            <div class="doc-gap-eyebrow">Fortaleza · base para sostener el avance</div>
+            <div class="doc-gap-title">Dominio sólido de tipicidad subjetiva y formas de autoría</div>
+          </div>
+        </div>
+        <div class="doc-gap-section">
+          <h5>Lo que esta fortaleza significa</h5>
+          <p>En las 11 preguntas sobre dolo (directo, eventual, de consecuencias necesarias), formas de culpa (con representación, sin representación) y autoría (directa, mediata, coautoría, participación), respondiste correctamente <strong>9 de 11</strong>. Esto es sustancialmente superior al promedio del curso en estos contenidos (61%) y muestra que tienes internalizada la distinción entre la dimensión objetiva y subjetiva del tipo, que es exactamente el andamiaje que necesitas para resolver las brechas anteriores.</p>
+          <p>En términos pedagógicos: <strong>esta fortaleza es tu mejor apoyo para cerrar las brechas en culpabilidad y antijuridicidad</strong>. La estructura mental que ya tienes para discriminar dolo y culpa es la misma que necesitas para discriminar justificación y exculpación. El plan de estudio que sigue está diseñado, deliberadamente, para apalancarse en lo que ya dominas.</p>
+        </div>
+        <div class="doc-strength-stats">
+          <div>9 de 11 correctas en dolo y culpa</div>
+          <div>+25 puntos sobre el curso en autoría</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- §V · Plan de consolidación -->
+    <div class="doc-section">
+      <div class="doc-section-num">V · Plan de consolidación</div>
+      <h3 class="doc-section-title">Cómo cerrar las brechas antes de la integradora</h3>
+      <p class="doc-section-deck">Propuesta de trabajo personalizada para las tres semanas previas al examen final. El plan integra las brechas identificadas con tu fortaleza en tipicidad subjetiva como punto de apoyo. Cada sesión tiene un objetivo de aprendizaje verificable.</p>
+
+      <div class="doc-plan">
+        <div class="doc-plan-header">
+          <h3>Itinerario de estudio sugerido · 3 semanas</h3>
+          <span class="total">6 sesiones · ~ 8 horas totales</span>
+        </div>
+
+        <div class="doc-plan-item">
+          <div class="doc-plan-time"><span class="duration">90′</span>Sesión 1</div>
+          <div class="doc-plan-content">
+            <h4>Reconstruir el esqueleto de la teoría del delito en una página</h4>
+            <p>Antes de profundizar en cada brecha, dedica esta sesión a redibujar tu propio diagrama de la teoría del delito: los tres niveles (tipicidad / antijuridicidad / culpabilidad), qué se discute en cada uno, qué efecto tiene cada exclusión. Hazlo a mano, sin consultar el manual.</p>
+            <p class="method">Técnica: mapa conceptual de construcción libre · auto-explicación</p>
+          </div>
+          <div class="doc-plan-material"><span class="lbl">Material</span>Hoja en blanco. Al final, contrastar con el esquema de la clase 3 (sesión introductoria al sistema).</div>
+        </div>
+
+        <div class="doc-plan-item">
+          <div class="doc-plan-time"><span class="duration">90′</span>Sesión 2</div>
+          <div class="doc-plan-content">
+            <h4>Causas de justificación: resolución guiada de cinco casos clásicos</h4>
+            <p>Resuelve, en este orden estricto, los cinco casos del cuadernillo de ejercicios de la unidad 3: legítima defensa propia, legítima defensa de terceros, estado de necesidad justificante, ejercicio legítimo de un derecho, consentimiento. Para cada uno, escribe la solución siguiendo el esquema dogmático. Solo después contrasta con la pauta.</p>
+            <p class="method">Técnica: resolución activa con esquema explícito · contraste diferido con pauta</p>
+          </div>
+          <div class="doc-plan-material"><span class="lbl">Material</span>Cuadernillo de ejercicios unidad 3 (entregado en clase 8). Cury, <em>Derecho Penal · Parte General</em>, capítulo XIV.</div>
+        </div>
+
+        <div class="doc-plan-item">
+          <div class="doc-plan-time"><span class="duration">75′</span>Sesión 3</div>
+          <div class="doc-plan-content">
+            <h4>Causas de exculpación: separación deliberada respecto de la justificación</h4>
+            <p>Trabaja la misma estructura de la sesión 2, ahora con cinco casos de exculpación. La consigna especial: en cada caso, antes de resolver, anota explícitamente <em>por qué no es causa de justificación</em>. Esa pregunta es el núcleo de la brecha identificada en tu certamen.</p>
+            <p class="method">Técnica: contraste diferencial · escritura previa del descarte</p>
+          </div>
+          <div class="doc-plan-material"><span class="lbl">Material</span>Casos seleccionados de clases 9-10. Politoff, Matus y Ramírez, <em>Lecciones</em>, sección sobre culpabilidad.</div>
+        </div>
+
+        <div class="doc-plan-item">
+          <div class="doc-plan-time"><span class="duration">90′</span>Sesión 4</div>
+          <div class="doc-plan-content">
+            <h4>Error de tipo y error de prohibición: tabla comparativa y casos espejo</h4>
+            <p>Construye una tabla comparativa de doble entrada (filas: error de tipo / error de prohibición; columnas: nivel dogmático, efecto, vencible/invencible, ejemplos). Luego resuelve cuatro pares de "casos espejo" (cada par es casi idéntico salvo en un detalle que cambia la calificación).</p>
+            <p class="method">Técnica: contraste sistematizado · casos discriminantes</p>
+          </div>
+          <div class="doc-plan-material"><span class="lbl">Material</span>Cuadernillo unidad 4, serie A "casos espejo". Apunte de clase 12 sobre teoría estricta de la culpabilidad.</div>
+        </div>
+
+        <div class="doc-plan-item">
+          <div class="doc-plan-time"><span class="duration">60′</span>Sesión 5</div>
+          <div class="doc-plan-content">
+            <h4>Imputación objetiva: introducir el método como paso obligado</h4>
+            <p>Resuelve tres casos de tipicidad objetiva siguiendo deliberadamente la secuencia completa: causalidad natural → creación de riesgo no permitido → realización del riesgo en el resultado → alcance del tipo. La consigna es procedimental: no saltarse pasos, aunque el caso parezca obvio.</p>
+            <p class="method">Técnica: protocolización del método · práctica deliberada</p>
+          </div>
+          <div class="doc-plan-material"><span class="lbl">Material</span>Casos del paper de la cátedra "Imputación objetiva aplicada" (Cárdenas, 2023). Roxin, § 11.</div>
+        </div>
+
+        <div class="doc-plan-item">
+          <div class="doc-plan-time"><span class="duration">90′</span>Sesión 6</div>
+          <div class="doc-plan-content">
+            <h4>Simulacro integrador: certamen N°1 resuelto en condiciones de prueba</h4>
+            <p>Resuelve nuevamente este mismo certamen, sin consultar, en 90 minutos. Compara tus respuestas con las correctas. El objetivo no es la nota: es identificar si los errores anteriores se repiten o si las sesiones 1-5 produjeron el cambio buscado.</p>
+            <p class="method">Técnica: evaluación formativa · auto-diagnóstico</p>
+          </div>
+          <div class="doc-plan-material"><span class="lbl">Material</span>Este mismo certamen. Pauta de corrección disponible al final del documento.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- §VI · Cierre, mensaje, nota metodológica -->
+    <div class="doc-section">
+      <div class="doc-section-num">VI · Cierre y nota metodológica</div>
+      <h3 class="doc-section-title">Reflexión final</h3>
+
+      <div class="doc-message">
+        <div class="doc-message-eyebrow">Mensaje para Tomás</div>
+        <p>Lo que muestra tu certamen no es ausencia de comprensión: es el momento exacto en el que la dogmática penal pide al estudiante que <strong>deje de leer y empiece a operar</strong>. Es un momento estrecho, pero atravesarlo bien marca la diferencia entre el penalista que recita y el penalista que razona. Tienes la base, tienes la inteligencia, y el plan que te proponemos está pensado para cerrar exactamente las brechas que se vieron. <strong>El próximo certamen va a verse muy distinto si trabajas estas seis sesiones con atención.</strong></p>
+      </div>
+
+      <div class="doc-methodology">
+        <h5>Nota metodológica</h5>
+        <p>Este informe ha sido generado por Evalys mediante el análisis del instrumento de evaluación aplicado, la calibración pedagógica establecida por la cátedra (parámetros, corpus de clase y ejemplos de corrección previos), y los resultados de aprendizaje del programa oficial de la asignatura. El sistema no juzga el currículo ni emite veredictos sobre la enseñanza: opera al servicio del aprendizaje del estudiante y como insumo de mejora continua del docente.</p>
+        <p>La generación del análisis cualitativo utilizó el modelo de inteligencia artificial Claude (Anthropic) bajo la calibración específica de la cátedra Cárdenas, con corpus pedagógico que incluye las presentaciones de las clases 1 a 14 del semestre, la guía de ejercicios resueltos de la unidad 3, y los criterios de corrección utilizados en certámenes anteriores. Las recomendaciones bibliográficas corresponden estrictamente a la bibliografía declarada en el programa oficial.</p>
+        <p>El presente documento es evidencia parcial del logro del estudiante en un instrumento específico. No reemplaza el diálogo con el equipo docente, no constituye recurso administrativo respecto de la calificación, ni puede usarse aisladamente como evaluación del programa académico. Su finalidad es exclusivamente pedagógica.</p>
+      </div>
     </div>
   `;
 }
