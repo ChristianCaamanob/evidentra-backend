@@ -1460,7 +1460,7 @@
             <p style="font-size:16px;color:rgba(255,255,255,0.58);line-height:1.75;margin-bottom:36px;max-width:430px;">
               Transforma tus evaluaciones en evidencia accionable. Evalys conecta el escaneo óptico, el análisis con IA y los briefings diferenciados en un solo flujo docente.
             </p>
-            <div style="display:flex;align-items:center;gap:14px;margin-bottom:48px;">
+            <div style="display:flex;align-items:center;gap:14px;margin-bottom:36px;">
               <button onclick="showLoginForm()" style="background:#0F8B8D;color:white;border:none;border-radius:13px;padding:14px 32px;font-size:15px;font-weight:700;cursor:pointer;transition:all .2s;" onmouseover="this.style.background='#1AA39E';this.style.transform='translateY(-2px)'" onmouseout="this.style.background='#0F8B8D';this.style.transform='translateY(0)'">
                 Iniciar sesión como docente →
               </button>
@@ -1468,6 +1468,47 @@
                 Conocer más
               </button>
             </div>
+
+            <!-- ─── ACCESO RÁPIDO · DEMO MULTI-PERFIL ─── -->
+            <div style="margin-bottom:42px;max-width:600px;">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+                <div style="height:1px;flex:1;background:rgba(255,255,255,0.12);"></div>
+                <span style="font-size:10.5px;color:rgba(255,255,255,0.45);text-transform:uppercase;letter-spacing:.22em;font-weight:700;">Acceso rápido · demo</span>
+                <div style="height:1px;flex:1;background:rgba(255,255,255,0.12);"></div>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+                <button onclick="loginAsDemo('caamano')" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:13px;padding:14px 14px;cursor:pointer;text-align:left;font-family:inherit;transition:all .15s;" onmouseover="this.style.background='rgba(15,139,141,0.12)';this.style.borderColor='rgba(15,139,141,0.4)';this.style.transform='translateY(-2px)'" onmouseout="this.style.background='rgba(255,255,255,0.04)';this.style.borderColor='rgba(255,255,255,0.1)';this.style.transform='translateY(0)'">
+                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                    <div style="width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#08101D,#0F8B8D);color:white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;letter-spacing:-0.3px;">CC</div>
+                    <div style="font-size:9.5px;font-weight:700;color:#0F8B8D;text-transform:uppercase;letter-spacing:.12em;">Administrador</div>
+                  </div>
+                  <div style="font-size:13px;font-weight:600;color:white;line-height:1.25;margin-bottom:3px;">Christian Caamaño</div>
+                  <div style="font-size:11px;color:rgba(255,255,255,0.5);line-height:1.4;">Depto. Ciencias · Vista institucional</div>
+                </button>
+
+                <button onclick="loginAsDemo('cardenas')" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:13px;padding:14px 14px;cursor:pointer;text-align:left;font-family:inherit;transition:all .15s;" onmouseover="this.style.background='rgba(15,139,141,0.12)';this.style.borderColor='rgba(15,139,141,0.4)';this.style.transform='translateY(-2px)'" onmouseout="this.style.background='rgba(255,255,255,0.04)';this.style.borderColor='rgba(255,255,255,0.1)';this.style.transform='translateY(0)'">
+                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                    <div style="width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#7c5cff,#0F8B8D);color:white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;letter-spacing:-0.3px;">MC</div>
+                    <div style="font-size:9.5px;font-weight:700;color:#0F8B8D;text-transform:uppercase;letter-spacing:.12em;">Docente</div>
+                  </div>
+                  <div style="font-size:13px;font-weight:600;color:white;line-height:1.25;margin-bottom:3px;">M. Soledad Cárdenas</div>
+                  <div style="font-size:11px;color:rgba(255,255,255,0.5);line-height:1.4;">Derecho Penal I · Cátedra activa</div>
+                </button>
+
+                <button onclick="loginAsDemo('saavedra')" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:13px;padding:14px 14px;cursor:pointer;text-align:left;font-family:inherit;transition:all .15s;" onmouseover="this.style.background='rgba(15,139,141,0.12)';this.style.borderColor='rgba(15,139,141,0.4)';this.style.transform='translateY(-2px)'" onmouseout="this.style.background='rgba(255,255,255,0.04)';this.style.borderColor='rgba(255,255,255,0.1)';this.style.transform='translateY(0)'">
+                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                    <div style="width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#B28A49,#0F8B8D);color:white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;letter-spacing:-0.3px;">RS</div>
+                    <div style="font-size:9.5px;font-weight:700;color:#0F8B8D;text-transform:uppercase;letter-spacing:.12em;">Docente</div>
+                  </div>
+                  <div style="font-size:13px;font-weight:600;color:white;line-height:1.25;margin-bottom:3px;">Rodrigo Saavedra</div>
+                  <div style="font-size:11px;color:rgba(255,255,255,0.5);line-height:1.4;">Morfología Humana · 46 estudiantes</div>
+                </button>
+              </div>
+              <div style="margin-top:10px;font-size:10.5px;color:rgba(255,255,255,0.32);line-height:1.5;">
+                Cada perfil aísla su universo de datos conforme a Ley 21.719. La identidad individual de estudiantes en riesgo es accesible solo al Director con registro auditable.
+              </div>
+            </div>
+
             <div style="display:flex;align-items:center;gap:0;">
               <div style="padding-right:32px;"><div style="font-size:26px;font-weight:800;color:#0F8B8D;">100%</div><div style="font-size:11px;color:rgba(255,255,255,0.38);text-transform:uppercase;letter-spacing:.14em;margin-top:2px;">Automatizado</div></div>
               <div style="width:1px;height:36px;background:rgba(255,255,255,0.1);margin-right:32px;"></div>
@@ -1576,9 +1617,9 @@
     </div>
     <div class="screen" id="screen-dashboard">
       <div style="padding:36px 48px 28px;">
-        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.25em;color:var(--teal);margin-bottom:10px;font-weight:600;">Plataforma de Inteligencia Académica</div>
-        <h1 style="font-size:36px;font-weight:800;color:var(--dark);margin-bottom:6px;letter-spacing:-.8px;">¡Bienvenido, Christian!</h1>
-        <p style="color:var(--text2);font-size:15px;">Universidad San Sebastián · <span style="color:var(--teal);font-weight:700;">Morfología Humana</span></p>
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.25em;color:var(--teal);margin-bottom:10px;font-weight:600;" id="dash-eyebrow">Plataforma de Inteligencia Académica</div>
+        <h1 style="font-size:36px;font-weight:800;color:var(--dark);margin-bottom:6px;letter-spacing:-.8px;" id="dash-title">¡Bienvenido!</h1>
+        <p style="color:var(--text2);font-size:15px;" id="dash-subtitle">Universidad San Sebastián</p>
       </div>
 
       <div style="padding:0 48px 32px;display:grid;grid-template-columns:repeat(3,1fr);gap:16px;">
@@ -3103,6 +3144,7 @@ const BRIEFING_UNIVERSE = {
     {
       id: 'DER-301',
       code: 'DER-301',
+      teacherId: 'cardenas',
       name: 'Derecho Penal I · Parte General',
       program: 'Licenciatura en Ciencias Jurídicas',
       year: '3° año',
@@ -3172,6 +3214,7 @@ const BRIEFING_UNIVERSE = {
     {
       id: 'DMOR-0030',
       code: 'DMOR-0030',
+      teacherId: 'saavedra',
       name: 'Morfología Humana',
       program: 'Carrera de Medicina',
       year: '1° año',
@@ -3459,13 +3502,32 @@ function brfRenderMain() {
 }
 
 function brfRenderCoursesList(el) {
+  const visibleCourses = (typeof getMyCourses === 'function') ? getMyCourses() : BRIEFING_UNIVERSE.courses;
+  const showOwnerTag = (typeof canSeeAllCourses === 'function') && canSeeAllCourses();
+
+  // Estado vacío: docente sin cursos
+  if (visibleCourses.length === 0) {
+    el.innerHTML = `
+      <div class="brf-empty">
+        <div class="brf-empty-icon">📚</div>
+        <div class="brf-empty-title">Aún no tienes cursos asignados</div>
+        <div>Crea tu primer curso desde "Mis cursos" para comenzar a generar briefings.</div>
+      </div>
+    `;
+    return;
+  }
+
   el.innerHTML = `
+    ${showOwnerTag ? `<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.14em;font-weight:700;margin-bottom:12px;padding:0 4px;">Vista institucional · ${visibleCourses.length} cursos visibles</div>` : ''}
     <div class="brf-grid">
-      ${BRIEFING_UNIVERSE.courses.map(c => `
+      ${visibleCourses.map(c => {
+        const owner = (typeof USERS !== 'undefined' && c.teacherId && USERS[c.teacherId]) ? USERS[c.teacherId] : null;
+        return `
         <button class="brf-card ${c.featured ? 'featured' : ''}" onclick="brfNavigate('tests', { courseId: '${c.id}' })">
           <div class="brf-card-eyebrow">
             <strong>${c.code}</strong>
             ${c.featured ? '<span style="color:var(--gold);">★ Destacado</span>' : ''}
+            ${showOwnerTag && owner ? `<span style="color:var(--text3);margin-left:auto;font-weight:500;">${owner.initials}</span>` : ''}
           </div>
           <div class="brf-card-title">${c.name}</div>
           <div class="brf-card-meta">${c.program} · ${c.year}<br>${c.teacher}</div>
@@ -3476,7 +3538,7 @@ function brfRenderCoursesList(el) {
           </div>
           <div class="brf-card-arrow">→</div>
         </button>
-      `).join('')}
+      `;}).join('')}
     </div>
   `;
 }
@@ -5250,6 +5312,97 @@ async function saveAnswerKey() {
 let _authToken = localStorage.getItem('evalys_token') || null;
 let _currentTeacher = JSON.parse(localStorage.getItem('evalys_teacher') || 'null');
 
+// ══════════════════════════════════════════════════════
+//  SISTEMA DE IDENTIDAD Y ROLES · Sprint 1.A
+//  Modelo: admin / director / teacher
+// ══════════════════════════════════════════════════════
+
+const USERS = {
+  'caamano': {
+    id: 'caamano',
+    email: 'christian.caamano@uss.cl',
+    name: 'Christian Caamaño Binimelis',
+    initials: 'CC',
+    role: 'admin',
+    roleLabel: 'Administrador',
+    title: 'Director · Departamento de Ciencias',
+    institution: 'Universidad San Sebastián',
+    department: 'Departamento de Ciencias',
+    avatarGradient: 'linear-gradient(135deg, #08101D, #0F8B8D)'
+  },
+  'cardenas': {
+    id: 'cardenas',
+    email: 'msoledad.cardenas@uss.cl',
+    name: 'M. Soledad Cárdenas',
+    initials: 'MC',
+    role: 'teacher',
+    roleLabel: 'Docente',
+    title: 'Profesora · Cátedra de Derecho Penal',
+    institution: 'Universidad San Sebastián',
+    department: 'Facultad de Derecho',
+    avatarGradient: 'linear-gradient(135deg, #7c5cff, #0F8B8D)'
+  },
+  'saavedra': {
+    id: 'saavedra',
+    email: 'r.saavedra@uss.cl',
+    name: 'Rodrigo Saavedra',
+    initials: 'RS',
+    role: 'teacher',
+    roleLabel: 'Docente',
+    title: 'Profesor · Morfología Humana',
+    institution: 'Universidad San Sebastián',
+    department: 'Departamento de Ciencias',
+    avatarGradient: 'linear-gradient(135deg, #B28A49, #0F8B8D)'
+  }
+};
+
+// Helpers de identidad y permisos
+function getCurrentUser() {
+  return _currentTeacher || null;
+}
+function getCurrentRole() {
+  return _currentTeacher ? _currentTeacher.role : null;
+}
+function isAdmin() { return getCurrentRole() === 'admin'; }
+function isDirector() { return getCurrentRole() === 'director'; }
+function isTeacher() { return getCurrentRole() === 'teacher'; }
+function canSeeAllCourses() { return isAdmin() || isDirector(); }
+function canEditStructurally() { return isAdmin(); }
+function canEditCourse(course) {
+  if (!course) return false;
+  if (isAdmin()) return true;
+  return isTeacher() && course.teacherId === _currentTeacher.id;
+}
+
+// Devuelve los cursos visibles para el usuario logueado
+function getMyCourses() {
+  if (!BRIEFING_UNIVERSE || !BRIEFING_UNIVERSE.courses) return [];
+  if (canSeeAllCourses()) return BRIEFING_UNIVERSE.courses;
+  if (!_currentTeacher) return [];
+  return BRIEFING_UNIVERSE.courses.filter(c => c.teacherId === _currentTeacher.id);
+}
+
+// Login simulado a partir de un userId (acceso rápido demo, sin backend)
+function loginAsDemo(userId) {
+  const user = USERS[userId];
+  if (!user) return;
+  _currentTeacher = user;
+  _authToken = 'demo-token-' + userId;
+  try {
+    localStorage.setItem('evalys_token', _authToken);
+    localStorage.setItem('evalys_teacher', JSON.stringify(_currentTeacher));
+  } catch(e) {}
+  hideLoginForm();
+  updateDashboardGreeting();
+  updateRoleBadge();
+  // Reset estado del módulo briefings para que el nuevo perfil vea sus cursos
+  if (typeof _briefingState !== 'undefined') {
+    _briefingState = { level: 'courses', courseId: null, testId: null, studentId: null, artifact: 'archive', archiveFilter: 'all' };
+  }
+  navigate('dashboard');
+  showToast('Bienvenido, ' + user.name.split(' ')[0] + ' · ' + user.roleLabel, 'success');
+}
+
 function showLoginForm() {
   document.getElementById('login-modal').style.display = 'flex';
   switchAuthTab('login');
@@ -5355,6 +5508,7 @@ async function doLogin() {
 
     hideLoginForm();
     updateDashboardGreeting();
+    updateRoleBadge();
     navigate('dashboard');
     showToast(`Bienvenido, ${_currentTeacher.name}`, 'success');
 
@@ -5407,6 +5561,7 @@ async function doRegister() {
 
     hideLoginForm();
     updateDashboardGreeting();
+    updateRoleBadge();
     navigate('dashboard');
     showToast(`Cuenta creada. Bienvenido, ${_currentTeacher.name}`, 'success');
 
@@ -5419,11 +5574,66 @@ async function doRegister() {
 }
 
 function updateDashboardGreeting() {
-  if (_currentTeacher) {
-    const firstName = _currentTeacher.name.split(' ')[0];
-    const el = document.querySelector('#screen-dashboard h1');
-    if (el) el.innerHTML = `¡Bienvenido, ${firstName}!`;
+  const u = _currentTeacher;
+  if (!u) return;
+  const firstName = (u.name || '').split(' ')[0];
+  const eyebrow = document.getElementById('dash-eyebrow');
+  const title = document.getElementById('dash-title');
+  const subtitle = document.getElementById('dash-subtitle');
+
+  if (eyebrow) eyebrow.textContent = u.roleLabel ? u.roleLabel + ' · Evalys' : 'Plataforma de Inteligencia Académica';
+  if (title) title.textContent = '¡Bienvenido, ' + firstName + '!';
+
+  // Subtitle según rol
+  if (subtitle) {
+    if (u.role === 'admin') {
+      subtitle.innerHTML = (u.institution || 'Universidad San Sebastián') + ' · <span style="color:var(--teal);font-weight:700;">Vista institucional integrada</span>';
+    } else if (u.role === 'director') {
+      subtitle.innerHTML = (u.institution || 'Universidad San Sebastián') + ' · <span style="color:var(--teal);font-weight:700;">' + (u.department || 'Vista de Dirección') + '</span>';
+    } else {
+      // Docente: mostrar institución + nombre del primer curso suyo
+      const myCourses = getMyCourses();
+      const courseName = myCourses.length > 0 ? myCourses[0].name.split(' · ')[0] : (u.department || '');
+      subtitle.innerHTML = (u.institution || 'Universidad San Sebastián') + ' · <span style="color:var(--teal);font-weight:700;">' + courseName + '</span>';
+    }
   }
+}
+
+function updateRoleBadge() {
+  const u = _currentTeacher;
+  let badge = document.getElementById('sidebar-role-badge');
+  if (!u) {
+    if (badge) badge.remove();
+    return;
+  }
+  // Crear o actualizar el badge dentro del sidebar (después del brand)
+  if (!badge) {
+    const brand = document.querySelector('.sidebar-brand');
+    if (!brand) return;
+    badge = document.createElement('div');
+    badge.id = 'sidebar-role-badge';
+    badge.style.cssText = 'padding: 6px 16px 12px;';
+    brand.parentNode.insertBefore(badge, brand.nextSibling);
+  }
+  // Color según rol
+  const colors = {
+    admin:    { bg: 'rgba(220, 38, 38, 0.10)', fg: '#b91c1c', label: 'ADMINISTRADOR' },
+    director: { bg: 'rgba(178, 138, 73, 0.14)', fg: '#8b6a30', label: 'DIRECTOR' },
+    teacher:  { bg: 'rgba(15, 139, 141, 0.12)', fg: '#0F8B8D', label: 'DOCENTE' }
+  };
+  const c = colors[u.role] || colors.teacher;
+  badge.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:${c.bg};border-radius:8px;">
+      <div style="width:6px;height:6px;border-radius:50%;background:${c.fg};flex-shrink:0;"></div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:9.5px;font-weight:700;letter-spacing:.14em;color:${c.fg};text-transform:uppercase;line-height:1;">${c.label}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:3px;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${u.name.split(' ').slice(0,2).join(' ')}</div>
+      </div>
+      <button onclick="doLogout()" title="Cerrar sesión" style="background:none;border:0;cursor:pointer;color:var(--text3);padding:4px;border-radius:6px;display:flex;align-items:center;" onmouseover="this.style.color='#b91c1c'" onmouseout="this.style.color='var(--text3)'">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </button>
+    </div>
+  `;
 }
 
 function doLogout() {
@@ -5431,18 +5641,26 @@ function doLogout() {
   _currentTeacher = null;
   localStorage.removeItem('evalys_token');
   localStorage.removeItem('evalys_teacher');
+  // Limpiar badge
+  const badge = document.getElementById('sidebar-role-badge');
+  if (badge) badge.remove();
+  // Resetear estado del módulo de briefings
+  if (typeof _briefingState !== 'undefined') {
+    _briefingState = { level: 'courses', courseId: null, testId: null, studentId: null, artifact: 'archive', archiveFilter: 'all' };
+  }
   navigate('login');
+  showToast('Sesión cerrada', 'info');
 }
 
 // Auto-login si hay token guardado
-// DESACTIVADO temporalmente: la app siempre arranca en la portada de identificación.
-// Para reactivar (cuando el backend valide tokens vía endpoint /me), descomentar:
-// window.addEventListener('DOMContentLoaded', () => {
-//   if (_authToken && _currentTeacher) {
-//     updateDashboardGreeting();
-//     navigate('dashboard');
-//   }
-// });
+// DESACTIVADO: la app siempre arranca en la portada de identificación.
+// PERO sí restauramos el badge de rol y greeting si el usuario recarga después de login demo.
+window.addEventListener('DOMContentLoaded', () => {
+  if (_currentTeacher) {
+    try { updateDashboardGreeting(); } catch(e) {}
+    try { updateRoleBadge(); } catch(e) {}
+  }
+});
 
 // ══════════════════════════════════════════════════════
 //  MÓDULO DE CURSO — TABS Y MODALES
