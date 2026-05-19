@@ -1268,9 +1268,7 @@
                 <div class="card-title" style="font-size:18px;">Respuestas detectadas</div>
                 <div class="card-desc" style="color:#94a3b8;" id="scan-answers-summary"></div>
               </div>
-              <div class="card-content" id="scan-answers-grid" style="
-                display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;
-              "></div>
+              <div class="card-content" id="scan-answers-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;"></div>
             </div>
           </div>
 
@@ -1302,191 +1300,85 @@
             </div>
           </div>
         </div>
-                <button class="studio-item w-full"><div class="flex justify-between items-center gap-2"><div class="studio-item-title">Hoja corregida</div><div class="studio-item-dot"></div></div><div class="studio-item-meta">Exportable con anotaciones</div></button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+      </div><!-- /workspace -->
     </div><!-- /screen-scan -->
 
     <!-- ─────────────── RESULTADO ─────────────── -->
     <div class="screen" id="screen-result">
-      <div class="page-header">
-        <div class="page-eyebrow">Resultado inmediato</div>
-        <h1 class="page-title">Nota, puntaje, percentil y lectura comparativa</h1>
-        <p class="page-desc">El resultado no es solo una nota. Habilita briefings, historial, exportación y trazabilidad longitudinal.</p>
-        <div class="page-actions">
-          <button class="btn btn-outline" id="btn-result-feedback" onclick="navigate('feedback')" style="display:none;">Ver briefing</button>
-          <button class="btn btn-primary"  id="btn-result-export"  onclick="navigate('export')"   style="display:none;">Exportar resultado</button>
+      <!-- Estado bloqueado - al inicio para ser visible -->
+      <div id="result-blocked" style="display:none;background:#fef2f2;border:1.5px solid #fecaca;border-radius:16px;padding:32px;text-align:center;margin-bottom:16px;">
+        <div style="font-size:32px;margin-bottom:12px;">🔒</div>
+        <div style="font-size:16px;font-weight:700;color:#991b1b;margin-bottom:8px;">Resultado bloqueado</div>
+        <div id="result-blocked-msg" style="font-size:13px;color:#64748b;"></div>
+        <div style="display:flex;gap:12px;justify-content:center;margin-top:20px;">
+          <button onclick="navigate('scan')" style="padding:10px 20px;background:#0d1f35;color:white;border:none;border-radius:10px;cursor:pointer;font-size:13px;">Ir a Escaneo</button>
+          <button onclick="navigate('answerkey')" style="padding:10px 20px;border:1.5px solid #e2e8f0;border-radius:10px;background:none;cursor:pointer;font-size:13px;">Revisar Pauta</button>
         </div>
       </div>
 
-      <div class="workspace">
+      <!-- Resultado cargado -->
+      <div id="result-loaded" style="display:none;padding:0 40px 40px;">
 
-        <!-- ── Panel izquierdo — Contexto (siempre visible) ── -->
-        <div class="sticky-col">
-          <div class="card">
-            <div class="card-header"><div class="card-title">Contexto</div></div>
-            <div class="card-content space-y-3">
-              <div class="source-card">
-                <div class="source-card-title">Solemne 1 · Morfología</div>
-                <div class="source-card-meta">DMOR-0030 · Cohorte 2026</div>
-              </div>
-              <div class="source-card">
-                <div class="source-card-title">Evaluado</div>
-                <div class="source-card-meta">Catalina Arroyo · Sección A</div>
-              </div>
-              <div class="source-card">
-                <div class="source-card-title">Fecha</div>
-                <div class="source-card-meta">26 de abril, 2026</div>
-              </div>
-              <div class="source-card">
-                <div class="flex justify-between items-center gap-2">
-                  <div class="source-card-title">Origen</div>
-                  <span class="pill pill-warning" id="result-origin-pill"><span class="pill-dot"></span>Pendiente</span>
-                </div>
-                <div class="source-card-meta" id="result-origin-meta">Esperando carga...</div>
-              </div>
+        <!-- Nota grande -->
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:24px;margin-bottom:24px;align-items:start;">
+          <div style="background:white;border:1.5px solid var(--border);border-radius:20px;padding:32px 40px;text-align:center;min-width:180px;">
+            <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px;">Nota final</div>
+            <div id="result-grade" style="font-size:64px;font-weight:800;color:#0d1f35;line-height:1;">—</div>
+            <div id="result-pass-badge" style="margin-top:12px;font-size:13px;font-weight:700;padding:6px 16px;border-radius:20px;display:inline-block;">—</div>
+          </div>
+
+          <!-- Stats -->
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;">
+            <div style="background:white;border:1.5px solid var(--border);border-radius:16px;padding:20px;">
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Correctas</div>
+              <div id="result-correct" style="font-size:28px;font-weight:700;color:#059669;">—</div>
+            </div>
+            <div style="background:white;border:1.5px solid var(--border);border-radius:16px;padding:20px;">
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Incorrectas</div>
+              <div id="result-incorrect" style="font-size:28px;font-weight:700;color:#ef4444;">—</div>
+            </div>
+            <div style="background:white;border:1.5px solid var(--border);border-radius:16px;padding:20px;">
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Omitidas</div>
+              <div id="result-omitted" style="font-size:28px;font-weight:700;color:#64748b;">—</div>
+            </div>
+            <div style="background:white;border:1.5px solid var(--border);border-radius:16px;padding:20px;">
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Puntaje</div>
+              <div id="result-percentage" style="font-size:28px;font-weight:700;color:#0d1f35;">—%</div>
+            </div>
+            <div style="background:white;border:1.5px solid var(--border);border-radius:16px;padding:20px;">
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Exigencia</div>
+              <div id="result-threshold" style="font-size:28px;font-weight:700;color:#0d1f35;">—%</div>
+            </div>
+            <div style="background:white;border:1.5px solid var(--border);border-radius:16px;padding:20px;">
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Escala</div>
+              <div id="result-scale" style="font-size:14px;font-weight:600;color:#0d1f35;">—</div>
             </div>
           </div>
         </div>
 
-        <!-- ── Panel central — cambia según estado ── -->
-        <div class="space-y-6">
-
-          <!-- CARGANDO -->
-          <div id="result-loading" style="display:flex;align-items:center;justify-content:center;min-height:320px;">
-            <div style="text-align:center;">
-              <div style="width:48px;height:48px;border-radius:50%;border:3px solid var(--border);border-top-color:var(--teal);animation:spin 0.8s linear infinite;margin:0 auto 16px;"></div>
-              <div style="font-size:13px;color:var(--text2);">Consultando el backend...</div>
-            </div>
-          </div>
-
-          <!-- BLOQUEADO -->
-          <div id="result-blocked" style="display:none;">
-            <div style="
-              border-radius:var(--radius);border:1px solid rgba(178,138,73,0.3);
-              background:linear-gradient(135deg,rgba(178,138,73,0.06),rgba(178,138,73,0.02));
-              padding:40px 36px;
-            ">
-              <div style="display:flex;align-items:flex-start;gap:20px;">
-                <div style="
-                  width:52px;height:52px;border-radius:18px;flex-shrink:0;
-                  background:rgba(178,138,73,0.15);border:1px solid rgba(178,138,73,0.3);
-                  display:flex;align-items:center;justify-content:center;font-size:24px;
-                ">⚠</div>
-                <div>
-                  <div style="font-size:10px;text-transform:uppercase;letter-spacing:.22em;color:var(--text3);margin-bottom:8px;">Resultado bloqueado</div>
-                  <div id="result-block-title" style="font-size:22px;font-weight:600;letter-spacing:-0.02em;color:var(--dark);line-height:1.2;">El resultado no puede calcularse aún</div>
-                  <div id="result-block-desc" style="font-size:14px;color:var(--text2);margin-top:10px;line-height:1.7;max-width:520px;">El backend reportó una condición previa sin resolver.</div>
-                </div>
-              </div>
-              <div style="margin-top:28px;display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">
-                <div id="block-condition-scan" class="readiness-panel" style="border-color:rgba(201,106,91,0.3);">
-                  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                    <div>
-                      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.22em;color:var(--text3);">Condición 1</div>
-                      <div style="font-size:13px;font-weight:500;color:var(--dark);margin-top:4px;">Escaneo sin revisión pendiente</div>
-                    </div>
-                    <span class="pill pill-danger" id="block-scan-pill"><span class="pill-dot"></span>Bloqueado</span>
-                  </div>
-                  <div style="margin-top:12px;">
-                    <button class="btn btn-outline" style="height:36px;font-size:12px;" onclick="navigate('scan')">Ir a escaneo ↗</button>
-                  </div>
-                </div>
-                <div id="block-condition-key" class="readiness-panel" style="border-color:rgba(201,106,91,0.3);">
-                  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                    <div>
-                      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.22em;color:var(--text3);">Condición 2</div>
-                      <div style="font-size:13px;font-weight:500;color:var(--dark);margin-top:4px;">Pauta validada</div>
-                    </div>
-                    <span class="pill pill-danger" id="block-key-pill"><span class="pill-dot"></span>Bloqueado</span>
-                  </div>
-                  <div style="margin-top:12px;">
-                    <button class="btn btn-outline" style="height:36px;font-size:12px;" onclick="navigate('answerkey')">Ir a pauta ↗</button>
-                  </div>
-                </div>
-              </div>
-              <div style="margin-top:24px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
-                <button class="btn btn-primary" onclick="loadResult()" id="btn-retry-result">Reintentar carga</button>
-                <span style="font-size:12px;color:var(--text3);">Resuelve las condiciones y vuelve a intentar.</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- CARGADO -->
-          <div id="result-loaded" style="display:none;">
-            <div class="card">
-              <div class="card-header">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">
-                  <div>
-                    <div class="card-title" style="font-size:26px;">Métricas del resultado</div>
-                    <div class="card-desc" id="result-status-desc">Calculado desde el backend</div>
-                  </div>
-                  <span class="pill" id="result-pass-pill"><span class="pill-dot"></span></span>
-                </div>
-              </div>
-              <div class="card-content">
-                <div class="metric-row"><div class="metric-label">Puntaje bruto</div><div class="metric-value" id="result-raw-score">—</div></div>
-                <div class="metric-row"><div class="metric-label">Porcentaje de logro</div><div class="metric-value" id="result-percentage">—</div></div>
-                <div class="metric-row"><div class="metric-label">Nota final</div><div class="metric-value" id="result-grade" style="font-size:42px;letter-spacing:-0.03em;">—</div></div>
-                <div class="metric-row"><div class="metric-label">Estado de aprobación</div><div class="metric-value" id="result-pass-status">—</div></div>
-                <div class="metric-row"><div class="metric-label">Percentil del curso</div><div class="metric-value" id="result-percentile">—</div></div>
-              </div>
-            </div>
-            <div class="card card-dark">
-              <div class="card-header"><div class="card-title" style="font-size:22px;">Comparativa del curso</div><div class="card-desc" style="color:#94a3b8;">Morfología · Solemne 1 · 46 estudiantes</div></div>
-              <div class="card-content">
-                <div class="analytics-grid">
-                  <div class="stat-card">
-                    <div class="stat-label">Promedio curso</div><div class="stat-value">5,4</div>
-                    <div class="stat-bars"><div class="stat-bar" style="height:40%"></div><div class="stat-bar" style="height:55%"></div><div class="stat-bar" style="height:65%"></div><div class="stat-bar" style="height:70%"></div><div class="stat-bar" style="height:80%"></div></div>
-                    <div class="stat-helper">Tendencia positiva en últimas 3 evaluaciones</div>
-                  </div>
-                  <div class="stat-card">
-                    <div class="stat-label">Tasa de aprobación</div><div class="stat-value">78%</div>
-                    <div class="stat-bars"><div class="stat-bar" style="height:60%"></div><div class="stat-bar" style="height:70%"></div><div class="stat-bar" style="height:78%"></div><div class="stat-bar" style="height:75%"></div><div class="stat-bar" style="height:78%"></div></div>
-                    <div class="stat-helper">36 de 46 estudiantes aprobaron</div>
-                  </div>
-                  <div class="stat-card">
-                    <div class="stat-label">Tu nota vs. promedio</div>
-                    <div class="stat-value" id="result-vs-avg">—</div>
-                    <div class="stat-bars"><div class="stat-bar" style="height:85%;background:linear-gradient(to top,#7c5cff,#b7fffb)"></div><div class="stat-bar" style="height:80%;background:linear-gradient(to top,#7c5cff,#b7fffb)"></div><div class="stat-bar" style="height:90%;background:linear-gradient(to top,#7c5cff,#b7fffb)"></div><div class="stat-bar" style="height:75%;background:linear-gradient(to top,#7c5cff,#b7fffb)"></div><div class="stat-bar" style="height:85%;background:linear-gradient(to top,#7c5cff,#b7fffb)"></div></div>
-                    <div class="stat-helper" id="result-vs-avg-helper">vs. promedio del curso</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-        </div><!-- /panel central -->
-
-        <!-- ── Panel derecho — Studio (siempre visible) ── -->
-        <div class="sticky-col">
-          <div class="card card-dark studio-wrap">
-            <div class="studio-glow"></div>
-            <div class="studio-content">
-              <div class="card-header">
-                <div class="card-title">Studio</div>
-                <div class="card-desc" id="studio-result-desc" style="color:#94a3b8;">Pendiente de resultado</div>
-              </div>
-              <div class="card-content space-y-3" id="studio-result-items">
-                <button class="studio-item w-full" style="opacity:0.4;cursor:not-allowed;">
-                  <div class="flex justify-between items-center gap-2"><div class="studio-item-title">Briefing académico</div><div class="studio-item-dot"></div></div>
-                  <div class="studio-item-meta">Disponible tras resultado</div>
-                </button>
-                <button class="studio-item w-full" style="opacity:0.4;cursor:not-allowed;">
-                  <div class="flex justify-between items-center gap-2"><div class="studio-item-title">Exportación</div><div class="studio-item-dot"></div></div>
-                  <div class="studio-item-meta">Disponible tras resultado</div>
-                </button>
-              </div>
-            </div>
+        <!-- Estudiante -->
+        <div style="background:white;border:1.5px solid var(--border);border-radius:16px;padding:20px;margin-bottom:20px;">
+          <div style="font-size:13px;font-weight:700;color:#0d1f35;margin-bottom:12px;">Estudiante</div>
+          <div style="display:flex;gap:32px;flex-wrap:wrap;">
+            <div><div style="font-size:11px;color:#94a3b8;margin-bottom:2px;">RUT</div><div id="result-rut" style="font-size:14px;font-weight:600;color:#0F8B8D;">—</div></div>
+            <div><div style="font-size:11px;color:#94a3b8;margin-bottom:2px;">Nombre</div><div id="result-name" style="font-size:14px;font-weight:600;color:#0d1f35;">—</div></div>
+            <div><div style="font-size:11px;color:#94a3b8;margin-bottom:2px;">Versión</div><div id="result-version" style="font-size:14px;font-weight:600;color:#0d1f35;">—</div></div>
           </div>
         </div>
 
-      </div><!-- /workspace -->
+        <!-- Detalle preguntas incorrectas -->
+        <div style="background:white;border:1.5px solid var(--border);border-radius:16px;padding:20px;">
+          <div style="font-size:13px;font-weight:700;color:#0d1f35;margin-bottom:12px;">Preguntas incorrectas</div>
+          <div id="result-incorrect-detail" style="font-size:13px;color:#64748b;">—</div>
+        </div>
+
+      </div>
+
+      <!-- Loading -->
+      <div id="result-loading" style="text-align:center;padding:40px;color:#94a3b8;display:none;">
+        <div style="font-size:32px;margin-bottom:12px;">⏳</div>
+        <div>Cargando resultado...</div>
+      </div>
     </div>
 
     <!-- ─────────────── FEEDBACK ─────────────── -->
@@ -1949,7 +1841,11 @@ function navigate(screen) {
   if (screen === 'course') renderMvpFlow('mvp-flow-course', 'course');
   if (screen === 'assessment') renderMvpFlow('mvp-flow-assessment', 'assessment');
   if (screen === 'feedback') showFeedback('academic');
-  if (screen === 'result') loadResult();
+  if (screen === 'result') {
+    var sr = document.getElementById('screen-result');
+    if (sr) sr.scrollTop = 0;
+    loadResult();
+  }
   // Scroll al top de la pantalla activa
   const activeScreen = document.getElementById('screen-' + screen);
   if (activeScreen) activeScreen.scrollTop = 0;
@@ -2265,142 +2161,83 @@ function gradeColor(grade) {
 }
 
 function showResultLoading() {
-  document.getElementById('result-loading').style.display = 'flex';
+  document.getElementById('result-loading').style.display = 'block';
   document.getElementById('result-blocked').style.display = 'none';
   document.getElementById('result-loaded').style.display  = 'none';
 }
 
-function showResultBlocked(detail) {
-  document.getElementById('result-loading').style.display = 'none';
-  document.getElementById('result-loaded').style.display  = 'none';
-  document.getElementById('result-blocked').style.display = 'block';
-
-  // Parsear el mensaje del backend para saber cuál condición falló
-  const isScanBlock = detail && detail.toLowerCase().includes('revisión');
-  const isKeyBlock  = detail && detail.toLowerCase().includes('pauta');
-  const isBothOrUnknown = !isScanBlock && !isKeyBlock;
-
-  const titleEl = document.getElementById('result-block-title');
-  const descEl  = document.getElementById('result-block-desc');
-  const scanPill = document.getElementById('block-scan-pill');
-  const keyPill  = document.getElementById('block-key-pill');
-  const scanBox  = document.getElementById('block-condition-scan');
-  const keyBox   = document.getElementById('block-condition-key');
-
-  if (isScanBlock || isBothOrUnknown) {
-    titleEl.textContent = 'Escaneo con revisión pendiente';
-    descEl.textContent  = detail || 'El escaneo aún tiene ambigüedades sin resolver. Resuelve la revisión docente y vuelve a intentar.';
-    scanPill.className = 'pill pill-danger';
-    scanPill.innerHTML = '<span class="pill-dot"></span>Bloqueado';
-    scanBox.style.borderColor = 'rgba(201,106,91,0.3)';
-  }
-  if (isKeyBlock || isBothOrUnknown) {
-    if (!isScanBlock) {
-      titleEl.textContent = 'Pauta sin validar';
-      descEl.textContent  = detail || 'La pauta del instrumento aún no ha sido validada. Valida la pauta y vuelve a intentar.';
-    }
-    keyPill.className = 'pill pill-danger';
-    keyPill.innerHTML = '<span class="pill-dot"></span>Bloqueado';
-    keyBox.style.borderColor = 'rgba(201,106,91,0.3)';
-  }
-
-  // Marcar como OK las condiciones que sí están resueltas
-  if (!isScanBlock && state.scanResolved) {
-    scanPill.className = 'pill pill-success';
-    scanPill.innerHTML = '<span class="pill-dot"></span>OK';
-    scanBox.style.borderColor = 'rgba(15,139,141,0.2)';
-  }
-  if (!isKeyBlock && state.answerKeyValid) {
-    keyPill.className = 'pill pill-success';
-    keyPill.innerHTML = '<span class="pill-dot"></span>OK';
-    keyBox.style.borderColor = 'rgba(15,139,141,0.2)';
-  }
+function showResultBlocked(msg) {
+  var el = document.getElementById('result-blocked');
+  var msgEl = document.getElementById('result-blocked-msg');
+  var loaded = document.getElementById('result-loaded');
+  var loading = document.getElementById('result-loading');
+  if (el) { el.style.display = 'block'; }
+  if (msgEl) msgEl.textContent = msg || 'Resultado no disponible';
+  if (loaded) loaded.style.display = 'none';
+  if (loading) loading.style.display = 'none';
 }
 
 function showResultLoaded(data, fromBackend) {
   document.getElementById('result-loading').style.display = 'none';
   document.getElementById('result-blocked').style.display = 'none';
-  document.getElementById('result-loaded').style.display  = 'block';
-
-  // Activar studio del panel derecho
-  const studioDesc = document.getElementById('studio-result-desc');
-  const studioItems = document.getElementById('studio-result-items');
-  if (studioDesc) studioDesc.textContent = 'Artefactos habilitados por el resultado';
-  if (studioItems) studioItems.innerHTML = `
-    <button class="studio-item w-full active" onclick="navigate('feedback')">
-      <div class="flex justify-between items-center gap-2"><div class="studio-item-title">Briefing académico ↗</div><div class="studio-item-dot"></div></div>
-      <div class="studio-item-meta">Listo con resultado calculado</div>
-    </button>
-    <button class="studio-item w-full" onclick="navigate('history')">
-      <div class="flex justify-between items-center gap-2"><div class="studio-item-title">Historial ↗</div><div class="studio-item-dot"></div></div>
-      <div class="studio-item-meta">Registro longitudinal habilitado</div>
-    </button>
-    <button class="studio-item w-full" onclick="navigate('export')">
-      <div class="flex justify-between items-center gap-2"><div class="studio-item-title">Exportación ↗</div><div class="studio-item-dot"></div></div>
-      <div class="studio-item-meta">Paquete académico listo</div>
-    </button>`;
-
-  // Mostrar botones de acción del header
-  document.getElementById('btn-result-feedback').style.display = 'inline-flex';
-  document.getElementById('btn-result-export').style.display   = 'inline-flex';
+  document.getElementById('result-loaded').style.display = 'block';
 
   // Nota
-  const grade     = data.final_grade;
-  const gradeEl   = document.getElementById('result-grade');
-  gradeEl.textContent = grade.toFixed(1).replace('.', ',');
-  gradeEl.className   = `metric-value ${gradeColor(grade)}`;
-
-  // Puntaje
-  document.getElementById('result-raw-score').textContent = `${data.raw_score} pts`;
-
-  // Porcentaje
-  const pctEl = document.getElementById('result-percentage');
-  pctEl.textContent = `${data.percentage}%`;
-  pctEl.className   = `metric-value ${data.percentage >= 60 ? 'good' : 'bad'}`;
-
-  // Estado aprobación
-  const ps    = PASS_STATUS_LABELS[data.pass_status] || { text: data.pass_status, cls: 'warn' };
-  const psEl  = document.getElementById('result-pass-status');
-  psEl.textContent = ps.text;
-  psEl.className   = `metric-value ${ps.cls}`;
-
-  // Pill de estado en el header de la card
-  const passPill = document.getElementById('result-pass-pill');
-  passPill.className = `pill ${data.pass_status === 'approved' ? 'pill-success' : 'pill-danger'}`;
-  passPill.innerHTML = `<span class="pill-dot"></span>${ps.text}`;
-
-  // Percentil
-  document.getElementById('result-percentile').textContent = `P${data.percentile}`;
-
-  // vs. promedio
-  const diff    = (grade - 5.4).toFixed(1);
-  const vsEl    = document.getElementById('result-vs-avg');
-  const diffSign = diff >= 0 ? '+' : '';
-  vsEl.textContent = `${diffSign}${diff}`.replace('.', ',');
-  vsEl.className   = `metric-value ${diff >= 0 ? 'good' : 'bad'}`;
-  document.getElementById('result-vs-avg-helper').textContent =
-    diff >= 0 ? 'por encima del promedio del curso' : 'por debajo del promedio del curso';
-
-  // Origen del resultado
-  const originPill = document.getElementById('result-origin-pill');
-  const originMeta = document.getElementById('result-origin-meta');
-  if (fromBackend) {
-    originPill.className = 'pill pill-success';
-    originPill.innerHTML = '<span class="pill-dot"></span>Backend';
-    originMeta.textContent = `GET /results/${IDS.scan_id}`;
-  } else {
-    originPill.className = 'pill pill-warning';
-    originPill.innerHTML = '<span class="pill-dot"></span>Demo';
-    originMeta.textContent = 'Datos de demostración (backend offline)';
+  var grade = data.final_grade || 0;
+  var gradeEl = document.getElementById('result-grade');
+  if (gradeEl) {
+    gradeEl.textContent = data.grade_label || grade.toFixed(1);
+    gradeEl.style.color = grade >= 4.0 ? '#059669' : '#ef4444';
   }
 
-  // Descripción del header
-  document.getElementById('result-status-desc').textContent =
-    fromBackend ? `Calculado en tiempo real desde el backend · scan_id ${IDS.scan_id}` : 'Datos de demostración';
+  // Badge aprobado/reprobado
+  var badge = document.getElementById('result-pass-badge');
+  if (badge) {
+    var passed = data.pass_status === 'approved';
+    badge.textContent = passed ? '✓ Aprobado' : '✗ Reprobado';
+    badge.style.background = passed ? '#d1fae5' : '#fee2e2';
+    badge.style.color = passed ? '#065f46' : '#991b1b';
+  }
+
+  // Stats
+  var setEl = function(id, val) { var el = document.getElementById(id); if (el) el.textContent = val; };
+  setEl('result-correct', data.n_correct || 0);
+  setEl('result-incorrect', data.n_incorrect || 0);
+  setEl('result-omitted', data.n_omitted || 0);
+  setEl('result-percentage', (data.percentage || 0) + '%');
+  setEl('result-threshold', (data.passing_threshold || 60) + '%');
+  setEl('result-scale', data.grading_scale === 'chile_1_7' ? 'Escala chilena 1-7' : (data.grading_scale || 'Chile 1-7'));
+
+  // Estudiante
+  setEl('result-rut', data.student_identifier || 'Desconocido');
+  setEl('result-name', data.student_name || '—');
+  setEl('result-version', data.version || '—');
+
+  // Incorrectas
+  var detail = document.getElementById('result-incorrect-detail');
+  if (detail) {
+    var incorrects = data.incorrect_questions || [];
+    if (!incorrects.length) {
+      detail.innerHTML = '<span style="color:#059669;">Sin preguntas incorrectas</span>';
+    } else {
+      detail.innerHTML = incorrects.map(function(q) {
+        return '<span style="display:inline-block;background:#fef2f2;color:#ef4444;border:1px solid #fecaca;border-radius:6px;padding:3px 8px;margin:2px;font-size:12px;">P' + q.question + ': marcó ' + q.student + ', correcta ' + q.correct + '</span>';
+      }).join('');
+    }
+  }
 }
 
 async function loadResult() {
-  showResultLoading();
+  var rname = document.getElementById('result-assessment-name');
+  var rcourse = document.getElementById('result-course-name');
+  if (rname) rname.textContent = (_currentAssessmentConfig && _currentAssessmentConfig.name) || 'Resultados';
+  if (rcourse) rcourse.textContent = _currentCourseName || '';
+  var loading = document.getElementById('result-loading');
+  var loaded = document.getElementById('result-loaded');
+  var blocked = document.getElementById('result-blocked');
+  if (loading) loading.style.display = 'block';
+  if (loaded) loaded.style.display = 'none';
+  if (blocked) blocked.style.display = 'none';
 
   // Reiniciar estado visual del bloqueo
   ['block-scan-pill','block-key-pill'].forEach(id => {
@@ -2432,8 +2269,7 @@ async function loadResult() {
   } catch (e) {
     // 409 = condición previa sin resolver (mensaje viene del backend)
     if (e.message && (e.message.includes('revisión') || e.message.includes('pauta'))) {
-      showResultBlocked(e.message);
-      showToast('El resultado está bloqueado por condiciones previas', 'warning');
+      showResultBlocked('El escaneo aún requiere revisión. Ve a Escaneo para resolverlas.');
     } else {
       // Backend offline — usar estado local para decidir
       if (!state.scanResolved || !state.answerKeyValid) {
@@ -2970,7 +2806,8 @@ async function loadAnswerKeyScreen() {
 
     // Actualizar estado pauta
     const badge = document.getElementById('ak-status-badge');
-    if (cfg.answer_key_valid) {
+    var pautaSaved = localStorage.getItem('evalys_pauta_saved_' + assessmentId);
+    if (cfg.answer_key_valid || pautaSaved) {
       badge.textContent = '✓ Validada';
       badge.style.background = '#d1fae5';
       badge.style.color = '#065f46';
@@ -3318,6 +3155,7 @@ async function saveAnswerKey() {
       answers.forEach(function(ans, idx) { if (ans) answersObj[idx+1] = ans; });
       _savedAnswerKeys[cacheKey] = {answers: answersObj, annulled: annulled};
       localStorage.setItem('evalys_answers_' + cacheKey, JSON.stringify({answers: answersObj, annulled: annulled}));
+      localStorage.setItem('evalys_pauta_saved_' + IDS.assessment_id, '1');
       showToast('Pauta guardada correctamente', 'success');
       var badge = document.getElementById('ak-status-badge');
       if (badge) { badge.textContent = 'Guardada'; badge.style.background = '#d1fae5'; badge.style.color = '#065f46'; }
