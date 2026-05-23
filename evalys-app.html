@@ -4744,21 +4744,39 @@ async function loadCourseAssessments(courseId) {
 
 async function loadCourseStudentsDetail(courseId) {
   const base = getApiBase();
+  const tbody = document.getElementById('detail-students-table');
+  const countEl = document.getElementById('detail-students-count');
   try {
-    const res = await fetch(`${base}/courses/${courseId}/students`, {headers: {'Authorization': `Bearer ${_authToken}`}});
+    // El header Authorization solo se añade si hay token (el endpoint
+    // funciona con o sin él; un token vacío podría causar rechazo).
+    const headers = {};
+    if (_authToken) headers['Authorization'] = `Bearer ${_authToken}`;
+
+    const res = await fetch(`${base}/courses/${courseId}/students`, { headers });
+    if (!res.ok) {
+      console.error('[loadCourseStudentsDetail] HTTP', res.status);
+      if (tbody) tbody.innerHTML = `<tr><td colspan="2" style="padding:40px;text-align:center;color:#c96a5b;">No se pudieron cargar los estudiantes (HTTP ${res.status})</td></tr>`;
+      return;
+    }
     const students = await res.json();
-    document.getElementById('detail-students-count').textContent = `${students.length} estudiantes`;
-    const tbody = document.getElementById('detail-students-table');
+    console.log('[loadCourseStudentsDetail] estudiantes recibidos:', students.length);
+
+    if (countEl) countEl.textContent = `${students.length} estudiantes`;
+    if (!tbody) return;
+
     if (!students.length) {
       tbody.innerHTML = '<tr><td colspan="2" style="padding:40px;text-align:center;color:#94a3b8;">Sin estudiantes</td></tr>';
       return;
     }
     tbody.innerHTML = students.map(s => `
       <tr style="border-bottom:1px solid var(--border);">
-        <td style="padding:10px 16px;font-size:13px;color:#0F8B8D;font-weight:600;">${s.rut}</td>
-        <td style="padding:10px 16px;font-size:13px;">${s.apellido_paterno} ${s.apellido_materno} ${s.nombres}</td>
+        <td style="padding:10px 16px;font-size:13px;color:#0F8B8D;font-weight:600;">${s.rut || ''}</td>
+        <td style="padding:10px 16px;font-size:13px;">${[s.apellido_paterno, s.apellido_materno, s.nombres].filter(Boolean).join(' ')}</td>
       </tr>`).join('');
-  } catch(e) {}
+  } catch(e) {
+    console.error('[loadCourseStudentsDetail] error:', e);
+    if (tbody) tbody.innerHTML = `<tr><td colspan="2" style="padding:40px;text-align:center;color:#c96a5b;">Error al cargar estudiantes: ${e.message}</td></tr>`;
+  }
 }
 
 function selectAssessment(assessmentId, assessmentName) {
@@ -4774,6 +4792,12 @@ function switchDetailTab(tab) {
   document.getElementById('dtab-students').style.display = tab === 'students' ? 'block' : 'none';
   document.getElementById('dtab-evals-btn').style.cssText = `padding:10px 20px;border:none;background:none;cursor:pointer;font-size:14px;font-weight:${tab==='evals'?'600':'400'};color:${tab==='evals'?'#0F8B8D':'#94a3b8'};border-bottom:2px solid ${tab==='evals'?'#0F8B8D':'transparent'};margin-bottom:-2px;`;
   document.getElementById('dtab-students-btn').style.cssText = `padding:10px 20px;border:none;background:none;cursor:pointer;font-size:14px;font-weight:${tab==='students'?'600':'400'};color:${tab==='students'?'#0F8B8D':'#94a3b8'};border-bottom:2px solid ${tab==='students'?'#0F8B8D':'transparent'};margin-bottom:-2px;`;
+  // Recargar los datos de la pestaña activa (antes no se recargaba, por eso
+  // los estudiantes no aparecían al cambiar de pestaña).
+  if (_currentCourseId) {
+    if (tab === 'students') loadCourseStudentsDetail(_currentCourseId);
+    if (tab === 'evals') loadCourseAssessments(_currentCourseId);
+  }
 }
 
 async function uploadNominaForDetail(input) {
@@ -4784,14 +4808,25 @@ async function uploadNominaForDetail(input) {
   const formData = new FormData();
   formData.append('file', file);
   try {
+    const headers = {};
+    if (_authToken) headers['Authorization'] = `Bearer ${_authToken}`;
     const res = await fetch(`${base}/courses/${_currentCourseId}/upload-nomina`, {
-      method: 'POST', headers: {'Authorization': `Bearer ${_authToken}`}, body: formData
+      method: 'POST', headers, body: formData
     });
     const data = await res.json();
-    showToast(`✅ ${data.imported} estudiantes importados`, 'success');
+    if (!res.ok) {
+      showToast(data.detail || 'Error al importar', 'error');
+      return;
+    }
+    const n = data.imported != null ? data.imported : (data.students ? data.students.length : '');
+    showToast(`✅ ${n} estudiantes importados`, 'success');
+    // Cambiar a la pestaña de estudiantes y recargar para que se vean
+    switchDetailTab('students');
     loadCourseStudentsDetail(_currentCourseId);
+    input.value = '';
   } catch(e) {
-    showToast('Error al importar', 'error');
+    console.error('[uploadNominaForDetail] error:', e);
+    showToast('Error al importar: ' + e.message, 'error');
   }
 }
 
@@ -6007,9 +6042,11 @@ async function saveNewStudent() {
   try {
     const base = getApiBase();
     const course_id = _currentCourseId || IDS.course_id;
+    const headers = {'Content-Type': 'application/json'};
+    if (_authToken) headers['Authorization'] = `Bearer ${_authToken}`;
     const res = await fetch(`${base}/courses/${course_id}/students`, {
       method: 'POST',
-      headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${_authToken}`},
+      headers,
       body: JSON.stringify({rut, apellido_paterno: ap, apellido_materno: am, nombres: nm}),
     });
     const data = await res.json();
@@ -6020,18 +6057,13 @@ async function saveNewStudent() {
     }
     closeAddStudentModal();
     showToast('Estudiante agregado', 'success');
-    // Recargar tabla correcta
-    if (_currentCourseId) {
-      loadCourseStudentsDetail(_currentCourseId);
-    } else {
-      const sRes = await fetch(`${base}/courses/${course_id}/students`, {
-        headers: {'Authorization': `Bearer ${_authToken}`}
-      });
-      const students = await sRes.json();
-      renderStudentsTable(students);
-    }
+    // Recargar la tabla visible. En la vista de detalle de curso siempre
+    // es detail-students-table (vía loadCourseStudentsDetail).
+    const cid = _currentCourseId || course_id;
+    loadCourseStudentsDetail(cid);
   } catch(e) {
-    errDiv.textContent = 'Error de conexión';
+    console.error('[saveNewStudent] error:', e);
+    errDiv.textContent = 'Error de conexión: ' + e.message;
     errDiv.style.display = 'block';
   }
 }
