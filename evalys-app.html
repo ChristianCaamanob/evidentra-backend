@@ -2490,10 +2490,43 @@ const state = {
 //  API CLIENT — fetch con timeout y fallback a demo
 // ══════════════════════════════════════════════════════
 
+// Polyfill/override de AbortSignal.timeout para máxima compatibilidad.
+// El AbortSignal.timeout() nativo causa "AbortSignal object could not be
+// cloned" en algunos entornos (ciertas extensiones, contextos postMessage).
+// Esta versión basada en AbortController funciona en todos los navegadores.
+(function() {
+  try {
+    AbortSignal.timeout = function(ms) {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new DOMException('TimeoutError', 'TimeoutError')), ms);
+      return controller.signal;
+    };
+  } catch (e) {
+    // Si no se puede sobrescribir, dejamos el nativo
+  }
+})();
+
+// Helper de fetch con timeout compatible con todos los navegadores.
+// Usa AbortController+setTimeout en vez de AbortSignal.timeout() porque
+// este último causa "AbortSignal object could not be cloned" en algunos
+// entornos (extensiones de navegador, ciertos contextos de postMessage).
+async function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(t);
+    return res;
+  } catch (e) {
+    clearTimeout(t);
+    throw e;
+  }
+}
+
 async function apiRequest(path, options = {}) {
   const base = (window._API_BASE_OVERRIDE || API_BASE).replace(/\/$/, '');
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 4000);
+  const timeout = setTimeout(() => controller.abort(), 30000);
   try {
     const res = await fetch(`${base}${path}`, {
       ...options,
@@ -2533,7 +2566,7 @@ function setConnectionStatus(online, msg = '') {
     bar.style.borderColor = 'rgba(178,138,73,0.25)';
     dot.style.background = '#b28a49';
     dot.style.boxShadow = '0 0 8px rgba(178,138,73,0.6)';
-    label.textContent = msg || 'Modo demo — backend no disponible en ' + API_BASE;
+    label.textContent = msg || 'Trabajando sin conexión — los datos se guardan localmente';
   }
 }
 
@@ -2568,7 +2601,7 @@ async function bootstrap() {
       await syncAllState();
     }
   } catch (e) {
-    setConnectionStatus(false, 'Modo demo — backend no disponible (' + e.message + ')');
+    setConnectionStatus(false, 'Conectando con el servidor… si persiste, se trabaja en modo local');
   }
 }
 
@@ -4578,7 +4611,7 @@ async function loadCoursesList() {
     const base = getApiBase();
     const res = await fetch(`${base}/courses/`, {
       headers: {'Authorization': `Bearer ${_authToken}`},
-      signal: AbortSignal.timeout(3000)
+      signal: AbortSignal.timeout(30000)
     });
     if (res.ok) {
       courses = await res.json();
@@ -4901,7 +4934,7 @@ async function saveNewCourse() {
       method: 'POST',
       headers: {'Content-Type':'application/json','Authorization':`Bearer ${_authToken}`},
       body: JSON.stringify({name, code, passing_threshold: threshold, grading_scale: 'chile_1_7'}),
-      signal: AbortSignal.timeout(3000)
+      signal: AbortSignal.timeout(30000)
     });
     if (res.ok) {
       savedViaBackend = true;
@@ -5051,7 +5084,7 @@ async function confirmDeleteCourse() {
     await fetch(`${base}/courses/${_deletingCourseId}`, {
       method: 'DELETE',
       headers: {'Authorization': `Bearer ${_authToken}`},
-      signal: AbortSignal.timeout(3000)
+      signal: AbortSignal.timeout(30000)
     });
   } catch(e) { /* fallback local */ }
 
@@ -5711,14 +5744,20 @@ async function doLogin() {
   btn.disabled = true;
   btn.textContent = 'Ingresando...';
 
+  // AbortController manual (NO AbortSignal.timeout) para evitar el error
+  // "AbortSignal object could not be cloned" causado por extensiones del navegador.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
   try {
     const base = getApiBase();
     const res = await fetch(`${base}/auth/login`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({email, password}),
-      signal: AbortSignal.timeout(10000),
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     const data = await res.json();
 
@@ -5728,7 +5767,15 @@ async function doLogin() {
     }
 
     _authToken = data.token;
-    _currentTeacher = data.teacher;
+    // El backend devuelve {token, teacher:{id,email,name}}. Enriquecemos con
+    // el rol intentado en la portada (teacher/director/admin) si está presente.
+    _currentTeacher = data.teacher || {};
+    if (_intentedRole && !_currentTeacher.role) {
+      _currentTeacher.role = _intentedRole;
+      _currentTeacher.roleLabel = { teacher: 'Docente', director: 'Director(a)', admin: 'Administrador' }[_intentedRole] || 'Docente';
+    }
+    if (!_currentTeacher.role) { _currentTeacher.role = 'teacher'; _currentTeacher.roleLabel = 'Docente'; }
+
     localStorage.setItem('evalys_token', _authToken);
     localStorage.setItem('evalys_teacher', JSON.stringify(_currentTeacher));
 
@@ -5736,10 +5783,14 @@ async function doLogin() {
     updateDashboardGreeting();
     updateRoleBadge();
     navigate('dashboard');
-    showToast(`Bienvenido, ${_currentTeacher.name}`, 'success');
+    showToast(`Bienvenido, ${(_currentTeacher.name||'').split(' ')[0]}`, 'success');
 
   } catch (e) {
-    showAuthMessage('Error de conexión: ' + e.message, 'error');
+    clearTimeout(timeoutId);
+    const msg = (e.name === 'AbortError')
+      ? 'El servidor tardó demasiado en responder. Intenta de nuevo (puede estar iniciando).'
+      : 'Error de conexión: ' + e.message;
+    showAuthMessage(msg, 'error');
   } finally {
     btn.disabled = false;
     btn.textContent = 'Iniciar sesión';
@@ -5764,14 +5815,18 @@ async function doRegister() {
   btn.disabled = true;
   btn.textContent = 'Creando cuenta...';
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
   try {
     const base = getApiBase();
     const res = await fetch(`${base}/auth/register`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({email, password, name}),
-      signal: AbortSignal.timeout(10000),
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     const data = await res.json();
 
@@ -5781,7 +5836,13 @@ async function doRegister() {
     }
 
     _authToken = data.token;
-    _currentTeacher = data.teacher;
+    _currentTeacher = data.teacher || {};
+    if (_intentedRole && !_currentTeacher.role) {
+      _currentTeacher.role = _intentedRole;
+      _currentTeacher.roleLabel = { teacher: 'Docente', director: 'Director(a)', admin: 'Administrador' }[_intentedRole] || 'Docente';
+    }
+    if (!_currentTeacher.role) { _currentTeacher.role = 'teacher'; _currentTeacher.roleLabel = 'Docente'; }
+
     localStorage.setItem('evalys_token', _authToken);
     localStorage.setItem('evalys_teacher', JSON.stringify(_currentTeacher));
 
@@ -5789,10 +5850,14 @@ async function doRegister() {
     updateDashboardGreeting();
     updateRoleBadge();
     navigate('dashboard');
-    showToast(`Cuenta creada. Bienvenido, ${_currentTeacher.name}`, 'success');
+    showToast(`Cuenta creada. Bienvenido, ${(_currentTeacher.name||'').split(' ')[0]}`, 'success');
 
   } catch (e) {
-    showAuthMessage('Error de conexión: ' + e.message, 'error');
+    clearTimeout(timeoutId);
+    const msg = (e.name === 'AbortError')
+      ? 'El servidor tardó demasiado en responder. Intenta de nuevo (puede estar iniciando).'
+      : 'Error de conexión: ' + e.message;
+    showAuthMessage(msg, 'error');
   } finally {
     btn.disabled = false;
     btn.textContent = 'Crear cuenta';
@@ -6632,7 +6697,7 @@ function applyApiConfig() {
 async function testConnection() {
   setApiStatusUI('pending', 'Probando...');
   try {
-    const res = await fetch(`${getApiBase()}/health`, { signal: AbortSignal.timeout(4000) });
+    const res = await fetch(`${getApiBase()}/health`, { signal: AbortSignal.timeout(30000) });
     if (res.ok) {
       const data = await res.json().catch(() => ({}));
       setApiStatusUI('ok', `OK — ${data.service || 'servicio activo'}`);
