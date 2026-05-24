@@ -36,7 +36,7 @@ def _fiducial(c, x, y, s=8*mm):
 def _get_qr_matrix(data: str) -> list:
     """Genera matriz QR real usando qrcode, o simulada como fallback."""
     if HAS_QRCODE:
-        qr = qrcode.QRCode(version=2, error_correction=qrcode.constants.ERROR_CORRECT_H, box_size=1, border=0)
+        qr = qrcode.QRCode(version=2, error_correction=qrcode.constants.ERROR_CORRECT_H, box_size=1, border=4)
         qr.add_data(data)
         qr.make(fit=True)
         mat = qr.get_matrix()
@@ -56,7 +56,7 @@ def _get_qr_matrix(data: str) -> list:
 def _draw_qr(c, mat, x, y, size):
     n = len(mat); ms = size / n
     c.setFillColor(WHITE)
-    c.rect(x-ms, y-ms, size+2*ms, size+2*ms, fill=1, stroke=0)
+    c.rect(x-4*ms, y-4*ms, size+8*ms, size+8*ms, fill=1, stroke=0)
     for r in range(n):
         for col in range(n):
             if mat[r][col]:
