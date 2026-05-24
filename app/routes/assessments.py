@@ -180,6 +180,9 @@ def update_assessment_config(assessment_id: UUID, payload: dict, db: Session = D
         a.passing_threshold = float(payload["passing_threshold"])
     if "name" in payload:
         a.name = payload["name"]
+    if "n_questions" in payload:
+        a.n_questions = int(payload["n_questions"])
+        a.version_count = int(payload["n_questions"])
     db.commit()
     db.refresh(a)
     return {"id": str(a.id), "name": a.name, "grading_scale": a.grading_scale, "passing_threshold": a.passing_threshold}
