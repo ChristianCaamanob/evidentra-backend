@@ -81,17 +81,42 @@ def correct_perspective(img, fiducials):
     return cv2.warpPerspective(img, M, (TARGET_W, TARGET_H))
 
 
-def read_qr(img):
+def _try_decode(detector, im):
+    try:
+        data, _, _ = detector.detectAndDecode(im)
+        if data:
+            return data
+    except Exception:
+        pass
+    return None
+
+
+def read_qr(img_color):
     detector = cv2.QRCodeDetector()
-    data, _, _ = detector.detectAndDecode(img)
-    if not data:
-        data, _, _ = detector.detectAndDecode(cv2.bitwise_not(img))
+    variants = []
+    g = cv2.cvtColor(img_color, cv2.COLOR_BGR2GRAY) if len(img_color.shape) == 3 else img_color
+    variants.append(img_color)
+    variants.append(g)
+    variants.append(cv2.bitwise_not(g))
+    _, otsu = cv2.threshold(g, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    variants.append(otsu)
+    variants.append(cv2.bitwise_not(otsu))
+    for scale in (1.5, 2.0, 0.75):
+        try:
+            variants.append(cv2.resize(g, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC))
+        except Exception:
+            pass
+    data = None
+    for v in variants:
+        data = _try_decode(detector, v)
+        if data:
+            break
     if not data:
         return None
     try:
         p = json.loads(data)
         return QRData(p.get("aid",""), p.get("cid",""), int(p.get("nq",40)), p.get("ver","A"), data)
-    except:
+    except Exception:
         return QRData(data[:12], "", 40, "A", data)
 
 
@@ -199,12 +224,14 @@ def scan_sheet(image_bytes: bytes, n_questions_override: int = 0) -> ScanResult:
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if img is None:
         return ScanResult(success=False, error="No se pudo decodificar la imagen")
+    img_original = img.copy()
     gray = preprocess(img)
     fiducials = find_fiducials(gray)
     if fiducials:
         img = correct_perspective(img, fiducials)
         gray = preprocess(img)
-    qr_data = read_qr(gray)
+        img_original = img.copy()
+    qr_data = read_qr(img_original)
     n_questions = n_questions_override or (qr_data.n_questions if qr_data else 40)
     if n_questions % 2 != 0:
         n_questions += 1
