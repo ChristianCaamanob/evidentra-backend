@@ -219,6 +219,31 @@ def draw_debug(img, fiducials, qr_data, rut_digits, answers, ambiguous):
     return base64.b64encode(buf).decode("utf-8")
 
 
+def _fiducials_confiables(fiducials, shape):
+    """Verifica que los 4 fiduciales esten realmente cerca de las 4 esquinas.
+    Si estan amontonados o lejos de las esquinas, no son confiables y
+    corregir perspectiva con ellos deformaria la imagen."""
+    if not fiducials or len(fiducials) != 4:
+        return False
+    h, w = shape[:2]
+    # Esquinas ideales: TL, TR, BL, BR
+    esquinas = [(0, 0), (w, 0), (0, h), (w, h)]
+    # Cada fiducial debe estar dentro del 30% del tamano desde su esquina esperada
+    tol_x = w * 0.30
+    tol_y = h * 0.30
+    for (fx, fy), (ex, ey) in zip(fiducials, esquinas):
+        if abs(fx - ex) > tol_x or abs(fy - ey) > tol_y:
+            return False
+    # Verificar que no esten amontonados: area del cuadrilatero razonable
+    xs = [p[0] for p in fiducials]
+    ys = [p[1] for p in fiducials]
+    ancho = max(xs) - min(xs)
+    alto = max(ys) - min(ys)
+    if ancho < w * 0.5 or alto < h * 0.5:
+        return False
+    return True
+
+
 def scan_sheet(image_bytes: bytes, n_questions_override: int = 0) -> ScanResult:
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -227,8 +252,15 @@ def scan_sheet(image_bytes: bytes, n_questions_override: int = 0) -> ScanResult:
     img_original = img.copy()
     gray = preprocess(img)
     fiducials = find_fiducials(gray)
-    if fiducials:
+    # Solo corregir perspectiva si los fiduciales son CREIBLES (cerca de las 4 esquinas).
+    # Si no, deformaria la imagen y descuadraria las burbujas.
+    if fiducials and _fiducials_confiables(fiducials, gray.shape):
         img = correct_perspective(img, fiducials)
+        gray = preprocess(img)
+        img_original = img.copy()
+    else:
+        # Normalizar al tamano estandar (2100x2970) para que calcen las coordenadas
+        img = cv2.resize(img, (2100, 2970), interpolation=cv2.INTER_AREA)
         gray = preprocess(img)
         img_original = img.copy()
     qr_data = read_qr(img_original)
