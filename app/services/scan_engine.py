@@ -129,17 +129,31 @@ def is_bubble_filled(gray, cx, cy, r, threshold=0.45):
 
 
 def read_rut(gray):
-    cfg = {"x_start":60,"y_start":220,"col_gap":66,"row_gap":60,"n_cols":9,"bubble_r":20}
+    # Coordenadas derivadas de sheet_service.py. Imagen normalizada a 2100x2970 = 10px/mm.
+    MM = 10.0
+    H_MM = 297.0
+    MX = 12.0
+    rut_x0 = MX + 2.0
+    RUT_GX = 7.0
+    RUT_GY = 6.2
+    RUT_R = 2.6
+    MY = 10.0; HDR_H = 10.0
+    hdr_y = H_MM - MY - HDR_H
+    top_zone_y = hdr_y - 2.0
+    RUT_HDR_H = 6.0
+    N_DCOLS = 9
+    bubble_r = int(RUT_R * MM)
     digits = []
     conf_scores = []
     DV = list(range(10)) + ["K"]
-    for col in range(cfg["n_cols"]):
-        cx = cfg["x_start"] + col*cfg["col_gap"]
+    for col in range(N_DCOLS):
+        cx = int((rut_x0 + col*RUT_GX) * MM)
         n_rows = 11 if col == 8 else 10
         col_data = []
         for row in range(n_rows):
-            cy = cfg["y_start"] + row*cfg["row_gap"]
-            filled, darkness = is_bubble_filled(gray, cx, cy, cfg["bubble_r"])
+            cy_pdf = top_zone_y - RUT_HDR_H - (row+1)*RUT_GY
+            cy = int((H_MM - cy_pdf) * MM)
+            filled, darkness = is_bubble_filled(gray, cx, cy, bubble_r)
             col_data.append((filled, darkness, row))
         col_data.sort(key=lambda x: x[1], reverse=True)
         best = col_data[0]
