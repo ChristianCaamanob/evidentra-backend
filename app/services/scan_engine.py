@@ -165,26 +165,39 @@ def read_rut(gray):
 
 
 def read_answers(gray, n_questions):
+    # Coordenadas derivadas de sheet_service.py. Imagen normalizada a 2100x2970 = 10px/mm.
+    MM = 10.0
+    H_MM = 297.0
     n_per_col = n_questions // 2
-    img_h = gray.shape[0]
-    # row_gap dinámico según alto de imagen para evitar caer en pie de página
-    y_start = 1050
-    y_end = img_h - 120
-    row_gap = int((y_end - y_start) / max(n_per_col - 1, 1))
-    row_gap = max(55, min(row_gap, 95))  # limitar entre 55-95px
-    cfg = {"col1_x":95,"col2_x":1155,"y_start":y_start,"choice_gap":83,"bubble_r":28}
+    MY = 10.0; HDR_H = 10.0
+    hdr_y = H_MM - MY - HDR_H
+    top_zone_y = hdr_y - 2.0
+    top_zone_h = 80.0
+    INST_Y = top_zone_y - top_zone_h - 2.0
+    INST_H = 5.5
+    GRID_TOP = INST_Y - INST_H - 3.0
+    PIE_H = 7.0; GRID_BOT = MY + PIE_H
+    HDR_Q = 6.0
+    ROW_H = (GRID_TOP - GRID_BOT - HDR_Q) / n_per_col
+    ROW_H = max(4.8, min(ROW_H, 11.0))
+    MX = 12.0; COL_GAP = 6.0
+    COL_W = (210.0 - 2*MX - COL_GAP) / 2
+    NUM_W = 10.0; BUB_GAP = 8.5; BUB_R = 3.4
     CHOICES = ["A","B","C","D","E"]
     answers = []
     ambiguous = []
     for col_idx in range(2):
-        x_base = cfg["col1_x"] if col_idx == 0 else cfg["col2_x"]
+        col_x = MX + col_idx*(COL_W + COL_GAP)
+        bub_x0 = col_x + NUM_W + 2.0
         q_start = col_idx * n_per_col
-        for row in range(n_per_col):
-            cy = cfg["y_start"] + row*row_gap
+        for q_idx in range(n_per_col):
+            row_top = GRID_TOP - HDR_Q - (q_idx+1)*ROW_H
+            row_ctr_mm_bottom = row_top + ROW_H/2
+            cy = int((H_MM - row_ctr_mm_bottom) * MM)
             row_res = []
             for i, ch in enumerate(CHOICES):
-                cx = x_base + i*cfg["choice_gap"]
-                filled, dark = is_bubble_filled(gray, cx, cy, cfg["bubble_r"])
+                cx = int((bub_x0 + i*BUB_GAP) * MM)
+                filled, dark = is_bubble_filled(gray, cx, cy, int(BUB_R*MM))
                 row_res.append((ch, filled, dark))
             row_res.sort(key=lambda x: x[2], reverse=True)
             best = row_res[0]
@@ -192,7 +205,7 @@ def read_answers(gray, n_questions):
             if best[2] > 0.45:
                 if second and second[2] > 0.35 and best[2]-second[2] < 0.12:
                     answers.append(None)
-                    ambiguous.append(q_start+row+1)
+                    ambiguous.append(q_start+q_idx+1)
                 else:
                     answers.append(best[0])
             else:
