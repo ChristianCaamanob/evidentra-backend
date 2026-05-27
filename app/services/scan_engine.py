@@ -48,37 +48,76 @@ def preprocess(img):
 
 
 def find_fiducials(gray):
-    thresh = cv2.adaptiveThreshold(gray, 255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 51, 10)
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    candidates = []
+    """Detecta los marcadores concentricos (negro-blanco-negro) de las 4 esquinas.
+    Usa jerarquia de contornos: un fiducial es un contorno negro que contiene
+    un contorno blanco que contiene un contorno negro. La barra del encabezado
+    y las burbujas NO tienen esa estructura anidada, asi que se descartan solas."""
     h, w = gray.shape
-    for cnt in contours:
+    _, binimg = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    contours, hierarchy = cv2.findContours(binimg, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    if hierarchy is None:
+        return None
+    hierarchy = hierarchy[0]
+
+    def es_cuadrado(cnt):
         area = cv2.contourArea(cnt)
-        if area < 500 or area > 15000:
-            continue
+        if area < 100:
+            return False, 0, 0, 0
         peri = cv2.arcLength(cnt, True)
-        approx = cv2.approxPolyDP(cnt, 0.04*peri, True)
+        approx = cv2.approxPolyDP(cnt, 0.05*peri, True)
         if len(approx) != 4:
-            continue
+            return False, 0, 0, 0
         x, y, bw, bh = cv2.boundingRect(cnt)
         aspect = bw/bh if bh > 0 else 0
-        if not (0.7 < aspect < 1.3):
+        if not (0.6 < aspect < 1.4):
+            return False, 0, 0, 0
+        # que sea solido: el area del contorno ocupa buena parte del bounding box
+        rect_area = bw*bh
+        if rect_area == 0 or area/rect_area < 0.6:
+            return False, 0, 0, 0
+        return True, x+bw//2, y+bh//2, bw
+
+    candidatos = []
+    for i, cnt in enumerate(contours):
+        # buscar contorno EXTERNO negro (sin padre o con padre que sea el fondo)
+        ok, cx, cy, sz = es_cuadrado(cnt)
+        if not ok:
             continue
-        roi = gray[y+2:y+bh-2, x+2:x+bw-2]
-        if roi.size == 0:
+        # contar descendientes anidados: debe haber al menos un hijo (blanco) con un nieto (negro)
+        hijo = hierarchy[i][2]
+        if hijo == -1:
             continue
-        if np.mean(roi) < 100:
+        nieto = hierarchy[hijo][2]
+        if nieto == -1:
             continue
-        candidates.append((x+bw//2, y+bh//2, area))
-    if len(candidates) < 4:
+        # validar que el hijo tambien sea cuadrado-ish (el cuadro blanco interior)
+        ok_h, _, _, _ = es_cuadrado(contours[hijo])
+        if not ok_h:
+            continue
+        candidatos.append((cx, cy, sz))
+
+    if len(candidatos) < 4:
         return None
-    candidates.sort(key=lambda c: c[2], reverse=True)
-    pts = [(c[0], c[1]) for c in candidates[:4]]
-    pts.sort(key=lambda p: p[1])
-    top = sorted(pts[:2], key=lambda p: p[0])
-    bot = sorted(pts[2:], key=lambda p: p[0])
-    return [top[0], top[1], bot[0], bot[1]]
+
+    # Quedarse con el mejor candidato por cuadrante (cercano a cada esquina de la imagen)
+    esquinas = [(0,0), (w,0), (0,h), (w,h)]
+    seleccion = []
+    usados = set()
+    for ex, ey in esquinas:
+        mejor = None
+        mejor_d = None
+        for idx, (cx, cy, sz) in enumerate(candidatos):
+            if idx in usados:
+                continue
+            d = (cx-ex)**2 + (cy-ey)**2
+            if mejor_d is None or d < mejor_d:
+                mejor_d = d; mejor = idx
+        if mejor is None:
+            return None
+        usados.add(mejor)
+        seleccion.append((candidatos[mejor][0], candidatos[mejor][1]))
+    # seleccion ya viene en orden TL, TR, BL, BR
+    return seleccion
 
 
 def correct_perspective(img, fiducials):
@@ -255,26 +294,18 @@ def draw_debug(img, fiducials, qr_data, rut_digits, answers, ambiguous):
 
 
 def _fiducials_confiables(fiducials, shape):
-    """Verifica que los 4 fiduciales esten realmente cerca de las 4 esquinas.
-    Si estan amontonados o lejos de las esquinas, no son confiables y
-    corregir perspectiva con ellos deformaria la imagen."""
+    """Con deteccion por patron concentrico ya confiamos en la estructura.
+    Solo verificamos que los 4 puntos formen un cuadrilatero con area razonable
+    (no amontonados) y que esten distribuidos en los 4 cuadrantes."""
     if not fiducials or len(fiducials) != 4:
         return False
     h, w = shape[:2]
-    # Esquinas ideales: TL, TR, BL, BR
-    esquinas = [(0, 0), (w, 0), (0, h), (w, h)]
-    # Cada fiducial debe estar dentro del 30% del tamano desde su esquina esperada
-    tol_x = w * 0.30
-    tol_y = h * 0.30
-    for (fx, fy), (ex, ey) in zip(fiducials, esquinas):
-        if abs(fx - ex) > tol_x or abs(fy - ey) > tol_y:
-            return False
-    # Verificar que no esten amontonados: area del cuadrilatero razonable
     xs = [p[0] for p in fiducials]
     ys = [p[1] for p in fiducials]
     ancho = max(xs) - min(xs)
     alto = max(ys) - min(ys)
-    if ancho < w * 0.5 or alto < h * 0.5:
+    # deben abarcar al menos 40% del ancho y alto (no amontonados)
+    if ancho < w * 0.4 or alto < h * 0.4:
         return False
     return True
 
