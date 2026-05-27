@@ -121,9 +121,19 @@ def find_fiducials(gray):
 
 
 def correct_perspective(img, fiducials):
+    """Endereza la imagen mapeando los fiduciales detectados a las posiciones
+    exactas donde sheet_service los dibuja. Asi se preserva toda la hoja sin recortes."""
     TARGET_W, TARGET_H = 2100, 2970
+    # Posiciones reales de los CENTROS de los fiduciales en el papel:
+    # fiducial a 3mm del borde, de 10mm de lado -> centro a 8mm del borde = 80px
+    OFFSET = 80
     src = np.float32(fiducials)
-    dst = np.float32([[50,50],[TARGET_W-50,50],[50,TARGET_H-50],[TARGET_W-50,TARGET_H-50]])
+    dst = np.float32([
+        [OFFSET, OFFSET],                          # TL
+        [TARGET_W-OFFSET, OFFSET],                 # TR
+        [OFFSET, TARGET_H-OFFSET],                 # BL
+        [TARGET_W-OFFSET, TARGET_H-OFFSET],        # BR
+    ])
     M = cv2.getPerspectiveTransform(src, dst)
     return cv2.warpPerspective(img, M, (TARGET_W, TARGET_H))
 
