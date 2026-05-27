@@ -5,6 +5,14 @@ import cv2
 import numpy as np
 import json
 import base64
+try:
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+    from PIL import Image
+    import io as _io
+    _HEIC_OK = True
+except Exception:
+    _HEIC_OK = False
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -274,8 +282,15 @@ def _fiducials_confiables(fiducials, shape):
 def scan_sheet(image_bytes: bytes, n_questions_override: int = 0) -> ScanResult:
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is None and _HEIC_OK:
+        # Intentar como HEIC/HEIF (iPhone) via Pillow
+        try:
+            pil = Image.open(_io.BytesIO(image_bytes)).convert("RGB")
+            img = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+        except Exception:
+            img = None
     if img is None:
-        return ScanResult(success=False, error="No se pudo decodificar la imagen")
+        return ScanResult(success=False, error="No se pudo decodificar la imagen (formato no soportado)")
     img_original = img.copy()
     gray = preprocess(img)
     fiducials = find_fiducials(gray)
