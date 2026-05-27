@@ -26,6 +26,10 @@ BLACK = colors.black
 
 
 def _fiducial(c, x, y, s=8*mm):
+    # Halo blanco alrededor para aislar del header/pie u otros elementos negros
+    halo = 3*mm
+    c.setFillColor(WHITE); c.rect(x-halo, y-halo, s+2*halo, s+2*halo, fill=1, stroke=0)
+    # Patron concentrico negro-blanco-negro
     c.setFillColor(BLACK); c.rect(x, y, s, s, fill=1, stroke=0)
     i = s * .38; o = (s - i) / 2
     c.setFillColor(WHITE); c.rect(x+o, y+o, i, i, fill=1, stroke=0)
@@ -102,8 +106,8 @@ def generate_answer_sheet_pdf(
 
     MX = 12*mm; MY = 10*mm
 
-    # FIDUCIALES
-    fs = 8*mm; fm = 6*mm
+    # FIDUCIALES (mas grandes y mas al borde para no chocar con header/pie)
+    fs = 10*mm; fm = 3*mm
     _fiducial(cv, fm, fm, fs)
     _fiducial(cv, W-fm-fs, fm, fs)
     _fiducial(cv, fm, H-fm-fs, fs)
