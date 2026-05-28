@@ -147,7 +147,7 @@ def generate_answer_sheet_pdf(
 
     # RUT (9 columnas: 8 dígitos + DV)
     RUT_R = 2.6*mm; RUT_GX = 7.0*mm; RUT_GY = 6.2*mm
-    N_DCOLS = 9; RUT_HDR_H = 6*mm
+    N_DCOLS = 9; RUT_HDR_H = 10*mm  # mas espacio para que las burbujas no toquen el borde superior
     rut_x0 = MX + 2*mm
     rut_block_w = (N_DCOLS-1)*RUT_GX + RUT_R*2 + 4*mm
 
@@ -233,10 +233,12 @@ def generate_answer_sheet_pdf(
     ]
     fid_bub_r = 2.4*mm
     fid_bub_gap = (fid_w - 12*mm) / 13.0
-    fid_bub_y0 = fid_y + 5*mm
+    # Espacio vertical entre las 2 filas: 7mm (era 5mm, muy junto)
+    fid_row_gap = 7*mm
+    fid_bub_y0 = fid_y + 4*mm
 
     for row_idx, row in enumerate(pattern):
-        by = fid_bub_y0 + (1-row_idx)*5*mm
+        by = fid_bub_y0 + (1-row_idx)*fid_row_gap
         for col_idx, state in enumerate(row):
             bx = fid_x + 6*mm + col_idx*fid_bub_gap
             cv.setLineWidth(0.8); cv.setStrokeColor(BLACK)
