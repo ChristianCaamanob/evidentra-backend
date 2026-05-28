@@ -142,7 +142,7 @@ def generate_answer_sheet_pdf(
     cv.drawRightString(W-MX-3*mm, hdr_y+3*mm, f'VER.{version}')
 
     # ZONA SUPERIOR
-    top_zone_y = hdr_y - 2*mm
+    top_zone_y = hdr_y - 6*mm  # mas aire entre header navy y bloques de abajo
     top_zone_h = 80*mm
 
     # RUT (9 columnas: 8 dígitos + DV)
@@ -233,9 +233,9 @@ def generate_answer_sheet_pdf(
     ]
     fid_bub_r = 2.4*mm
     fid_bub_gap = (fid_w - 12*mm) / 13.0
-    # Espacio vertical entre las 2 filas: 7mm (era 5mm, muy junto)
-    fid_row_gap = 7*mm
-    fid_bub_y0 = fid_y + 4*mm
+    # Burbujas mas abajo y filas separadas para no tapar el subtitulo
+    fid_row_gap = 6*mm
+    fid_bub_y0 = fid_y + 3*mm
 
     for row_idx, row in enumerate(pattern):
         by = fid_bub_y0 + (1-row_idx)*fid_row_gap
