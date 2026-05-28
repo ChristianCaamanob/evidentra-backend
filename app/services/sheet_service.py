@@ -178,7 +178,7 @@ def generate_answer_sheet_pdf(
     # Coords del mockup SVG: col1 numeros en x=58, burbujas x=80,96,112,128,144
     # col2 numeros en x=175, burbujas x=190,204,218,232,246
     # Primera fila y=184 (SVG) = H-184 (RL). Gap entre filas = 26 (SVG, hacia abajo) = -26 (RL).
-    BUB_R = 7.5
+    BUB_R = 6.5
     CHOICES = ['A','B','C','D','E']
     col1_num_x = 58
     col1_bub_xs = [80, 96, 112, 128, 144]
