@@ -90,166 +90,149 @@ def generate_answer_sheet_pdf(
     passing: float = 4.0,
     threshold_pct: int = 60,
 ) -> bytes:
-    """Genera la hoja de respuesta y devuelve los bytes del PDF."""
-
+    """Hoja Evalys v6: tres recuadros separados, sin QR.
+    Layout estilo GradeCam con identidad Evalys."""
     assert n_questions % 2 == 0, "n_questions debe ser par"
     N_PER_COL = n_questions // 2
 
-    qr_mat = _get_qr_matrix(json.dumps(
-        {'ev': '1', 'aid': assessment_id, 'cid': course_id,
-         'nq': n_questions, 'ver': version},
-        separators=(',', ':')))
-
     buf = io.BytesIO()
     cv = canvas.Canvas(buf, pagesize=A4)
-    cv.setTitle(f'Evidentra — {assessment_name} V{version}')
+    cv.setTitle(f'Evalys - {assessment_name} V{version}')
 
-    MX = 12*mm; MY = 10*mm
-
-    # FIDUCIALES (mas grandes y mas al borde para no chocar con header/pie)
+    # ====== MARGENES Y FIDUCIALES ======
+    MX = 8*mm  # margen horizontal del papel
+    MY = 8*mm  # margen vertical del papel
     fs = 10*mm; fm = 3*mm
     _fiducial(cv, fm, fm, fs)
     _fiducial(cv, W-fm-fs, fm, fs)
     _fiducial(cv, fm, H-fm-fs, fs)
     _fiducial(cv, W-fm-fs, H-fm-fs, fs)
 
-    # MARCO RECTANGULAR (ancla robusta para deteccion estilo GradeCam)
-    # Borde negro continuo a 5mm de los bordes del papel, grosor 1.5mm.
-    # Esta es la pieza principal que el scanner detecta para enderezar la hoja.
-    marco_m = 5*mm  # margen desde el borde del papel
-    marco_grosor = 1.5*mm
-    cv.setStrokeColor(BLACK)
-    cv.setLineWidth(marco_grosor)
-    cv.rect(marco_m, marco_m, W-2*marco_m, H-2*marco_m, fill=0, stroke=1)
-
-    # ENCABEZADO
-    HDR_H = 10*mm
+    # ====== HEADER NAVY CON FRANJA TEAL ======
+    HDR_H = 12*mm
     hdr_y = H - MY - HDR_H
     cv.setFillColor(NAVY)
     cv.rect(MX, hdr_y, W-2*MX, HDR_H, fill=1, stroke=0)
     cv.setFillColor(TEAL)
-    cv.rect(MX, hdr_y, 3*mm, HDR_H, fill=1, stroke=0)
-    cv.setFillColor(WHITE); cv.setFont('Helvetica-Bold', 9)
-    cv.drawString(MX+5*mm, hdr_y+3.8*mm, 'Evidentra')
-    cv.setFillColor(TEAL2); cv.setFont('Helvetica', 4.5)
-    cv.drawString(MX+5*mm, hdr_y+1.5*mm, 'INTELIGENCIA ACADEMICA')
-    cv.setFillColor(WHITE); cv.setFont('Helvetica-Bold', 8)
-    cv.drawCentredString(W/2, hdr_y+4*mm, assessment_name.upper())
-    cv.setFillColor(LGRAY); cv.setFont('Helvetica', 6)
-    cv.drawCentredString(W/2, hdr_y+1.5*mm,
-        f'{course_name}  ·  {n_questions} preguntas  ·  Versión {version}')
-    cv.setFillColor(TEAL); cv.setFont('Helvetica-Bold', 14)
-    cv.drawRightString(W-MX-3*mm, hdr_y+3*mm, f'VER.{version}')
+    cv.rect(MX, hdr_y, 1.5*mm, HDR_H, fill=1, stroke=0)
+    cv.setFillColor(WHITE); cv.setFont('Helvetica-Bold', 11)
+    cv.drawString(MX+5*mm, hdr_y+6.5*mm, 'Evalys')
+    cv.setFillColor(TEAL2); cv.setFont('Helvetica', 5.5)
+    cv.drawString(MX+5*mm, hdr_y+2.5*mm, 'INTELIGENCIA ACADEMICA')
+    cv.setFillColor(WHITE); cv.setFont('Helvetica-Bold', 10)
+    cv.drawCentredString(W/2, hdr_y+7*mm, assessment_name.upper())
+    cv.setFillColor(LGRAY); cv.setFont('Helvetica', 7)
+    cv.drawCentredString(W/2, hdr_y+2.5*mm,
+        f'{course_name} . {n_questions} preguntas . Version {version}')
+    cv.setFillColor(TEAL2); cv.setFont('Helvetica-Bold', 14)
+    cv.drawRightString(W-MX-3*mm, hdr_y+4*mm, f'VER.{version}')
 
-    # ZONA SUPERIOR
-    top_zone_y = hdr_y - 6*mm  # mas aire entre header navy y bloques de abajo
-    top_zone_h = 80*mm
+    # ====== DATOS DEL ESTUDIANTE (lineas, sin recuadro) ======
+    DAT_Y = hdr_y - 6*mm
+    cv.setFillColor(NAVY); cv.setFont('Helvetica-Bold', 7)
+    cv.drawString(MX+2*mm, DAT_Y, 'APELLIDOS Y NOMBRE')
+    cv.setStrokeColor(MGRAY); cv.setLineWidth(0.5)
+    cv.line(MX+2*mm, DAT_Y-3*mm, MX+95*mm, DAT_Y-3*mm)
+    cv.drawString(MX+102*mm, DAT_Y, 'ASIGNATURA / CARRERA')
+    cv.line(MX+102*mm, DAT_Y-3*mm, W-MX-2*mm, DAT_Y-3*mm)
 
-    # RUT (9 columnas: 8 dígitos + DV)
-    RUT_R = 2.6*mm; RUT_GX = 7.0*mm; RUT_GY = 6.2*mm
-    N_DCOLS = 9; RUT_HDR_H = 13*mm  # aire suficiente entre el header y la primera fila de burbujas
-    rut_x0 = MX + 2*mm
-    rut_block_w = (N_DCOLS-1)*RUT_GX + RUT_R*2 + 4*mm
+    DAT_Y2 = DAT_Y - 10*mm
+    cv.drawString(MX+2*mm, DAT_Y2, 'SECCION')
+    cv.line(MX+2*mm, DAT_Y2-3*mm, MX+45*mm, DAT_Y2-3*mm)
+    cv.drawString(MX+50*mm, DAT_Y2, 'FECHA')
+    cv.line(MX+50*mm, DAT_Y2-3*mm, MX+95*mm, DAT_Y2-3*mm)
+    cv.drawString(MX+102*mm, DAT_Y2, 'DOCENTE')
+    cv.line(MX+102*mm, DAT_Y2-3*mm, W-MX-2*mm, DAT_Y2-3*mm)
 
-    cv.setFillColor(BGRAY); cv.setStrokeColor(BLACK); cv.setLineWidth(2)
-    cv.roundRect(MX, top_zone_y-top_zone_h, rut_block_w, top_zone_h, 2*mm, fill=1, stroke=1)
+    # ====== TOP DE LOS RECUADROS PRINCIPALES ======
+    BOXES_TOP = DAT_Y2 - 10*mm
 
-    cv.setFillColor(NAVY); cv.setFont('Helvetica-Bold', 6.5)
-    cv.drawString(MX+3*mm, top_zone_y-5*mm, 'RUT')
+    # ====== RECUADRO RUT (arriba derecha) ======
+    # Geometria: 8 columnas de burbujas + texto auxiliar
+    RUT_BUB_R = 2.8*mm
+    RUT_BUB_GX = 6.5*mm
+    RUT_BUB_GY = 6.0*mm
+    N_DIGS = 8
+    RUT_INNER_PAD = 4*mm
+    RUT_BUB_AREA_W = (N_DIGS-1)*RUT_BUB_GX + 2*RUT_BUB_R
+    RUT_BUB_AREA_H = 10*RUT_BUB_GY + 2*RUT_BUB_R - RUT_BUB_GY
+    RUT_TITULO_H = 10*mm   # titulo + subtitulo
+    RUT_CASILLAS_H = 8*mm  # casillas para escribir RUT
+    RUT_W = RUT_BUB_AREA_W + 2*RUT_INNER_PAD + 18*mm  # extra para "DV auto"
+    RUT_H = RUT_TITULO_H + RUT_CASILLAS_H + RUT_BUB_AREA_H + 2*RUT_INNER_PAD
+
+    rut_x = W - MX - RUT_W
+    rut_y = BOXES_TOP - RUT_H
+
+    cv.setStrokeColor(BLACK); cv.setLineWidth(2)
+    cv.setFillColor(WHITE)
+    cv.rect(rut_x, rut_y, RUT_W, RUT_H, fill=1, stroke=1)
+
+    cv.setFillColor(NAVY); cv.setFont('Helvetica-Bold', 8)
+    cv.drawString(rut_x + RUT_INNER_PAD, rut_y + RUT_H - 6*mm, 'RUT')
     cv.setFillColor(MGRAY); cv.setFont('Helvetica', 5.5)
-    cv.drawString(MX+3*mm, top_zone_y-8.5*mm, 'Sin puntos · con guion · dígito verificador')
+    cv.drawString(rut_x + RUT_INNER_PAD, rut_y + RUT_H - 9.5*mm,
+        'Escriba arriba y rellene las burbujas')
 
-    for i in range(N_DCOLS):
-        cx = rut_x0 + i*RUT_GX
-        cv.setFillColor(TEAL if i == 7 else NAVY)
-        cv.setFont('Helvetica-Bold', 6)
-        cv.drawCentredString(cx, top_zone_y-RUT_HDR_H-1*mm,
-            str(i+1) if i < 8 else 'DV')
+    # Casillas para escribir el RUT (8 cajas separadas)
+    cas_w = 6*mm; cas_h = 6.5*mm
+    cas_gap = RUT_BUB_GX - cas_w  # mismo gap que las burbujas
+    cas_x0 = rut_x + RUT_INNER_PAD + (RUT_BUB_R - cas_w/2)
+    cas_y = rut_y + RUT_H - RUT_TITULO_H - cas_h
+    cv.setStrokeColor(BLACK); cv.setLineWidth(0.6)
+    for i in range(N_DIGS):
+        cx = cas_x0 + i*RUT_BUB_GX - (RUT_BUB_R - cas_w/2)
+        cv.rect(cx, cas_y, cas_w, cas_h, fill=0, stroke=1)
+    # "DV auto" a la derecha
+    dv_text_x = cas_x0 + (N_DIGS-1)*RUT_BUB_GX + cas_w + 2*mm
+    cv.setFillColor(MGRAY); cv.setFont('Helvetica-Oblique', 6)
+    cv.drawString(dv_text_x, cas_y + cas_h/2 - 1*mm, '- DV auto')
 
-    cv.setStrokeColor(TEAL); cv.setLineWidth(1.0)
-    sv = rut_x0 + 7.5*RUT_GX
-    cv.line(sv, top_zone_y-RUT_HDR_H-3.5*mm, sv, top_zone_y-top_zone_h+2*mm)
+    # Burbujas del RUT (8 columnas x 10 filas)
+    bub_x0 = rut_x + RUT_INNER_PAD + RUT_BUB_R
+    bub_y0_top = cas_y - RUT_BUB_R - 1.5*mm  # primera fila empieza aqui
+    for i in range(N_DIGS):
+        cx = bub_x0 + i*RUT_BUB_GX
+        for j in range(10):
+            cy = bub_y0_top - j*RUT_BUB_GY
+            _bubble(cv, cx, cy, RUT_BUB_R, str(j), color=NAVY)
 
-    digits_dv = list(range(10)) + ['K']
-    for i in range(N_DCOLS):
-        cx = rut_x0 + i*RUT_GX
-        rows = digits_dv if i == 8 else list(range(10))
-        for j, d in enumerate(rows):
-            cy = top_zone_y - RUT_HDR_H - (j+1)*RUT_GY
-            if cy - RUT_R >= top_zone_y - top_zone_h + 1.5*mm:
-                _bubble(cv, cx, cy, RUT_R, str(d),
-                        color=TEAL if str(d) == 'K' else NAVY)
+    # ====== RECUADRO FORM IDENTIFIER (debajo del RUT) ======
+    FID_H = 22*mm
+    FID_GAP = 4*mm
+    fid_x = rut_x
+    fid_w = RUT_W
+    fid_y = rut_y - FID_GAP - FID_H
 
-    # QR eliminado: reemplazado por Form Identifier debajo de Datos
+    cv.setStrokeColor(BLACK); cv.setLineWidth(2)
+    cv.setFillColor(WHITE)
+    cv.rect(fid_x, fid_y, fid_w, FID_H, fill=1, stroke=1)
 
-    # DATOS ESTUDIANTE (ensanchado: ocupa hasta el borde derecho, sin QR)
-    # Datos arriba, Form Identifier abajo (orden v4 aprobado)
-    dat_x = MX + rut_block_w + 3*mm
-    dat_w = (W - MX) - dat_x
-    FORM_ID_H = 28*mm  # mas alto para que las burbujas y el subtitulo no choquen
-    # Datos arranca en lo alto de la zona superior
-    dat_h = top_zone_h - FORM_ID_H - 2*mm
-    dat_y = top_zone_y - dat_h
+    cv.setFillColor(NAVY); cv.setFont('Helvetica-Bold', 8)
+    cv.drawString(fid_x + 4*mm, fid_y + FID_H - 5*mm, 'FORM IDENTIFIER')
+    cv.setFillColor(MGRAY); cv.setFont('Helvetica-Oblique', 5.5)
+    cv.drawString(fid_x + 4*mm, fid_y + FID_H - 9*mm, 'No marcar - uso del sistema')
 
-    cv.setFillColor(BGRAY); cv.setStrokeColor(BLACK); cv.setLineWidth(2)
-    cv.roundRect(dat_x, dat_y, dat_w, dat_h, 2*mm, fill=1, stroke=1)
-
-    fields = [
-        ('APELLIDOS Y NOMBRE', dat_h-6*mm, dat_h-10*mm),
-        ('ASIGNATURA / CARRERA', dat_h-15*mm, dat_h-19*mm),
-        ('SECCIÓN', dat_h-24*mm, dat_h-28*mm),
-        ('FECHA', dat_h-33*mm, dat_h-37*mm),
-        ('DOCENTE', dat_h-42*mm, dat_h-46*mm),
-        ('EVALUACIÓN', dat_h-51*mm, dat_h-55*mm),
-    ]
-    for label, lbl_off, line_off in fields:
-        cv.setFillColor(NAVY); cv.setFont('Helvetica-Bold', 5.5)
-        cv.drawString(dat_x+3*mm, dat_y+lbl_off, label)
-        cv.setStrokeColor(LGRAY); cv.setLineWidth(0.5)
-        cv.line(dat_x+3*mm, dat_y+line_off, dat_x+dat_w-3*mm, dat_y+line_off)
-
-    cv.setFillColor(TEAL); cv.setFont('Helvetica-Bold', 5.5)
-    cv.drawString(dat_x+3*mm, dat_y+2*mm,
-        f'Escala {scale_min}–{scale_max}  ·  Aprobación {threshold_pct}%  ·  Nota mín. {passing}')
-
-    # FORM IDENTIFIER (patron fijo de prueba) - debajo del bloque de Datos
-    fid_x = dat_x
-    fid_w = dat_w
-    fid_h = FORM_ID_H
-    fid_y = top_zone_y - top_zone_h
-
-    cv.setFillColor(BGRAY); cv.setStrokeColor(BLACK); cv.setLineWidth(2)
-    cv.roundRect(fid_x, fid_y, fid_w, fid_h, 2*mm, fill=1, stroke=1)
-
-    cv.setFillColor(NAVY); cv.setFont('Helvetica-Bold', 6.5)
-    cv.drawString(fid_x+3*mm, fid_y+fid_h-5*mm, 'FORM IDENTIFIER')
-    cv.setFillColor(MGRAY); cv.setFont('Helvetica-Oblique', 5)
-    cv.drawString(fid_x+3*mm, fid_y+fid_h-9*mm, 'No marcar - uso del sistema')
-
-    # 2 filas de 13 burbujas, patron fijo de prueba (0=vacia, 1=rellena, 2=rayada)
-    pattern = [
+    # Patron fijo de prueba: 2 filas x 13 burbujas, 3 estados (0=vacia,1=rellena,2=rayada)
+    FID_PATTERN = [
         [2,1,0,2,1,1,2,2,0,1,2,0,2],
         [1,2,0,1,1,2,1,0,1,2,0,1,1],
     ]
-    fid_bub_r = 2.4*mm
-    fid_bub_gap = (fid_w - 12*mm) / 13.0
-    # Geometria: subtitulo en fid_y + fid_h - 9mm (= 19mm con fid_h=28)
-    # Fila superior centrada en fid_y + 12mm, inferior en fid_y + 5mm. Gap 7mm.
-    fid_row_gap = 7*mm
-    fid_bub_y0 = fid_y + 5*mm  # fila INFERIOR
-
-    for row_idx, row in enumerate(pattern):
+    fid_bub_r = 2.0*mm
+    fid_bub_gap = (fid_w - 8*mm) / 13.0
+    fid_row_gap = 5.5*mm
+    fid_bub_y0 = fid_y + 3.5*mm  # fila inferior
+    for row_idx, row in enumerate(FID_PATTERN):
         by = fid_bub_y0 + (1-row_idx)*fid_row_gap
         for col_idx, state in enumerate(row):
-            bx = fid_x + 6*mm + col_idx*fid_bub_gap
-            cv.setLineWidth(0.8); cv.setStrokeColor(BLACK)
+            bx = fid_x + 4*mm + col_idx*fid_bub_gap + fid_bub_gap/2
+            cv.setStrokeColor(BLACK); cv.setLineWidth(0.6)
             if state == 1:
                 cv.setFillColor(BLACK)
                 cv.circle(bx, by, fid_bub_r, fill=1, stroke=1)
             elif state == 2:
                 cv.setFillColor(WHITE)
                 cv.circle(bx, by, fid_bub_r, fill=1, stroke=1)
-                cv.setStrokeColor(BLACK); cv.setLineWidth(0.6)
                 cv.line(bx-fid_bub_r*0.7, by-fid_bub_r*0.35, bx+fid_bub_r*0.7, by-fid_bub_r*0.35)
                 cv.line(bx-fid_bub_r*0.8, by, bx+fid_bub_r*0.8, by)
                 cv.line(bx-fid_bub_r*0.7, by+fid_bub_r*0.35, bx+fid_bub_r*0.7, by+fid_bub_r*0.35)
@@ -257,70 +240,68 @@ def generate_answer_sheet_pdf(
                 cv.setFillColor(WHITE)
                 cv.circle(bx, by, fid_bub_r, fill=1, stroke=1)
 
-    # INSTRUCCIÓN
-    INST_Y = top_zone_y - top_zone_h - 2*mm
-    INST_H = 5.5*mm
-    cv.setFillColor(NAVY)
-    cv.rect(MX, INST_Y-INST_H, W-2*MX, INST_H, fill=1, stroke=0)
-    cv.setFillColor(WHITE); cv.setFont('Helvetica-Bold', 6)
-    cv.drawCentredString(W/2, INST_Y-INST_H+2*mm,
-        'Rellene completamente la burbuja de su alternativa  ·  '
-        'UNA respuesta por pregunta  ·  No use corrector líquido')
-
-    # GRILLA
-    GRID_TOP = INST_Y - INST_H - 3*mm
-    PIE_H = 7*mm
-    GRID_BOT = MY + PIE_H
-    HDR_Q = 6*mm
-    ROW_H = (GRID_TOP - GRID_BOT - HDR_Q) / N_PER_COL
-    ROW_H = max(4.8*mm, min(ROW_H, 11*mm))
-
-    BUB_R = 3.4*mm; BUB_GAP = 8.5*mm
+    # ====== RECUADRO ALTERNATIVAS (izquierda, alto) ======
+    BUB_R = 3.0*mm
     CHOICES = ['A','B','C','D','E']
-    NUM_W = 10*mm; COL_GAP = 6*mm
-    COL_W = (W - 2*MX - COL_GAP) / 2
-    BUB_AREA = len(CHOICES) * BUB_GAP
+    BUB_GAP = 7*mm
+    NUM_W = 9*mm
+    COL_INNER_GAP = 8*mm  # aire entre columna 1-15 y columna 16-30
+    INNER_PAD_X = 6*mm
+    INNER_PAD_TOP = 10*mm
+    INNER_PAD_BOTTOM = 4*mm
+    ROW_H = 6.8*mm
 
-    for col_idx in range(2):
-        col_x = MX + col_idx*(COL_W + COL_GAP)
+    col_w = NUM_W + len(CHOICES)*BUB_GAP
+    alt_w = rut_x - MX - 4*mm  # ancho del recuadro alternativas
+    alt_y = MY + 18*mm  # deja espacio abajo para pie
+    alt_h = BOXES_TOP - alt_y
+    alt_x = MX
+
+    cv.setStrokeColor(BLACK); cv.setLineWidth(2)
+    cv.setFillColor(WHITE)
+    cv.rect(alt_x, alt_y, alt_w, alt_h, fill=1, stroke=1)
+
+    cv.setFillColor(NAVY); cv.setFont('Helvetica-Bold', 8)
+    cv.drawString(alt_x + 4*mm, alt_y + alt_h - 5*mm, 'ALTERNATIVAS')
+    cv.setFillColor(MGRAY); cv.setFont('Helvetica-Oblique', 5.5)
+    cv.drawString(alt_x + 4*mm, alt_y + alt_h - 9*mm, 'Rellene UNA por pregunta')
+
+    grid_top = alt_y + alt_h - INNER_PAD_TOP - 3*mm
+    grid_bottom = alt_y + INNER_PAD_BOTTOM
+    avail_h = grid_top - grid_bottom
+    actual_row_h = avail_h / N_PER_COL
+
+    # Posiciones X de las dos columnas, centradas en el recuadro
+    total_w = 2*col_w + COL_INNER_GAP
+    col1_x = alt_x + (alt_w - total_w)/2
+    col2_x = col1_x + col_w + COL_INNER_GAP
+
+    for col_idx, col_x in enumerate([col1_x, col2_x]):
         q_start = col_idx*N_PER_COL + 1
-        q_end = min(q_start+N_PER_COL-1, n_questions)
-        bub_x0 = col_x + NUM_W + 2*mm
-
-        cv.setFillColor(NAVY)
-        cv.rect(col_x, GRID_TOP-HDR_Q, NUM_W+BUB_AREA+2*mm, HDR_Q, fill=1, stroke=0)
-        cv.setFillColor(WHITE); cv.setFont('Helvetica-Bold', 7)
-        cv.drawCentredString(col_x+NUM_W/2, GRID_TOP-HDR_Q+2*mm, 'N°')
-        for i, l in enumerate(CHOICES):
-            cv.drawCentredString(bub_x0+i*BUB_GAP, GRID_TOP-HDR_Q+2*mm, l)
+        q_end = q_start + N_PER_COL - 1
+        bub_x0 = col_x + NUM_W
 
         for q_idx, q_num in enumerate(range(q_start, q_end+1)):
-            row_top = GRID_TOP - HDR_Q - (q_idx+1)*ROW_H
-            row_ctr = row_top + ROW_H/2
-
-            if q_idx % 2 == 0:
-                cv.setFillColor(BGRAY)
-                cv.rect(col_x, row_top, NUM_W+BUB_AREA+2*mm, ROW_H, fill=1, stroke=0)
-
-            if q_idx % 5 == 0 and q_idx > 0:
-                cv.setStrokeColor(LGRAY); cv.setLineWidth(0.8)
-                cv.line(col_x, row_top+ROW_H, col_x+NUM_W+BUB_AREA+2*mm, row_top+ROW_H)
-
-            cv.setFillColor(NAVY); cv.setFont('Helvetica-Bold', 10)
-            cv.drawRightString(col_x+NUM_W-1*mm, row_ctr-3.5*mm, f'{q_num}.')
-
+            row_ctr = grid_top - q_idx*actual_row_h - actual_row_h/2
+            cv.setFillColor(NAVY); cv.setFont('Helvetica-Bold', 9)
+            cv.drawRightString(col_x + NUM_W - 2*mm, row_ctr - 2.5*mm, f'{q_num}.')
             for i, l in enumerate(CHOICES):
-                _bubble(cv, bub_x0+i*BUB_GAP, row_ctr, BUB_R, l)
+                _bubble(cv, bub_x0 + i*BUB_GAP + BUB_GAP/2, row_ctr, BUB_R, l)
 
-    # PIE
-    cv.setStrokeColor(LGRAY); cv.setLineWidth(0.4)
-    cv.line(MX, MY+5*mm, W-MX, MY+5*mm)
-    cv.setFillColor(MGRAY); cv.setFont('Helvetica', 5)
-    cv.drawString(MX, MY+2*mm,
-        f'Evidentra — Plataforma de Inteligencia Academica  |  '
-        f'{assessment_name}  |  ID: {assessment_id}')
-    cv.setFont('Helvetica-Bold', 5)
-    cv.drawRightString(W-MX, MY+2*mm, f'Ver.{version}  ·  {n_questions}P  ·  {date}')
+    # ====== PIE ======
+    cv.setFillColor(MGRAY); cv.setFont('Helvetica-Oblique', 6)
+    cv.drawCentredString(W/2, MY + 13*mm,
+        'Use lapicero negro . Rellene completamente . UNA respuesta por pregunta . No use corrector')
+    cv.setFillColor(TEAL); cv.setFont('Helvetica-Bold', 7.5)
+    cv.drawCentredString(W/2, MY + 8*mm,
+        f'Escala {scale_min}-{scale_max} . Aprobacion {threshold_pct}% . Nota minima {passing}')
+
+    cv.setFillColor(MGRAY); cv.setFont('Helvetica', 5.5)
+    cv.drawString(MX, MY + 2*mm,
+        f'Evalys . ID: {assessment_id[:13]} . {assessment_name} . {course_name}')
+    cv.setFillColor(TEAL); cv.setFont('Helvetica-Bold', 6)
+    cv.drawRightString(W-MX, MY + 2*mm,
+        f'Ver.{version} . {n_questions}P . {date}')
 
     cv.save()
     return buf.getvalue()
