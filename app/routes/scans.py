@@ -23,32 +23,37 @@ def resolve_scan_review(
 ):
     return scan_service.resolve_scan_review(db, scan_id)
 
-from fastapi import UploadFile, File, HTTPException
+from typing import Optional
+from fastapi import UploadFile, File, Form, HTTPException
 from app.services.scan_engine import scan_sheet
 from app.models.scan import Scan
 
 @router.post("/process-image")
-async def process_scan_image(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def process_scan_image(
+    file: UploadFile = File(...),
+    assessment_id: Optional[str] = Form(None),
+    version: Optional[str] = Form(None),
+    n_questions: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+):
     image_bytes = await file.read()
-    result = scan_sheet(image_bytes)
+    result = scan_sheet(image_bytes, n_questions_override=n_questions or 0)
     if not result.success:
         raise HTTPException(status_code=400, detail=result.error or "Error al escanear")
 
     qr = result.qr
-    if not qr or not qr.assessment_id:
-        raise HTTPException(status_code=400, detail="QR no detectado")
-
-    # Buscar scan existente o crear uno nuevo
-    from app.repositories.scan_repo import ScanRepository
-    repo = ScanRepository()
-    scan = repo.get(db, qr.assessment_id)
+    # assessment_id puede venir del parametro (hoja v6 sin QR) o del QR (hojas viejas)
+    final_aid = assessment_id or (qr.assessment_id if qr else None)
+    final_version = version or (qr.version if qr else None) or "A"
+    if not final_aid:
+        raise HTTPException(status_code=400, detail="No se pudo identificar la evaluacion (sin QR ni assessment_id)")
 
     # Crear nuevo scan con los datos del OCR
     new_scan = Scan(
-        assessment_id=qr.assessment_id,
+        assessment_id=final_aid,
         student_identifier=result.rut or "desconocido",
         status="requires_review" if result.ambiguous else "processed",
-        detected_version=qr.version or "A",
+        detected_version=final_version,
         requires_review=bool(result.ambiguous),
         ambiguity_count=len(result.ambiguous or []),
         unresolved_ambiguity_count=len(result.ambiguous or []),
@@ -75,7 +80,7 @@ async def process_scan_image(file: UploadFile = File(...), db: Session = Depends
     return {
         "scan_id": str(new_scan.id),
         "rut": result.rut,
-        "version": qr.version,
+        "version": final_version,
         "n_questions": len(result.answers or []),
         "answers": result.answers,
         "ambiguous": result.ambiguous,
@@ -85,24 +90,32 @@ async def process_scan_image(file: UploadFile = File(...), db: Session = Depends
     }
 
 @router.post("/process-pdf")
-async def process_scan_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def process_scan_pdf(
+    file: UploadFile = File(...),
+    assessment_id: Optional[str] = Form(None),
+    version: Optional[str] = Form(None),
+    n_questions: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+):
     import fitz
     pdf_bytes = await file.read()
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     page = doc[0]
     pix = page.get_pixmap(matrix=fitz.Matrix(3, 3))
     image_bytes = pix.tobytes("jpeg")
-    result = scan_sheet(image_bytes)
+    result = scan_sheet(image_bytes, n_questions_override=n_questions or 0)
     if not result.success:
         raise HTTPException(status_code=400, detail=result.error or "Error al escanear")
     qr = result.qr
-    if not qr or not qr.assessment_id:
-        raise HTTPException(status_code=400, detail="QR no detectado")
+    final_aid = assessment_id or (qr.assessment_id if qr else None)
+    final_version = version or (qr.version if qr else None) or "A"
+    if not final_aid:
+        raise HTTPException(status_code=400, detail="No se pudo identificar la evaluacion (sin QR ni assessment_id)")
     new_scan = Scan(
-        assessment_id=qr.assessment_id,
+        assessment_id=final_aid,
         student_identifier=result.rut or "desconocido",
         status="requires_review" if result.ambiguous else "processed",
-        detected_version=qr.version or "A",
+        detected_version=final_version,
         requires_review=bool(result.ambiguous),
         ambiguity_count=len(result.ambiguous or []),
         unresolved_ambiguity_count=len(result.ambiguous or []),
@@ -118,7 +131,7 @@ async def process_scan_pdf(file: UploadFile = File(...), db: Session = Depends(g
         resultado = get_result(db, new_scan.id)
     except Exception as e:
         resultado = {"error": str(e)}
-    return {"scan_id": str(new_scan.id), "rut": result.rut, "version": qr.version,
+    return {"scan_id": str(new_scan.id), "rut": result.rut, "version": final_version,
             "n_questions": len(result.answers or []), "answers": result.answers,
             "ambiguous": result.ambiguous, "requires_review": new_scan.requires_review,
             "debug_image": result.debug_image, "resultado": resultado}
