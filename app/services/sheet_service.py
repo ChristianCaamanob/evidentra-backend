@@ -180,21 +180,15 @@ def generate_answer_sheet_pdf(
                 _bubble(cv, cx, cy, RUT_R, str(d),
                         color=TEAL if str(d) == 'K' else NAVY)
 
-    # QR — más grande y centrado en zona datos
-    QR_SIZE = 30*mm
-    qr_x = W - MX - QR_SIZE - 3*mm
-    qr_y = top_zone_y - top_zone_h + 8*mm
-    _draw_qr(cv, qr_mat, qr_x, qr_y, QR_SIZE)
-    cv.setFillColor(MGRAY); cv.setFont('Helvetica', 4.5)
-    cv.drawCentredString(qr_x+QR_SIZE/2, qr_y-3*mm, f'ID: {assessment_id}')
-    cv.setFont('Helvetica', 4)
-    cv.drawCentredString(qr_x+QR_SIZE/2, qr_y-5*mm, 'NO MARCAR ESTA ZONA')
+    # QR eliminado: reemplazado por Form Identifier debajo de Datos
 
-    # DATOS ESTUDIANTE
+    # DATOS ESTUDIANTE (ensanchado: ocupa hasta el borde derecho, sin QR)
     dat_x = MX + rut_block_w + 3*mm
-    dat_w = qr_x - dat_x - 3*mm
+    dat_w = (W - MX) - dat_x
     dat_y = top_zone_y - top_zone_h
-    dat_h = top_zone_h
+    # Altura reducida para dejar espacio al Form Identifier debajo
+    FORM_ID_H = 22*mm
+    dat_h = top_zone_h - FORM_ID_H - 2*mm
 
     cv.setFillColor(BGRAY); cv.setStrokeColor(BLACK); cv.setLineWidth(2)
     cv.roundRect(dat_x, dat_y, dat_w, dat_h, 2*mm, fill=1, stroke=1)
@@ -216,6 +210,48 @@ def generate_answer_sheet_pdf(
     cv.setFillColor(TEAL); cv.setFont('Helvetica-Bold', 5.5)
     cv.drawString(dat_x+3*mm, dat_y+2*mm,
         f'Escala {scale_min}–{scale_max}  ·  Aprobación {threshold_pct}%  ·  Nota mín. {passing}')
+
+    # FORM IDENTIFIER (patron fijo de prueba)
+    fid_x = dat_x
+    fid_y = dat_y + dat_h + 2*mm
+    fid_w = dat_w
+    fid_h = FORM_ID_H
+
+    cv.setFillColor(BGRAY); cv.setStrokeColor(BLACK); cv.setLineWidth(2)
+    cv.roundRect(fid_x, fid_y, fid_w, fid_h, 2*mm, fill=1, stroke=1)
+
+    cv.setFillColor(NAVY); cv.setFont('Helvetica-Bold', 6.5)
+    cv.drawString(fid_x+3*mm, fid_y+fid_h-5*mm, 'FORM IDENTIFIER')
+    cv.setFillColor(MGRAY); cv.setFont('Helvetica-Oblique', 5)
+    cv.drawString(fid_x+3*mm, fid_y+fid_h-9*mm, 'No marcar - uso del sistema')
+
+    # 2 filas de 13 burbujas, patron fijo de prueba (0=vacia, 1=rellena, 2=rayada)
+    pattern = [
+        [2,1,0,2,1,1,2,2,0,1,2,0,2],
+        [1,2,0,1,1,2,1,0,1,2,0,1,1],
+    ]
+    fid_bub_r = 2.4*mm
+    fid_bub_gap = (fid_w - 12*mm) / 13.0
+    fid_bub_y0 = fid_y + 5*mm
+
+    for row_idx, row in enumerate(pattern):
+        by = fid_bub_y0 + (1-row_idx)*5*mm
+        for col_idx, state in enumerate(row):
+            bx = fid_x + 6*mm + col_idx*fid_bub_gap
+            cv.setLineWidth(0.8); cv.setStrokeColor(BLACK)
+            if state == 1:
+                cv.setFillColor(BLACK)
+                cv.circle(bx, by, fid_bub_r, fill=1, stroke=1)
+            elif state == 2:
+                cv.setFillColor(WHITE)
+                cv.circle(bx, by, fid_bub_r, fill=1, stroke=1)
+                cv.setStrokeColor(BLACK); cv.setLineWidth(0.6)
+                cv.line(bx-fid_bub_r*0.7, by-fid_bub_r*0.35, bx+fid_bub_r*0.7, by-fid_bub_r*0.35)
+                cv.line(bx-fid_bub_r*0.8, by, bx+fid_bub_r*0.8, by)
+                cv.line(bx-fid_bub_r*0.7, by+fid_bub_r*0.35, bx+fid_bub_r*0.7, by+fid_bub_r*0.35)
+            else:
+                cv.setFillColor(WHITE)
+                cv.circle(bx, by, fid_bub_r, fill=1, stroke=1)
 
     # INSTRUCCIÓN
     INST_Y = top_zone_y - top_zone_h - 2*mm
