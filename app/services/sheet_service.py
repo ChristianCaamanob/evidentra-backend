@@ -183,7 +183,7 @@ def generate_answer_sheet_pdf(
     col1_num_x = 58
     col1_bub_xs = [80, 96, 112, 128, 144]
     col2_num_x = 175
-    col2_bub_xs = [190, 204, 218, 232, 246]
+    col2_bub_xs = [197, 213, 229, 245, 261]
     row_y_top_svg = 184
     row_gap = 26
 
