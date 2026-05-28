@@ -144,148 +144,140 @@ def generate_answer_sheet_pdf(
     cv.drawString(MX+102*mm, DAT_Y2, 'DOCENTE')
     cv.line(MX+102*mm, DAT_Y2-3*mm, W-MX-2*mm, DAT_Y2-3*mm)
 
-    # ====== TOP DE LOS RECUADROS PRINCIPALES ======
-    BOXES_TOP = DAT_Y2 - 10*mm
+    # ====== COORDENADAS ABSOLUTAS DEL MOCKUP V6 ======
+    # Mockup SVG era 595x842 = A4 en puntos PDF, traslado directo.
+    # En SVG Y crece hacia abajo. En ReportLab Y crece hacia arriba.
+    # Conversion: y_rl = H - y_svg
+    # Punto = unidad nativa de ReportLab, lo dejo sin *mm para coordenadas absolutas.
+    from reportlab.lib.units import inch
 
-    # ====== RECUADRO RUT (arriba derecha) ======
-    # Geometria: 8 columnas de burbujas + texto auxiliar
-    RUT_BUB_R = 2.6*mm
-    RUT_BUB_GX = 7.5*mm  # mas aire horizontal entre burbujas
-    RUT_BUB_GY = 6.5*mm  # mas aire vertical entre filas
-    N_DIGS = 8
-    RUT_INNER_PAD = 4*mm
-    RUT_BUB_AREA_W = (N_DIGS-1)*RUT_BUB_GX + 2*RUT_BUB_R
-    RUT_BUB_AREA_H = 10*RUT_BUB_GY + 2*RUT_BUB_R - RUT_BUB_GY
-    RUT_TITULO_H = 10*mm   # titulo + subtitulo
-    RUT_CASILLAS_H = 8*mm  # casillas para escribir RUT
-    RUT_W = RUT_BUB_AREA_W + 2*RUT_INNER_PAD + 18*mm  # extra para "DV auto"
-    RUT_H = RUT_TITULO_H + RUT_CASILLAS_H + RUT_BUB_AREA_H + 2*RUT_INNER_PAD
+    # ====== RECUADRO ALTERNATIVAS (izquierda) ======
+    # SVG: x=30, y=230, w=290, h=900 (alto largo)
+    # ReportLab: alt_x=30, alt_y=H-(230+900)=H-1130, alt_w=290, alt_h=900
+    # Pero como H=842, no entra. Hay que escalar al canvas real.
+    # El SVG era 842 alto. Lo dejamos identico ya que A4=842pt.
+    # Pero las coords y=230 en SVG = (842-230)=612 en RL. Y h=900 sobrepasa el canvas.
+    # Mejor: re-escribir las coords directamente en sistema ReportLab.
 
-    rut_x = W - MX - RUT_W
-    rut_y = BOXES_TOP - RUT_H
-
-    cv.setStrokeColor(BLACK); cv.setLineWidth(2)
-    cv.setFillColor(WHITE)
-    cv.rect(rut_x, rut_y, RUT_W, RUT_H, fill=1, stroke=1)
-
-    cv.setFillColor(NAVY); cv.setFont('Helvetica-Bold', 8)
-    cv.drawString(rut_x + RUT_INNER_PAD, rut_y + RUT_H - 6*mm, 'RUT')
-    cv.setFillColor(MGRAY); cv.setFont('Helvetica', 5.5)
-    cv.drawString(rut_x + RUT_INNER_PAD, rut_y + RUT_H - 9.5*mm,
-        'Escriba arriba y rellene las burbujas')
-
-    # Casillas para escribir el RUT (8 cajas separadas)
-    cas_w = 6*mm; cas_h = 6.5*mm
-    cas_gap = RUT_BUB_GX - cas_w  # mismo gap que las burbujas
-    cas_x0 = rut_x + RUT_INNER_PAD + (RUT_BUB_R - cas_w/2)
-    cas_y = rut_y + RUT_H - RUT_TITULO_H - cas_h
-    cv.setStrokeColor(BLACK); cv.setLineWidth(0.6)
-    for i in range(N_DIGS):
-        cx = cas_x0 + i*RUT_BUB_GX - (RUT_BUB_R - cas_w/2)
-        cv.rect(cx, cas_y, cas_w, cas_h, fill=0, stroke=1)
-    # "DV auto" a la derecha
-    dv_text_x = cas_x0 + (N_DIGS-1)*RUT_BUB_GX + cas_w + 2*mm
-    cv.setFillColor(MGRAY); cv.setFont('Helvetica-Oblique', 6)
-    cv.drawString(dv_text_x, cas_y + cas_h/2 - 1*mm, '- DV auto')
-
-    # Burbujas del RUT (8 columnas x 10 filas)
-    bub_x0 = rut_x + RUT_INNER_PAD + RUT_BUB_R
-    bub_y0_top = cas_y - RUT_BUB_R - 1.5*mm  # primera fila empieza aqui
-    for i in range(N_DIGS):
-        cx = bub_x0 + i*RUT_BUB_GX
-        for j in range(10):
-            cy = bub_y0_top - j*RUT_BUB_GY
-            _bubble(cv, cx, cy, RUT_BUB_R, str(j), color=NAVY)
-
-    # ====== RECUADRO FORM IDENTIFIER (debajo del RUT) ======
-    FID_H = 22*mm
-    FID_GAP = 4*mm
-    fid_x = rut_x
-    fid_w = RUT_W
-    fid_y = rut_y - FID_GAP - FID_H
-
-    cv.setStrokeColor(BLACK); cv.setLineWidth(2)
-    cv.setFillColor(WHITE)
-    cv.rect(fid_x, fid_y, fid_w, FID_H, fill=1, stroke=1)
-
-    cv.setFillColor(NAVY); cv.setFont('Helvetica-Bold', 8)
-    cv.drawString(fid_x + 4*mm, fid_y + FID_H - 5*mm, 'FORM IDENTIFIER')
-    cv.setFillColor(MGRAY); cv.setFont('Helvetica-Oblique', 5.5)
-    cv.drawString(fid_x + 4*mm, fid_y + FID_H - 9*mm, 'No marcar - uso del sistema')
-
-    # Patron fijo de prueba: 2 filas x 13 burbujas, 3 estados (0=vacia,1=rellena,2=rayada)
-    FID_PATTERN = [
-        [2,1,0,2,1,1,2,2,0,1,2,0,2],
-        [1,2,0,1,1,2,1,0,1,2,0,1,1],
-    ]
-    fid_bub_r = 2.0*mm
-    fid_bub_gap = (fid_w - 8*mm) / 13.0
-    fid_row_gap = 5.5*mm
-    fid_bub_y0 = fid_y + 3.5*mm  # fila inferior
-    for row_idx, row in enumerate(FID_PATTERN):
-        by = fid_bub_y0 + (1-row_idx)*fid_row_gap
-        for col_idx, state in enumerate(row):
-            bx = fid_x + 4*mm + col_idx*fid_bub_gap + fid_bub_gap/2
-            cv.setStrokeColor(BLACK); cv.setLineWidth(0.6)
-            if state == 1:
-                cv.setFillColor(BLACK)
-                cv.circle(bx, by, fid_bub_r, fill=1, stroke=1)
-            elif state == 2:
-                cv.setFillColor(WHITE)
-                cv.circle(bx, by, fid_bub_r, fill=1, stroke=1)
-                cv.line(bx-fid_bub_r*0.7, by-fid_bub_r*0.35, bx+fid_bub_r*0.7, by-fid_bub_r*0.35)
-                cv.line(bx-fid_bub_r*0.8, by, bx+fid_bub_r*0.8, by)
-                cv.line(bx-fid_bub_r*0.7, by+fid_bub_r*0.35, bx+fid_bub_r*0.7, by+fid_bub_r*0.35)
-            else:
-                cv.setFillColor(WHITE)
-                cv.circle(bx, by, fid_bub_r, fill=1, stroke=1)
-
-    # ====== RECUADRO ALTERNATIVAS (izquierda, alto) ======
-    BUB_R = 2.8*mm
-    CHOICES = ['A','B','C','D','E']
-    BUB_GAP = 6*mm  # ajustado para que 2 columnas + gap quepan en alt_w
-    NUM_W = 13*mm  # mas aire entre numero de pregunta y burbuja A
-    COL_INNER_GAP = 8*mm  # aire entre columna 1-15 y columna 16-30
-    INNER_PAD_X = 1*mm  # bloque pegado a la izquierda del recuadro
-    INNER_PAD_TOP = 10*mm
-    INNER_PAD_BOTTOM = 4*mm
-    ROW_H = 6.8*mm
-
-    col_w = NUM_W + len(CHOICES)*BUB_GAP
-    alt_w = rut_x - MX - 4*mm  # ancho del recuadro alternativas
-    alt_y = MY + 18*mm  # deja espacio abajo para pie
-    alt_h = BOXES_TOP - alt_y
-    alt_x = MX
+    # ALTERNATIVAS: ancho 295pt, desde x=30 hasta x=325. Alto desde y=140 hasta y=695 (SVG).
+    # En RL: alt_y = H - 695 = 147. alt_h = 695-140 = 555.
+    alt_x = 30
+    alt_y = H - 695
+    alt_w = 295
+    alt_h = 555
 
     cv.setStrokeColor(BLACK); cv.setLineWidth(2)
     cv.setFillColor(WHITE)
     cv.rect(alt_x, alt_y, alt_w, alt_h, fill=1, stroke=1)
-
     cv.setFillColor(NAVY); cv.setFont('Helvetica-Bold', 8)
-    cv.drawString(alt_x + 4*mm, alt_y + alt_h - 5*mm, 'ALTERNATIVAS')
+    cv.drawString(alt_x + 10, alt_y + alt_h - 15, 'ALTERNATIVAS')
     cv.setFillColor(MGRAY); cv.setFont('Helvetica-Oblique', 5.5)
-    cv.drawString(alt_x + 4*mm, alt_y + alt_h - 9*mm, 'Rellene UNA por pregunta')
+    cv.drawString(alt_x + 10, alt_y + alt_h - 25, 'Rellene UNA por pregunta')
 
-    grid_top = alt_y + alt_h - INNER_PAD_TOP - 3*mm
-    grid_bottom = alt_y + INNER_PAD_BOTTOM
-    avail_h = grid_top - grid_bottom
-    actual_row_h = avail_h / N_PER_COL
+    # 30 preguntas en 2 columnas (15 + 15)
+    # Coords del mockup SVG: col1 numeros en x=58, burbujas x=80,96,112,128,144
+    # col2 numeros en x=175, burbujas x=190,204,218,232,246
+    # Primera fila y=184 (SVG) = H-184 (RL). Gap entre filas = 26 (SVG, hacia abajo) = -26 (RL).
+    BUB_R = 7.5
+    CHOICES = ['A','B','C','D','E']
+    col1_num_x = 58
+    col1_bub_xs = [80, 96, 112, 128, 144]
+    col2_num_x = 175
+    col2_bub_xs = [190, 204, 218, 232, 246]
+    row_y_top_svg = 184
+    row_gap = 26
 
-    # Posiciones X de las dos columnas, alineadas a la izquierda con padding
-    col1_x = alt_x + INNER_PAD_X
-    col2_x = col1_x + col_w + COL_INNER_GAP
-
-    for col_idx, col_x in enumerate([col1_x, col2_x]):
-        q_start = col_idx*N_PER_COL + 1
-        q_end = q_start + N_PER_COL - 1
-        bub_x0 = col_x + NUM_W
-
-        for q_idx, q_num in enumerate(range(q_start, q_end+1)):
-            row_ctr = grid_top - q_idx*actual_row_h - actual_row_h/2
+    for col_idx, (num_x, bub_xs) in enumerate([(col1_num_x, col1_bub_xs), (col2_num_x, col2_bub_xs)]):
+        q_start = col_idx*15 + 1
+        for q_idx, q_num in enumerate(range(q_start, q_start+15)):
+            y_svg = row_y_top_svg + q_idx*row_gap
+            y_rl = H - y_svg
             cv.setFillColor(NAVY); cv.setFont('Helvetica-Bold', 9)
-            cv.drawRightString(col_x + NUM_W - 2*mm, row_ctr - 2.5*mm, f'{q_num}.')
+            cv.drawRightString(num_x, y_rl - 3, f'{q_num}.')
             for i, l in enumerate(CHOICES):
-                _bubble(cv, bub_x0 + i*BUB_GAP, row_ctr, BUB_R, l)
+                _bubble(cv, bub_xs[i], y_rl, BUB_R, l)
+
+    # ====== RECUADRO RUT (arriba derecha) ======
+    # Mockup SVG: x=335, y=140, w=231, h=200
+    rut_x = 335
+    rut_y = H - 340
+    rut_w = 231
+    rut_h = 200
+
+    cv.setStrokeColor(BLACK); cv.setLineWidth(2)
+    cv.setFillColor(WHITE)
+    cv.rect(rut_x, rut_y, rut_w, rut_h, fill=1, stroke=1)
+    cv.setFillColor(NAVY); cv.setFont('Helvetica-Bold', 8)
+    cv.drawString(rut_x + 11, rut_y + rut_h - 16, 'RUT')
+    cv.setFillColor(MGRAY); cv.setFont('Helvetica', 5.5)
+    cv.drawString(rut_x + 11, rut_y + rut_h - 26, 'Escriba arriba y rellene las burbujas')
+
+    # Casillas para escribir RUT: 8 cajas en y=175 (SVG), w=16 h=18
+    cas_y_svg = 175 + 18
+    cas_y_rl = H - cas_y_svg
+    cas_xs = [348, 367, 386, 405, 424, 443, 462, 481]
+    cas_w = 16; cas_h = 18
+    cv.setStrokeColor(BLACK); cv.setLineWidth(0.6)
+    for cx in cas_xs:
+        cv.rect(cx, cas_y_rl, cas_w, cas_h, fill=0, stroke=1)
+    cv.setFillColor(MGRAY); cv.setFont('Helvetica-Oblique', 7)
+    cv.drawString(503, cas_y_rl + 7, '- DV auto')
+
+    # 8 columnas de burbujas, 10 filas (0-9)
+    # Mockup: centros x = 356, 375, 394, 413, 432, 451, 470, 489 (gap 19)
+    # Primera fila y=205 (SVG), gap 13 entre filas
+    rut_bub_xs = [356, 375, 394, 413, 432, 451, 470, 489]
+    rut_y_top_svg = 205
+    rut_row_gap = 13
+    rut_bub_r = 5.5
+
+    for col_x in rut_bub_xs:
+        for j in range(10):
+            y_svg = rut_y_top_svg + j*rut_row_gap
+            y_rl = H - y_svg
+            _bubble(cv, col_x, y_rl, rut_bub_r, str(j), color=NAVY)
+
+    # ====== RECUADRO FORM IDENTIFIER (debajo del RUT) ======
+    # Mockup: x=335, y=355, w=231, h=80
+    fid_x = 335
+    fid_y = H - 435
+    fid_w = 231
+    fid_h = 80
+
+    cv.setStrokeColor(BLACK); cv.setLineWidth(2)
+    cv.setFillColor(WHITE)
+    cv.rect(fid_x, fid_y, fid_w, fid_h, fill=1, stroke=1)
+    cv.setFillColor(NAVY); cv.setFont('Helvetica-Bold', 8)
+    cv.drawString(fid_x + 11, fid_y + fid_h - 16, 'FORM IDENTIFIER')
+    cv.setFillColor(MGRAY); cv.setFont('Helvetica-Oblique', 5.5)
+    cv.drawString(fid_x + 11, fid_y + fid_h - 26, 'No marcar - uso del sistema')
+
+    # 2 filas de 13 burbujas: y_svg = 400 (fila sup), 420 (fila inf)
+    FID_PATTERN = [
+        [2,1,0,2,1,1,2,2,0,1,2,0,2],
+        [1,2,0,1,1,2,1,0,1,2,0,1,1],
+    ]
+    fid_xs = [353, 368, 383, 398, 413, 428, 443, 458, 473, 488, 503, 518, 533]
+    fid_y_rows_svg = [400, 420]
+    fid_bub_r = 5.0
+
+    for row_idx, row in enumerate(FID_PATTERN):
+        y_rl = H - fid_y_rows_svg[row_idx]
+        for col_idx, state in enumerate(row):
+            bx = fid_xs[col_idx]
+            cv.setStrokeColor(BLACK); cv.setLineWidth(0.6)
+            if state == 1:
+                cv.setFillColor(BLACK)
+                cv.circle(bx, y_rl, fid_bub_r, fill=1, stroke=1)
+            elif state == 2:
+                cv.setFillColor(WHITE)
+                cv.circle(bx, y_rl, fid_bub_r, fill=1, stroke=1)
+                cv.line(bx-fid_bub_r*0.7, y_rl-fid_bub_r*0.35, bx+fid_bub_r*0.7, y_rl-fid_bub_r*0.35)
+                cv.line(bx-fid_bub_r*0.8, y_rl, bx+fid_bub_r*0.8, y_rl)
+                cv.line(bx-fid_bub_r*0.7, y_rl+fid_bub_r*0.35, bx+fid_bub_r*0.7, y_rl+fid_bub_r*0.35)
+            else:
+                cv.setFillColor(WHITE)
+                cv.circle(bx, y_rl, fid_bub_r, fill=1, stroke=1)
 
     # ====== PIE ======
     cv.setFillColor(MGRAY); cv.setFont('Helvetica-Oblique', 6)
