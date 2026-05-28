@@ -186,30 +186,29 @@ def is_bubble_filled(gray, cx, cy, r, threshold=0.45):
 
 
 def read_rut(gray):
-    # Coordenadas derivadas de sheet_service.py. Imagen normalizada a 2100x2970 = 10px/mm.
-    MM = 10.0
-    H_MM = 297.0
-    MX = 12.0
-    rut_x0 = MX + 2.0
-    RUT_GX = 7.0
-    RUT_GY = 6.2
-    RUT_R = 2.6
-    MY = 10.0; HDR_H = 10.0
-    hdr_y = H_MM - MY - HDR_H
-    top_zone_y = hdr_y - 2.0
-    RUT_HDR_H = 6.0
-    N_DCOLS = 9
-    bubble_r = int(RUT_R * MM)
+    """Coordenadas del v6 en PUNTOS PDF, convertidas a pixeles.
+    Imagen normalizada 2100x2970. Factor: 2100/595.27 = 3.528 px/punto.
+    Las coordenadas SVG del v6 usan y_svg, y en el PDF y_rl = H_PT - y_svg.
+    En la imagen (Y hacia abajo): y_px = y_svg * FACTOR directamente."""
+    FACTOR = 2100.0 / 595.27  # = 3.528 px por punto PDF
+    H_PT = 841.89
+
+    # RUT v6: 8 columnas, centros x (en puntos) y filas
+    rut_bub_xs = [356, 375, 394, 413, 432, 451, 470, 489]
+    rut_y_top_svg = 205   # primera fila (digito 0), coordenada SVG
+    rut_row_gap = 13
+    rut_bub_r_pt = 5.5
+
+    bubble_r = int(rut_bub_r_pt * FACTOR)
     digits = []
     conf_scores = []
-    DV = list(range(10)) + ["K"]
-    for col in range(N_DCOLS):
-        cx = int((rut_x0 + col*RUT_GX) * MM)
-        n_rows = 11 if col == 8 else 10
+    # En el v6 NO hay columna DV con burbujas (DV se calcula). Solo 8 columnas 0-9.
+    for col_x_pt in rut_bub_xs:
+        cx = int(col_x_pt * FACTOR)
         col_data = []
-        for row in range(n_rows):
-            cy_pdf = top_zone_y - RUT_HDR_H - (row+1)*RUT_GY
-            cy = int((H_MM - cy_pdf) * MM)
+        for row in range(10):
+            y_svg = rut_y_top_svg + row * rut_row_gap
+            cy = int(y_svg * FACTOR)  # y_svg ya esta en sistema imagen (Y hacia abajo)
             filled, darkness = is_bubble_filled(gray, cx, cy, bubble_r)
             col_data.append((filled, darkness, row))
         col_data.sort(key=lambda x: x[1], reverse=True)
@@ -220,55 +219,62 @@ def read_rut(gray):
                 digits.append(None)
                 conf_scores.append(0.0)
             else:
-                idx = best[2]
-                digits.append(DV[idx] if col==8 else idx)
+                digits.append(best[2])
                 conf_scores.append(best[1])
         else:
             digits.append(None)
             conf_scores.append(0.0)
+    # Calcular DV automaticamente (modulo 11) si los 8 digitos estan
     rut_str = None
     if all(d is not None for d in digits):
-        num = "".join(str(d) for d in digits[:8])
-        dv = str(digits[8])
+        num = "".join(str(d) for d in digits)
+        dv = _calcular_dv(num)
         rut_str = f"{num}-{dv}"
+        digits = digits + [dv]
     avg = float(np.mean([s for s in conf_scores if s > 0])) if any(s > 0 for s in conf_scores) else 0.0
     return rut_str, digits, avg, []
 
 
+def _calcular_dv(num_str):
+    """Calcula el digito verificador chileno (modulo 11) de un RUT de 8 digitos."""
+    reversed_digits = [int(d) for d in reversed(num_str)]
+    factors = [2, 3, 4, 5, 6, 7]
+    s = sum(d * factors[i % 6] for i, d in enumerate(reversed_digits))
+    resto = 11 - (s % 11)
+    if resto == 11:
+        return "0"
+    if resto == 10:
+        return "K"
+    return str(resto)
+
+
 def read_answers(gray, n_questions):
-    # Coordenadas derivadas de sheet_service.py. Imagen normalizada a 2100x2970 = 10px/mm.
-    MM = 10.0
-    H_MM = 297.0
+    """Coordenadas del v6 en PUNTOS PDF convertidas a pixeles.
+    Alternativas en 2 columnas (1-15, 16-30)."""
+    FACTOR = 2100.0 / 595.27
+
+    # v6: coordenadas SVG (Y hacia abajo, igual que la imagen)
+    col1_bub_xs = [87, 103, 119, 135, 151]
+    col2_bub_xs = [210, 226, 242, 258, 274]
+    row_y_top_svg = 184
+    row_gap = 26
+    bub_r_pt = 6.5
+    CHOICES = ["A", "B", "C", "D", "E"]
+
     n_per_col = n_questions // 2
-    MY = 10.0; HDR_H = 10.0
-    hdr_y = H_MM - MY - HDR_H
-    top_zone_y = hdr_y - 2.0
-    top_zone_h = 80.0
-    INST_Y = top_zone_y - top_zone_h - 2.0
-    INST_H = 5.5
-    GRID_TOP = INST_Y - INST_H - 3.0
-    PIE_H = 7.0; GRID_BOT = MY + PIE_H
-    HDR_Q = 6.0
-    ROW_H = (GRID_TOP - GRID_BOT - HDR_Q) / n_per_col
-    ROW_H = max(4.8, min(ROW_H, 11.0))
-    MX = 12.0; COL_GAP = 6.0
-    COL_W = (210.0 - 2*MX - COL_GAP) / 2
-    NUM_W = 10.0; BUB_GAP = 8.5; BUB_R = 3.4
-    CHOICES = ["A","B","C","D","E"]
+    bubble_r = int(bub_r_pt * FACTOR)
     answers = []
     ambiguous = []
-    for col_idx in range(2):
-        col_x = MX + col_idx*(COL_W + COL_GAP)
-        bub_x0 = col_x + NUM_W + 2.0
+
+    for col_idx, bub_xs in enumerate([col1_bub_xs, col2_bub_xs]):
         q_start = col_idx * n_per_col
         for q_idx in range(n_per_col):
-            row_top = GRID_TOP - HDR_Q - (q_idx+1)*ROW_H
-            row_ctr_mm_bottom = row_top + ROW_H/2
-            cy = int((H_MM - row_ctr_mm_bottom) * MM)
+            y_svg = row_y_top_svg + q_idx * row_gap
+            cy = int(y_svg * FACTOR)
             row_res = []
             for i, ch in enumerate(CHOICES):
-                cx = int((bub_x0 + i*BUB_GAP) * MM)
-                filled, dark = is_bubble_filled(gray, cx, cy, int(BUB_R*MM))
+                cx = int(bub_xs[i] * FACTOR)
+                filled, dark = is_bubble_filled(gray, cx, cy, bubble_r)
                 row_res.append((ch, filled, dark))
             row_res.sort(key=lambda x: x[2], reverse=True)
             best = row_res[0]
