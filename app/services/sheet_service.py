@@ -244,9 +244,9 @@ def generate_answer_sheet_pdf(
     BUB_R = 2.8*mm
     CHOICES = ['A','B','C','D','E']
     BUB_GAP = 6*mm  # ajustado para que 2 columnas + gap quepan en alt_w
-    NUM_W = 11*mm  # mas aire entre numero de pregunta y burbuja A
+    NUM_W = 13*mm  # mas aire entre numero de pregunta y burbuja A
     COL_INNER_GAP = 8*mm  # aire entre columna 1-15 y columna 16-30
-    INNER_PAD_X = 3*mm  # corre el bloque hacia la izquierda
+    INNER_PAD_X = 1*mm  # bloque pegado a la izquierda del recuadro
     INNER_PAD_TOP = 10*mm
     INNER_PAD_BOTTOM = 4*mm
     ROW_H = 6.8*mm
