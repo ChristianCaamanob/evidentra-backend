@@ -139,7 +139,7 @@ def get_result(db: Session, scan_id):
     key_items = {
         item.question_number: item
         for item in answer_key.items
-        if item.version.upper() == version.upper() and not item.is_annulled
+        if item.version.upper() == version.upper()
     }
 
     if not key_items:
@@ -174,7 +174,7 @@ def get_result(db: Session, scan_id):
         item.weight for q_num, item in key_items.items()
         if q_num in correct
     )
-    total_weight = sum(item.weight for item in key_items.values())
+    total_weight = sum(item.weight for q_num, item in key_items.items() if q_num not in annulled)
     percentage = round((raw_score / total_weight * 100) if total_weight > 0 else 0, 1)
 
     # Obtener exigencia del curso
@@ -229,4 +229,5 @@ def get_result(db: Session, scan_id):
         "correct_questions": correct,
         "incorrect_questions": incorrect,
         "omitted_questions": omitted,
+        "annulled_questions": annulled,
     }
