@@ -100,8 +100,8 @@ def generate_answer_sheet_pdf(
     cv.setTitle(f'Evalys - {assessment_name} V{version}')
 
     # ====== MARGENES Y FIDUCIALES ======
-    MX = 8*mm  # margen horizontal del papel
-    MY = 8*mm  # margen vertical del papel
+    MX = 16*mm  # margen horizontal del papel (deja espacio a los fiduciales)
+    MY = 16*mm  # margen vertical del papel (deja espacio a los fiduciales)
     fs = 10*mm; fm = 3*mm
     _fiducial(cv, fm, fm, fs)
     _fiducial(cv, W-fm-fs, fm, fs)
@@ -149,9 +149,9 @@ def generate_answer_sheet_pdf(
 
     # ====== RECUADRO RUT (arriba derecha) ======
     # Geometria: 8 columnas de burbujas + texto auxiliar
-    RUT_BUB_R = 2.8*mm
-    RUT_BUB_GX = 6.5*mm
-    RUT_BUB_GY = 6.0*mm
+    RUT_BUB_R = 2.6*mm
+    RUT_BUB_GX = 7.5*mm  # mas aire horizontal entre burbujas
+    RUT_BUB_GY = 6.5*mm  # mas aire vertical entre filas
     N_DIGS = 8
     RUT_INNER_PAD = 4*mm
     RUT_BUB_AREA_W = (N_DIGS-1)*RUT_BUB_GX + 2*RUT_BUB_R
@@ -271,9 +271,8 @@ def generate_answer_sheet_pdf(
     avail_h = grid_top - grid_bottom
     actual_row_h = avail_h / N_PER_COL
 
-    # Posiciones X de las dos columnas, centradas en el recuadro
-    total_w = 2*col_w + COL_INNER_GAP
-    col1_x = alt_x + (alt_w - total_w)/2
+    # Posiciones X de las dos columnas, alineadas a la izquierda con padding
+    col1_x = alt_x + INNER_PAD_X
     col2_x = col1_x + col_w + COL_INNER_GAP
 
     for col_idx, col_x in enumerate([col1_x, col2_x]):
