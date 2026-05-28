@@ -183,12 +183,13 @@ def generate_answer_sheet_pdf(
     # QR eliminado: reemplazado por Form Identifier debajo de Datos
 
     # DATOS ESTUDIANTE (ensanchado: ocupa hasta el borde derecho, sin QR)
+    # Datos arriba, Form Identifier abajo (orden v4 aprobado)
     dat_x = MX + rut_block_w + 3*mm
     dat_w = (W - MX) - dat_x
-    dat_y = top_zone_y - top_zone_h
-    # Altura reducida para dejar espacio al Form Identifier debajo
     FORM_ID_H = 22*mm
+    # Datos arranca en lo alto de la zona superior
     dat_h = top_zone_h - FORM_ID_H - 2*mm
+    dat_y = top_zone_y - dat_h
 
     cv.setFillColor(BGRAY); cv.setStrokeColor(BLACK); cv.setLineWidth(2)
     cv.roundRect(dat_x, dat_y, dat_w, dat_h, 2*mm, fill=1, stroke=1)
@@ -211,11 +212,11 @@ def generate_answer_sheet_pdf(
     cv.drawString(dat_x+3*mm, dat_y+2*mm,
         f'Escala {scale_min}–{scale_max}  ·  Aprobación {threshold_pct}%  ·  Nota mín. {passing}')
 
-    # FORM IDENTIFIER (patron fijo de prueba)
+    # FORM IDENTIFIER (patron fijo de prueba) - debajo del bloque de Datos
     fid_x = dat_x
-    fid_y = dat_y + dat_h + 2*mm
     fid_w = dat_w
     fid_h = FORM_ID_H
+    fid_y = top_zone_y - top_zone_h
 
     cv.setFillColor(BGRAY); cv.setStrokeColor(BLACK); cv.setLineWidth(2)
     cv.roundRect(fid_x, fid_y, fid_w, fid_h, 2*mm, fill=1, stroke=1)
