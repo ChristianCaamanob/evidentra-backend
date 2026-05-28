@@ -180,10 +180,10 @@ def generate_answer_sheet_pdf(
     # Primera fila y=184 (SVG) = H-184 (RL). Gap entre filas = 26 (SVG, hacia abajo) = -26 (RL).
     BUB_R = 6.5
     CHOICES = ['A','B','C','D','E']
-    col1_num_x = 58
-    col1_bub_xs = [80, 96, 112, 128, 144]
-    col2_num_x = 175
-    col2_bub_xs = [197, 213, 229, 245, 261]
+    col1_num_x = 65
+    col1_bub_xs = [87, 103, 119, 135, 151]
+    col2_num_x = 188
+    col2_bub_xs = [210, 226, 242, 258, 274]
     row_y_top_svg = 184
     row_gap = 26
 
