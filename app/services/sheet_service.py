@@ -241,9 +241,9 @@ def generate_answer_sheet_pdf(
                 cv.circle(bx, by, fid_bub_r, fill=1, stroke=1)
 
     # ====== RECUADRO ALTERNATIVAS (izquierda, alto) ======
-    BUB_R = 3.0*mm
+    BUB_R = 2.8*mm
     CHOICES = ['A','B','C','D','E']
-    BUB_GAP = 7*mm
+    BUB_GAP = 6*mm  # ajustado para que 2 columnas + gap quepan en alt_w
     NUM_W = 9*mm
     COL_INNER_GAP = 8*mm  # aire entre columna 1-15 y columna 16-30
     INNER_PAD_X = 6*mm
@@ -285,7 +285,7 @@ def generate_answer_sheet_pdf(
             cv.setFillColor(NAVY); cv.setFont('Helvetica-Bold', 9)
             cv.drawRightString(col_x + NUM_W - 2*mm, row_ctr - 2.5*mm, f'{q_num}.')
             for i, l in enumerate(CHOICES):
-                _bubble(cv, bub_x0 + i*BUB_GAP + BUB_GAP/2, row_ctr, BUB_R, l)
+                _bubble(cv, bub_x0 + i*BUB_GAP, row_ctr, BUB_R, l)
 
     # ====== PIE ======
     cv.setFillColor(MGRAY); cv.setFont('Helvetica-Oblique', 6)
