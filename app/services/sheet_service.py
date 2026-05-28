@@ -147,7 +147,7 @@ def generate_answer_sheet_pdf(
 
     # RUT (9 columnas: 8 dígitos + DV)
     RUT_R = 2.6*mm; RUT_GX = 7.0*mm; RUT_GY = 6.2*mm
-    N_DCOLS = 9; RUT_HDR_H = 10*mm  # mas espacio para que las burbujas no toquen el borde superior
+    N_DCOLS = 9; RUT_HDR_H = 13*mm  # aire suficiente entre el header y la primera fila de burbujas
     rut_x0 = MX + 2*mm
     rut_block_w = (N_DCOLS-1)*RUT_GX + RUT_R*2 + 4*mm
 
@@ -186,7 +186,7 @@ def generate_answer_sheet_pdf(
     # Datos arriba, Form Identifier abajo (orden v4 aprobado)
     dat_x = MX + rut_block_w + 3*mm
     dat_w = (W - MX) - dat_x
-    FORM_ID_H = 22*mm
+    FORM_ID_H = 28*mm  # mas alto para que las burbujas y el subtitulo no choquen
     # Datos arranca en lo alto de la zona superior
     dat_h = top_zone_h - FORM_ID_H - 2*mm
     dat_y = top_zone_y - dat_h
@@ -233,9 +233,10 @@ def generate_answer_sheet_pdf(
     ]
     fid_bub_r = 2.4*mm
     fid_bub_gap = (fid_w - 12*mm) / 13.0
-    # Burbujas mas abajo y filas separadas para no tapar el subtitulo
-    fid_row_gap = 6*mm
-    fid_bub_y0 = fid_y + 3*mm
+    # Geometria: subtitulo en fid_y + fid_h - 9mm (= 19mm con fid_h=28)
+    # Fila superior centrada en fid_y + 12mm, inferior en fid_y + 5mm. Gap 7mm.
+    fid_row_gap = 7*mm
+    fid_bub_y0 = fid_y + 5*mm  # fila INFERIOR
 
     for row_idx, row in enumerate(pattern):
         by = fid_bub_y0 + (1-row_idx)*fid_row_gap
