@@ -151,7 +151,7 @@ def generate_answer_sheet_pdf(
     rut_x0 = MX + 2*mm
     rut_block_w = (N_DCOLS-1)*RUT_GX + RUT_R*2 + 4*mm
 
-    cv.setFillColor(BGRAY); cv.setStrokeColor(LGRAY); cv.setLineWidth(0.4)
+    cv.setFillColor(BGRAY); cv.setStrokeColor(BLACK); cv.setLineWidth(2)
     cv.roundRect(MX, top_zone_y-top_zone_h, rut_block_w, top_zone_h, 2*mm, fill=1, stroke=1)
 
     cv.setFillColor(NAVY); cv.setFont('Helvetica-Bold', 6.5)
@@ -196,7 +196,7 @@ def generate_answer_sheet_pdf(
     dat_y = top_zone_y - top_zone_h
     dat_h = top_zone_h
 
-    cv.setFillColor(BGRAY); cv.setStrokeColor(LGRAY); cv.setLineWidth(0.4)
+    cv.setFillColor(BGRAY); cv.setStrokeColor(BLACK); cv.setLineWidth(2)
     cv.roundRect(dat_x, dat_y, dat_w, dat_h, 2*mm, fill=1, stroke=1)
 
     fields = [
