@@ -113,6 +113,15 @@ def generate_answer_sheet_pdf(
     _fiducial(cv, fm, H-fm-fs, fs)
     _fiducial(cv, W-fm-fs, H-fm-fs, fs)
 
+    # MARCO RECTANGULAR (ancla robusta para deteccion estilo GradeCam)
+    # Borde negro continuo a 5mm de los bordes del papel, grosor 1.5mm.
+    # Esta es la pieza principal que el scanner detecta para enderezar la hoja.
+    marco_m = 5*mm  # margen desde el borde del papel
+    marco_grosor = 1.5*mm
+    cv.setStrokeColor(BLACK)
+    cv.setLineWidth(marco_grosor)
+    cv.rect(marco_m, marco_m, W-2*marco_m, H-2*marco_m, fill=0, stroke=1)
+
     # ENCABEZADO
     HDR_H = 10*mm
     hdr_y = H - MY - HDR_H
