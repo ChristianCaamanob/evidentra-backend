@@ -25,3 +25,11 @@ class ScanRepository:
             .order_by(Scan.created_at.asc())
             .all()
         )
+
+    def delete(self, db: Session, scan_id) -> bool:
+        scan = db.get(Scan, scan_id)
+        if not scan:
+            return False
+        db.delete(scan)
+        db.commit()
+        return True

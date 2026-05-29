@@ -136,3 +136,18 @@ async def process_scan_pdf(
             "n_questions": len(result.answers or []), "answers": result.answers,
             "ambiguous": result.ambiguous, "requires_review": new_scan.requires_review,
             "debug_image": result.debug_image, "resultado": resultado}
+
+
+# --- borrado de escaneo (limpieza de registros) ---
+from app.repositories.scan_repo import ScanRepository as _ScanRepoDel
+from app.core.errors import not_found as _not_found_scan
+
+_scan_repo_del = _ScanRepoDel()
+
+
+@router.delete("/{scan_id}")
+def delete_scan(scan_id: UUID, db: Session = Depends(get_db)):
+    deleted = _scan_repo_del.delete(db, scan_id)
+    if not deleted:
+        raise _not_found_scan("Escaneo no encontrado.")
+    return {"deleted": True, "scan_id": str(scan_id)}
