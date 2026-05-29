@@ -46,7 +46,13 @@ async def scan_answer_key(
     db: Session = Depends(get_db),
 ):
     image_bytes = await file.read()
-    scan_result = scan_sheet(image_bytes)
+    hint_n = 0
+    if assessment_id:
+        from app.models.assessment import Assessment
+        _a = db.query(Assessment).filter(Assessment.id == assessment_id).first()
+        if _a:
+            hint_n = getattr(_a, "n_questions", 0) or getattr(_a, "version_count", 0) or 0
+    scan_result = scan_sheet(image_bytes, n_questions_hint=hint_n)
     if not scan_result.success:
         raise HTTPException(status_code=400, detail=scan_result.error or "Error al escanear")
     result = save_items_from_scan(db, scan_result, assessment_id=assessment_id, version=version)

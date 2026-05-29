@@ -367,7 +367,7 @@ def read_form_id(gray):
     return version, (nq if nq > 0 else None)
 
 
-def scan_sheet(image_bytes: bytes, n_questions_override: int = 0) -> ScanResult:
+def scan_sheet(image_bytes: bytes, n_questions_override: int = 0, n_questions_hint: int = 0) -> ScanResult:
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if img is None and _HEIC_OK:
@@ -395,7 +395,8 @@ def scan_sheet(image_bytes: bytes, n_questions_override: int = 0) -> ScanResult:
         img_original = img.copy()
     qr_data = read_qr(img_original)
     fid_version, fid_n = read_form_id(gray)
-    n_questions = n_questions_override or fid_n or (qr_data.n_questions if qr_data else 40)
+    n_questions = (n_questions_override or fid_n or (qr_data.n_questions if qr_data else None)
+                   or n_questions_hint or 40)
     if n_questions % 2 != 0:
         n_questions += 1
     rut_str, rut_digits, rut_conf, _ = read_rut(gray)
