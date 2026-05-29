@@ -1793,12 +1793,16 @@
               height:40px; padding:0 12px; border-radius:12px;
               border:1px solid var(--border); background:var(--surface);
               font-family:inherit; font-size:14px; color:var(--dark); outline:none;
-            ">
+            " onchange="window._sheetNqManual=true;">
+              <option value="10">10</option>
+              <option value="15">15</option>
               <option value="20">20</option>
+              <option value="25">25</option>
               <option value="30">30</option>
+              <option value="35">35</option>
               <option value="40" selected>40</option>
+              <option value="45">45</option>
               <option value="50">50</option>
-              <option value="60">60</option>
             </select>
           </div>
 
@@ -1977,12 +1981,21 @@
             <div style="font-size:13px;font-weight:700;color:#0d1f35;margin-bottom:4px;">📷 Escanear hoja de pauta</div>
             <div style="font-size:11px;color:#64748b;margin-bottom:12px;">Sube una foto de tu hoja respondida — el QR identifica la prueba automáticamente.</div>
             <div id="ak-scan-drop" onclick="document.getElementById('ak-scan-file').click()"
+              ondragover="event.preventDefault();this.style.background='rgba(15,139,141,0.10)'"
+              ondragleave="this.style.background='rgba(15,139,141,0.03)'"
+              ondrop="event.preventDefault();this.style.background='rgba(15,139,141,0.03)';if(event.dataTransfer.files&&event.dataTransfer.files.length)uploadAnswerKeyScan({files:event.dataTransfer.files})"
               style="border:2px dashed rgba(15,139,141,0.4);border-radius:12px;padding:24px;text-align:center;cursor:pointer;background:rgba(15,139,141,0.03);">
               <div style="font-size:24px;margin-bottom:6px;">📦</div>
               <div style="font-size:13px;color:#0F8B8D;font-weight:600;">Arrastra la imagen aquí</div>
               <div style="font-size:11px;color:#94a3b8;">o haz click · JPG, PNG</div>
             </div>
             <input type="file" id="ak-scan-file" accept="image/*" style="display:none" onchange="uploadAnswerKeyScan(this)">
+            <div id="ak-scan-result" style="display:none;margin-top:14px;">
+              <div id="ak-scan-msg" style="font-size:13px;font-weight:600;margin-bottom:8px;color:#94a3b8;"></div>
+              <div id="ak-scan-answers" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;"></div>
+              <span id="ak-status-pill" style="display:none;font-size:11px;font-weight:700;color:#065f46;background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.3);border-radius:999px;padding:4px 10px;">Pauta cargada — recuerda Validar</span>
+              <img id="ak-scan-debug" style="display:none;width:100%;border-radius:8px;border:1px solid var(--border);margin-top:10px;">
+            </div>
           </div>
         </div>
 
@@ -1999,8 +2012,32 @@
       <div class="page-header">
         <div class="page-eyebrow">Escaneo óptico</div>
         <h1 class="page-title">Escaneo inteligente de respuestas</h1>
-        <p class="page-desc">Sube la foto de una hoja de respuesta. El sistema detecta el QR, lee el RUT y extrae todas las respuestas automáticamente.</p>
+        <p class="page-desc">Selecciona la evaluacion, sube la foto de la hoja y Evalys lee el RUT y extrae todas las respuestas automaticamente.</p>
       </div><!-- /page-header -->
+
+        <!-- SELECTOR DE EVALUACION -->
+        <div style="margin-top:20px;padding:20px;border:1px solid var(--border);border-radius:16px;background:white;">
+          <div style="font-size:13px;font-weight:700;color:var(--dark);margin-bottom:14px;">1. Selecciona la evaluacion a corregir</div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:200px;">
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:5px;font-weight:600;">CURSO</label>
+              <select id="scan-course-select" onchange="onScanCourseChange()" style="width:100%;height:42px;padding:0 12px;border:1px solid var(--border);border-radius:10px;font-family:inherit;font-size:14px;background:white;cursor:pointer;">
+                <option value="">Cargando cursos...</option>
+              </select>
+            </div>
+            <div style="flex:1;min-width:200px;">
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:5px;font-weight:600;">EVALUACION</label>
+              <select id="scan-assessment-select" onchange="onScanAssessmentChange()" disabled style="width:100%;height:42px;padding:0 12px;border:1px solid var(--border);border-radius:10px;font-family:inherit;font-size:14px;background:#f8fafc;cursor:pointer;">
+                <option value="">Primero elige un curso</option>
+              </select>
+            </div>
+          </div>
+          <div id="scan-eval-confirm" style="display:none;margin-top:12px;padding:10px 14px;border-radius:10px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.3);font-size:13px;color:#065f46;">
+            ✓ <strong id="scan-eval-name"></strong> seleccionada · ya puedes subir las hojas
+          </div>
+        </div>
+
+        <div id="scan-step2-label" style="margin-top:18px;font-size:13px;font-weight:700;color:var(--dark);opacity:0.4;">2. Sube las hojas de respuesta</div>
 
         <!-- ZONA DE CARGA -->
         <div id="scan-upload-zone" style="
@@ -2167,6 +2204,10 @@
               <div id="result-omitted" style="font-size:28px;font-weight:700;color:#64748b;">—</div>
             </div>
             <div style="background:white;border:1.5px solid var(--border);border-radius:16px;padding:20px;">
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Anuladas</div>
+              <div id="result-annulled" style="font-size:28px;font-weight:700;color:#b28a49;">—</div>
+            </div>
+            <div style="background:white;border:1.5px solid var(--border);border-radius:16px;padding:20px;">
               <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Puntaje</div>
               <div id="result-percentage" style="font-size:28px;font-weight:700;color:#0d1f35;">—%</div>
             </div>
@@ -2180,6 +2221,8 @@
             </div>
           </div>
         </div>
+
+        <div id="result-effective-note" style="display:none;font-size:12px;color:#b28a49;background:rgba(178,138,73,0.08);border:1px solid rgba(178,138,73,0.25);border-radius:10px;padding:10px 14px;margin-bottom:20px;"></div>
 
         <!-- Estudiante -->
         <div style="background:white;border:1.5px solid var(--border);border-radius:16px;padding:20px;margin-bottom:20px;">
@@ -2207,6 +2250,21 @@
     </div>
 
     <!-- ─────────────── FEEDBACK / BRIEFINGS ─────────────── -->
+    <div class="screen" id="screen-reports">
+      <div class="page-header">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+          <button onclick="navigate('course-detail')" style="background:none;border:none;cursor:pointer;color:#0F8B8D;font-size:13px;padding:0;">← Volver</button>
+        </div>
+        <div class="page-eyebrow">Reportes y métricas</div>
+        <h1 class="page-title" id="evr-title">Reportes</h1>
+        <div class="page-actions">
+          <button onclick="exportReportsExcel()" style="background:#fff;color:#0F8B8D;border:1.5px solid #0F8B8D;border-radius:8px;padding:8px 16px;font-size:13px;cursor:pointer;">↧ Excel</button>
+          <button onclick="exportReportsPDF()" style="background:#0F8B8D;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;cursor:pointer;margin-left:8px;">↧ PDF</button>
+        </div>
+      </div>
+      <div id="evr-body" style="padding:0 40px 60px;"></div>
+    </div>
+
     <div class="screen" id="screen-feedback">
       <div class="page-header">
         <div class="page-eyebrow">Corazón diferencial del producto</div>
@@ -2647,6 +2705,7 @@ async function syncAllState() {
 function navigate(screen) {
   if (screen === 'answerkey') setTimeout(updateAnswerKeyIdentity, 150);
   if (screen === 'course') setTimeout(loadCoursesList, 100);
+  if (screen === 'scan') setTimeout(loadScanSelector, 100);
   if (screen === 'feedback') setTimeout(brfRender, 50);
   if (screen === 'answerkey') {
     setTimeout(loadAnswerKeyScreen, 100);
@@ -3051,9 +3110,23 @@ function showResultLoaded(data, fromBackend) {
   setEl('result-correct', data.n_correct || 0);
   setEl('result-incorrect', data.n_incorrect || 0);
   setEl('result-omitted', data.n_omitted || 0);
+  setEl('result-annulled', data.n_annulled || 0);
   setEl('result-percentage', (data.percentage || 0) + '%');
   setEl('result-threshold', (data.passing_threshold || 60) + '%');
   setEl('result-scale', data.grading_scale === 'chile_1_7' ? 'Escala chilena 1-7' : (data.grading_scale || 'Chile 1-7'));
+
+  var effNote = document.getElementById('result-effective-note');
+  if (effNote) {
+    var _na = data.n_annulled || 0;
+    if (_na > 0) {
+      var _nt = data.n_total || ((data.n_effective || 0) + _na);
+      var _ne = data.n_effective || (_nt - _na);
+      effNote.textContent = 'La nota se calculó sobre ' + _ne + ' de ' + _nt + ' preguntas (' + _na + ' anuladas, no cuentan para nadie).';
+      effNote.style.display = 'block';
+    } else {
+      effNote.style.display = 'none';
+    }
+  }
 
   // Estudiante
   setEl('result-rut', data.student_identifier || 'Desconocido');
@@ -4464,9 +4537,10 @@ function loadAnswerKeyGrid() {
 
 async function downloadAnswerSheet() {
   const version = document.getElementById('ak-version')?.value || 'A';
-  const nq = document.getElementById('ak-nq')?.value || '40';
   const base = getApiBase();
-  const url = `${base}/assessments/${IDS.assessment_id}/generate-sheet?version=${version}&n_questions=${nq}`;
+  // n_questions=0 → el backend usa el número configurado en la evaluación,
+  // garantizando que la hoja coincida siempre con la prueba.
+  const url = `${base}/assessments/${IDS.assessment_id}/generate-sheet?version=${version}&n_questions=0`;
   try {
     const res = await fetch(url, {
       headers: {'Authorization': `Bearer ${_authToken}`}
@@ -4475,7 +4549,7 @@ async function downloadAnswerSheet() {
     const blob = await res.blob();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `Evalys_Hoja_Version${version}_${nq}preguntas.pdf`;
+    a.download = `Evalys_Hoja_Version${version}.pdf`;
     a.click();
     URL.revokeObjectURL(a.href);
   } catch(e) {
@@ -4532,6 +4606,10 @@ async function processScanBatch() {
     try {
       const formData = new FormData();
       formData.append('file', file);
+      // Mandar el assessment_id seleccionado (hoja v6 sin QR)
+      if (IDS.assessment_id) formData.append('assessment_id', IDS.assessment_id);
+      formData.append('version', 'A');
+      formData.append('n_questions', String(window._scanNQuestions || 30));
       const isPdf = file.type === 'application/pdf' || file.name.endsWith('.pdf');
       const endpoint = isPdf ? 'process-pdf' : 'process-image';
       const res = await fetch(`${base}/scans/${endpoint}`, {
@@ -4615,6 +4693,7 @@ async function loadCoursesList() {
     });
     if (res.ok) {
       courses = await res.json();
+      saveLocalCourses(courses);   // sincroniza el cache local con el backend
     }
   } catch(e) {
     // backend no disponible
@@ -4733,7 +4812,7 @@ async function loadCourseAssessments(courseId) {
           </td>
           <td style="padding:14px 16px;text-align:center;font-size:12px;color:#94a3b8;">${a.created_at || '—'}</td>
           <td style="padding:14px 16px;text-align:center;">
-            <button onclick="selectAssessment('${a.id}','${a.name}')" style="background:#0F8B8D;color:white;border:none;border-radius:8px;padding:6px 14px;font-size:12px;cursor:pointer;">Abrir</button>
+            <button onclick="selectAssessment('${a.id}','${a.name}')" style="background:#0F8B8D;color:white;border:none;border-radius:8px;padding:6px 14px;font-size:12px;cursor:pointer;">Abrir</button> <button onclick="openReports('${a.id}','${a.name}',${a.n_questions})" style="background:#fff;color:#0F8B8D;border:1.5px solid #0F8B8D;border-radius:8px;padding:6px 14px;font-size:12px;cursor:pointer;margin-left:6px;">Ver reportes</button>
           </td>
         </tr>`).join('')}
       </tbody></table>`;
@@ -4784,6 +4863,9 @@ function selectAssessment(assessmentId, assessmentName) {
   window._evalysState = window._evalysState || {};
   window._evalysState.assessmentName = assessmentName;
   window._evalysState.courseName = _currentCourseName;
+  // Nueva evaluación seleccionada: el selector de hoja debe volver a
+  // sincronizarse automáticamente con su n_questions (no arrastrar elección previa)
+  window._sheetNqManual = false;
   navigate('answerkey');
 }
 
@@ -5043,15 +5125,29 @@ async function saveEditCourse() {
     return;
   }
 
-  const updated = updateLocalCourse(_editingCourseId, {
-    name, code, passing_threshold: threshold, status
-  });
-
-  if (!updated) {
-    errDiv.textContent = 'Error al guardar los cambios';
+  // Guardar en el backend (fuente de verdad)
+  try {
+    const base = getApiBase();
+    const res = await fetch(`${base}/courses/${_editingCourseId}`, {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json','Authorization': `Bearer ${_authToken}`},
+      body: JSON.stringify({ name, code, passing_threshold: threshold, status }),
+      signal: AbortSignal.timeout(30000)
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(()=>({detail:'Error'}));
+      errDiv.textContent = 'No se pudo guardar: ' + (e.detail || res.status);
+      errDiv.style.display = 'block';
+      return;
+    }
+  } catch(err) {
+    errDiv.textContent = 'No se pudo conectar al servidor.';
     errDiv.style.display = 'block';
     return;
   }
+
+  // Sincronizar cache local
+  updateLocalCourse(_editingCourseId, { name, code, passing_threshold: threshold, status });
 
   closeEditCourseModal();
   showToast(`Curso "${name}" actualizado`, 'success');
@@ -5113,17 +5209,33 @@ async function confirmDeleteCourse() {
   if (!course) return;
   const name = course.name;
 
-  // Intento backend silencioso
+  const btn = document.getElementById('delete-course-btn');
+  const errDiv = document.getElementById('delete-course-error');
+  if (btn) { btn.disabled = true; btn.textContent = 'Eliminando...'; }
+
+  // Borrar en el backend (con cascada)
   try {
     const base = getApiBase();
-    await fetch(`${base}/courses/${_deletingCourseId}`, {
+    const res = await fetch(`${base}/courses/${_deletingCourseId}`, {
       method: 'DELETE',
       headers: {'Authorization': `Bearer ${_authToken}`},
       signal: AbortSignal.timeout(30000)
     });
-  } catch(e) { /* fallback local */ }
+    if (!res.ok) {
+      const e = await res.json().catch(()=>({detail:'Error'}));
+      errDiv.textContent = 'No se pudo eliminar: ' + (e.detail || res.status);
+      errDiv.style.display = 'block';
+      if (btn) { btn.disabled = false; btn.textContent = 'Eliminar definitivamente'; }
+      return;
+    }
+  } catch(err) {
+    errDiv.textContent = 'No se pudo conectar al servidor.';
+    errDiv.style.display = 'block';
+    if (btn) { btn.disabled = false; btn.textContent = 'Eliminar definitivamente'; }
+    return;
+  }
 
-  // Eliminación local
+  // Sincronizar cache local
   deleteLocalCourse(_deletingCourseId);
 
   closeDeleteCourseModal();
@@ -5211,6 +5323,30 @@ function updateAnswerKeyBanner(cfg) {
   if (nqEl) nqEl.textContent = cfg.n_questions || 40;
   if (scaleEl) scaleEl.textContent = (typeof SCALE_NAMES !== 'undefined' ? SCALE_NAMES[cfg.grading_scale] : null) || cfg.grading_scale || 'Escala chilena 1.0-7.0';
   if (threshEl) threshEl.textContent = (cfg.passing_threshold || 60) + '%';
+  // Sincronizar el selector de la hoja de respuesta con el N° real de preguntas
+  syncSheetQuestionsSelector(cfg.n_questions);
+}
+
+// Ajusta el selector "N° preguntas" de la hoja de respuesta para que refleje
+// el número configurado en la evaluación, en lugar de quedarse fijo en 40.
+// Si el valor exacto no está entre las opciones, lo añade dinámicamente.
+function syncSheetQuestionsSelector(nQuestions) {
+  const sel = document.getElementById('sheet-nquestions');
+  if (!sel || !nQuestions) return;
+  // No pisar una elección manual explícita del usuario
+  if (window._sheetNqManual) return;
+  const val = String(nQuestions);
+  let found = Array.from(sel.options).some(o => o.value === val);
+  if (!found) {
+    // Insertar la opción exacta ordenada
+    const opt = document.createElement('option');
+    opt.value = val; opt.textContent = val;
+    const nums = Array.from(sel.options).map(o => parseInt(o.value));
+    let idx = nums.findIndex(n => n > nQuestions);
+    if (idx === -1) sel.appendChild(opt);
+    else sel.insertBefore(opt, sel.options[idx]);
+  }
+  sel.value = val;
 }
 
 async function loadAnswerKeyScreen() {
@@ -5244,6 +5380,8 @@ async function loadAnswerKeyScreen() {
     document.getElementById('ak-n-questions').textContent = cfg.n_questions || 40;
     document.getElementById('ak-scale-label').textContent = SCALE_NAMES[cfg.grading_scale] || cfg.grading_scale;
     document.getElementById('ak-threshold').textContent = (cfg.passing_threshold || 60) + '%';
+    // Sincronizar el selector de la hoja con el N° real de preguntas del backend
+    syncSheetQuestionsSelector(cfg.n_questions);
 
     // Actualizar estado pauta
     const badge = document.getElementById('ak-status-badge');
@@ -5500,8 +5638,14 @@ async function saveAssessmentConfig() {
     var res = await fetch(base + '/assessments/' + IDS.assessment_id + '/config', {
       method: 'PATCH',
       headers: {'Content-Type':'application/json','Authorization':'Bearer ' + _authToken},
-      body: JSON.stringify({name:name, grading_scale:scale, passing_threshold:threshold})
+      body: JSON.stringify({name:name, n_questions:nq, grading_scale:scale, passing_threshold:threshold})
     });
+    if (!res.ok) {
+      var d = await res.json().catch(()=>({}));
+      errEl.textContent = d.detail || ('Error al guardar (HTTP ' + res.status + ')');
+      errEl.style.display = 'block';
+      return;
+    }
     if (_currentAssessmentConfig) {
       _currentAssessmentConfig.name = name;
       _currentAssessmentConfig.n_questions = nq;
@@ -5535,6 +5679,9 @@ async function uploadAnswerKeyScan(input) {
   debugImg.style.display = 'none';
   const formData = new FormData();
   formData.append('file', file);
+  if (IDS.assessment_id) formData.append('assessment_id', IDS.assessment_id);
+  const _akv = document.getElementById('ak-version-select');
+  if (_akv && _akv.value) formData.append('version', _akv.value);
   try {
     const base = getApiBase();
     const res = await fetch(`${base}/answer-keys/scan-answer-key`, {
@@ -5558,6 +5705,19 @@ async function uploadAnswerKeyScan(input) {
       debugImg.style.display = 'block';
     }
     document.getElementById('ak-status-pill').style.display = 'block';
+    // Reflejar la pauta escaneada en la grilla editable del centro
+    try {
+      var _ver = (data.version || (document.getElementById('ak-version-select') && document.getElementById('ak-version-select').value) || 'A').toString().toUpperCase();
+      var _sel = document.getElementById('ak-version-select');
+      if (_sel && _sel.value !== _ver && Array.from(_sel.options).some(function(o){return o.value === _ver;})) _sel.value = _ver;
+      var _ansObj = {};
+      (data.answers || []).forEach(function(a, i){ if (a && a !== '?') _ansObj[i+1] = a.toString().toUpperCase(); });
+      var _ck = IDS.assessment_id + '_' + _ver;
+      _savedAnswerKeys[_ck] = { answers: _ansObj, annulled: [] };
+      try { localStorage.setItem('evalys_answers_' + _ck, JSON.stringify(_savedAnswerKeys[_ck])); } catch(e){}
+      _annulledQuestions = new Set();
+      if (typeof loadAnswerKeyGrid === 'function') loadAnswerKeyGrid();
+    } catch(e){}
     if (window._evalysState) window._evalysState.answerKeyValid = false;
   } catch(e) {
     msgDiv.textContent = '❌ Error de conexión';
@@ -6420,6 +6580,72 @@ function closeCamera() {
 // ══════════════════════════════════════════════════════
 
 let scanFile = null;
+let _scanCourses = [];
+
+async function loadScanSelector() {
+  const sel = document.getElementById('scan-course-select');
+  if (!sel) return;
+  try {
+    const base = getApiBase();
+    const res = await fetch(`${base}/courses/`, {headers: {'Authorization': `Bearer ${_authToken}`}});
+    _scanCourses = res.ok ? await res.json() : [];
+  } catch(e) { _scanCourses = []; }
+  if (!_scanCourses.length) {
+    sel.innerHTML = '<option value="">No hay cursos</option>';
+    return;
+  }
+  sel.innerHTML = '<option value="">Elige un curso...</option>' +
+    _scanCourses.map(c => `<option value="${c.id}">${c.code ? c.code+' · ' : ''}${c.name}</option>`).join('');
+  // Si ya hay un curso seleccionado en memoria, preseleccionarlo
+  if (IDS.course_id) { sel.value = IDS.course_id; onScanCourseChange(); }
+}
+
+async function onScanCourseChange() {
+  const courseSel = document.getElementById('scan-course-select');
+  const evalSel = document.getElementById('scan-assessment-select');
+  const courseId = courseSel.value;
+  document.getElementById('scan-eval-confirm').style.display = 'none';
+  if (!courseId) {
+    evalSel.disabled = true;
+    evalSel.style.background = '#f8fafc';
+    evalSel.innerHTML = '<option value="">Primero elige un curso</option>';
+    return;
+  }
+  IDS.course_id = courseId;
+  evalSel.innerHTML = '<option value="">Cargando...</option>';
+  evalSel.disabled = true;
+  try {
+    const base = getApiBase();
+    const res = await fetch(`${base}/assessments/by-course/${courseId}`, {headers: {'Authorization': `Bearer ${_authToken}`}});
+    const assessments = res.ok ? await res.json() : [];
+    if (!assessments.length) {
+      evalSel.innerHTML = '<option value="">Este curso no tiene evaluaciones</option>';
+      return;
+    }
+    evalSel.innerHTML = '<option value="">Elige una evaluacion...</option>' +
+      assessments.map(a => `<option value="${a.id}" data-name="${(a.name||'').replace(/"/g,'&quot;')}" data-n="${a.n_questions||30}">${a.name} (${a.n_questions||30}P)</option>`).join('');
+    evalSel.disabled = false;
+    evalSel.style.background = 'white';
+  } catch(e) {
+    evalSel.innerHTML = '<option value="">Error al cargar</option>';
+  }
+}
+
+function onScanAssessmentChange() {
+  const evalSel = document.getElementById('scan-assessment-select');
+  const opt = evalSel.options[evalSel.selectedIndex];
+  const aid = evalSel.value;
+  if (!aid) {
+    document.getElementById('scan-eval-confirm').style.display = 'none';
+    document.getElementById('scan-step2-label').style.opacity = '0.4';
+    return;
+  }
+  IDS.assessment_id = aid;
+  window._scanNQuestions = parseInt(opt.getAttribute('data-n')) || 30;
+  document.getElementById('scan-eval-name').textContent = opt.getAttribute('data-name') || 'Evaluacion';
+  document.getElementById('scan-eval-confirm').style.display = 'block';
+  document.getElementById('scan-step2-label').style.opacity = '1';
+}
 
 function handleScanFile(file) {
   if (!file) return;
@@ -6427,11 +6653,31 @@ function handleScanFile(file) {
   const zone = document.getElementById('scan-upload-zone');
   const preview = document.getElementById('scan-preview-zone');
   const img = document.getElementById('scan-preview-img');
-  if (file.type.startsWith('image/')) {
+  const isHeic = /\.(heic|heif)$/i.test(file.name) || file.type === 'image/heic' || file.type === 'image/heif';
+  const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+  if (file.type.startsWith('image/') && !isHeic) {
+    // Imagen que el navegador puede mostrar (JPG, PNG)
     img.src = URL.createObjectURL(file);
     img.style.display = 'block';
+    if (img._placeholder) { img._placeholder.remove(); img._placeholder = null; }
   } else {
+    // HEIC o PDF: el navegador no muestra preview, ponemos una tarjeta linda
     img.style.display = 'none';
+    if (img._placeholder) img._placeholder.remove();
+    const ph = document.createElement('div');
+    ph._isPlaceholder = true;
+    ph.style.cssText = 'display:flex;align-items:center;gap:14px;padding:18px 20px;border-radius:12px;border:1px solid rgba(16,185,129,0.3);background:rgba(16,185,129,0.06);max-width:360px;';
+    ph.innerHTML = `
+      <div style="width:44px;height:44px;border-radius:50%;background:#10B981;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <span style="color:#fff;font-size:22px;line-height:1;">✓</span>
+      </div>
+      <div style="min-width:0;">
+        <div style="font-size:14px;font-weight:600;color:var(--dark);">${isPdf ? 'PDF cargado' : 'Imagen cargada'}</div>
+        <div style="font-size:12px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${file.name}</div>
+        <div style="font-size:11px;color:#10B981;margin-top:2px;">Lista para procesar</div>
+      </div>`;
+    img._placeholder = ph;
+    img.parentNode.insertBefore(ph, img);
   }
   zone.style.display = 'none';
   preview.style.display = 'block';
@@ -6466,6 +6712,10 @@ async function processScanImage() {
     const base = getApiBase();
     const formData = new FormData();
     formData.append('file', scanFile);
+    // Mandar el assessment_id seleccionado (hoja v6 sin QR)
+    if (IDS.assessment_id) formData.append('assessment_id', IDS.assessment_id);
+    formData.append('version', 'A');
+    formData.append('n_questions', '30');
     const isPdf = scanFile.type === 'application/pdf' || scanFile.name.endsWith('.pdf');
     const endpoint = isPdf ? 'process-pdf' : 'process-image';
     const res = await fetch(`${base}/scans/${endpoint}`, {
@@ -6494,7 +6744,11 @@ function renderScanResult(data) {
     <div class="source-card"><div class="source-card-title">Versión</div><div class="source-card-meta">${qr.version}</div></div>
     <div class="source-card"><div class="source-card-title">N° preguntas</div><div class="source-card-meta">${qr.n_questions}</div></div>
     <div class="source-card"><div class="source-card-title">Confianza</div><div class="source-card-meta">${Math.round(data.confidence*100)}%</div></div>
-  ` : '<div style="color:#F87171;font-size:13px;">QR no detectado</div>';
+  ` : `
+    <div class="source-card" style="border-left:3px solid #10B981;">
+      <div class="source-card-title" style="color:#10B981;">✓ Hoja identificada</div>
+      <div class="source-card-meta">Evaluacion seleccionada · Version ${data.version || 'A'}</div>
+    </div>`;
 
   const answered = data.answers ? data.answers.filter(a => a !== null).length : 0;
   const total = data.answers ? data.answers.length : 0;
@@ -6509,16 +6763,72 @@ function renderScanResult(data) {
   `;
 
   if (data.answers && data.answers.length > 0) {
+    // Construir indices rapidos de correctas/incorrectas/omitidas desde el resultado
+    const r = data.resultado || {};
+    const correctSet = new Set(r.correct_questions || []);
+    const incorrectMap = {};
+    (r.incorrect_questions || []).forEach(it => { incorrectMap[it.question] = it.correct; });
+    const omittedSet = new Set(r.omitted_questions || []);
+    const hasPauta = !!(r.correct_questions || r.incorrect_questions);
+
     document.getElementById('scan-answers-grid').innerHTML = data.answers.map((ans, i) => {
-      const isAmbig = data.ambiguous.includes(i+1);
-      const color = isAmbig ? '#F59E0B' : ans ? '#10B981' : '#94A3B8';
-      return `<div style="background:rgba(255,255,255,0.04);border-radius:10px;padding:8px;text-align:center;border:1px solid rgba(255,255,255,0.06);">
-        <div style="font-size:11px;color:var(--text2);">P${i+1}</div>
-        <div style="font-size:18px;font-weight:700;color:${color};">${isAmbig ? '?' : (ans || '—')}</div>
+      const q = i + 1;
+      const isAmbig = data.ambiguous.includes(q);
+      let bg = 'rgba(255,255,255,0.04)';
+      let border = 'rgba(255,255,255,0.06)';
+      let color = '#94A3B8';
+      let letra = ans || '—';
+      let correcta = '';
+
+      if (isAmbig) {
+        // Ambigua: naranja
+        bg = 'rgba(245,158,11,0.08)';
+        border = 'rgba(245,158,11,0.35)';
+        color = '#F59E0B';
+        letra = '?';
+      } else if (hasPauta) {
+        // Hay pauta: pintar segun comparacion
+        if (correctSet.has(q)) {
+          bg = 'rgba(16,185,129,0.10)';
+          border = 'rgba(16,185,129,0.35)';
+          color = '#10B981';
+        } else if (incorrectMap[q]) {
+          bg = 'rgba(239,68,68,0.10)';
+          border = 'rgba(239,68,68,0.40)';
+          color = '#EF4444';
+          correcta = incorrectMap[q];
+        } else if (omittedSet.has(q) || !ans) {
+          bg = 'rgba(148,163,184,0.08)';
+          border = 'rgba(148,163,184,0.25)';
+          color = '#94A3B8';
+          letra = '—';
+        }
+      } else {
+        // Sin pauta validada: comportamiento original (verde si hay respuesta)
+        if (ans) { color = '#10B981'; }
+      }
+
+      const correctaHtml = correcta
+        ? `<div style="font-size:10px;color:#10B981;margin-top:4px;font-weight:600;">Correcta: ${correcta}</div>`
+        : '';
+
+      return `<div style="background:${bg};border-radius:10px;padding:8px;text-align:center;border:1px solid ${border};">
+        <div style="font-size:11px;color:var(--text2);">P${q}</div>
+        <div style="font-size:18px;font-weight:700;color:${color};">${letra}</div>
+        ${correctaHtml}
       </div>`;
     }).join('');
-    document.getElementById('scan-answers-summary').textContent =
-      `${answered} de ${total} respuestas detectadas · ${data.ambiguous.length} ambiguas`;
+
+    // Resumen con desglose si hay pauta
+    let resumen = `${answered} de ${total} respuestas detectadas · ${data.ambiguous.length} ambiguas`;
+    if (hasPauta) {
+      const nc = (r.correct_questions || []).length;
+      const ni = (r.incorrect_questions || []).length;
+      const no = (r.omitted_questions || []).length;
+      const na = (r.annulled_questions || []).length;
+      resumen = `${nc} correctas · ${ni} incorrectas · ${no} omitidas${na ? ` · ${na} anuladas` : ''} · ${data.ambiguous.length} ambiguas`;
+    }
+    document.getElementById('scan-answers-summary').textContent = resumen;
     document.getElementById('scan-answers-panel').style.display = 'block';
   }
 
@@ -6567,6 +6877,7 @@ function renderScanResult(data) {
             <div style="font-size:13px;color:#475569;">✅ Correctas: <strong>${r.n_correct}</strong></div>
             <div style="font-size:13px;color:#475569;">❌ Incorrectas: <strong>${r.n_incorrect}</strong></div>
             <div style="font-size:13px;color:#475569;">— Omitidas: <strong>${r.n_omitted}</strong></div>
+            ${r.n_annulled ? `<div style="font-size:13px;color:#b28a49;">🚫 Anuladas: <strong>${r.n_annulled}</strong> (no cuentan)</div>` : ''}
             <div style="font-size:13px;color:#475569;">📊 Puntaje: <strong>${r.percentage}%</strong></div>
           </div>
         </div>
@@ -6581,7 +6892,15 @@ function renderScanResult(data) {
 
 async function downloadSheet() {
   const nq      = parseInt(document.getElementById('sheet-nquestions')?.value || '40');
-  const version = document.getElementById('sheet-version')?.value || 'A';
+  // Lee la versión del selector que esté VISIBLE (pauta: ak-version-select; creación: sheet-version)
+  const version = (function(){
+    for (const id of ['ak-version-select','sheet-version']) {
+      const el = document.getElementById(id);
+      if (el && el.offsetParent !== null && el.value) return el.value;
+    }
+    return document.getElementById('sheet-version')?.value
+        || document.getElementById('ak-version-select')?.value || 'A';
+  })();
   const status  = document.getElementById('sheet-status');
 
   if (!IDS.assessment_id) {
@@ -6597,9 +6916,12 @@ async function downloadSheet() {
 
   try {
     const base = getApiBase();
-    const url  = `${base}/assessments/${IDS.assessment_id}/generate-sheet?version=${version}&n_questions=${nq}`;
+    // n_questions=0 → el backend usa SIEMPRE el número configurado en la
+    // evaluación. Así la hoja nunca se desincroniza con la prueba real,
+    // sin importar qué muestre el selector.
+    const url  = `${base}/assessments/${IDS.assessment_id}/generate-sheet?version=${version}&n_questions=0`;
 
-    const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     // Descargar el PDF
@@ -6610,14 +6932,14 @@ async function downloadSheet() {
     // Nombre del archivo desde el header Content-Disposition si está disponible
     const cd = res.headers.get('Content-Disposition') || '';
     const match = cd.match(/filename="?([^"]+)"?/);
-    link.download = match ? match[1] : `Evalys_Hoja_Ver${version}_${nq}P.pdf`;
+    link.download = match ? match[1] : `Evalys_Hoja_Ver${version}.pdf`;
 
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(link.href);
 
-    if (status) status.textContent = `✓ Hoja Ver.${version} · ${nq} preguntas descargada`;
+    if (status) status.textContent = `✓ Hoja Ver.${version} descargada`;
     showToast(`Hoja Ver.${version} generada y descargada`, 'success');
 
   } catch (e) {
@@ -6633,12 +6955,12 @@ async function downloadSheet() {
 }
 
 function _downloadDemoSheet(nq, version) {
-  // Fallback: redirige a la URL del backend con los parámetros
-  // Si el backend está caído, no hay PDF sin él (el PDF lo genera el servidor)
+  // Fallback: usa n_questions=0 para que el backend tome el número
+  // configurado en la evaluación (evita desincronización con el selector).
   const base = getApiBase();
   if (IDS.assessment_id) {
     window.open(
-      `${base}/assessments/${IDS.assessment_id}/generate-sheet?version=${version}`,
+      `${base}/assessments/${IDS.assessment_id}/generate-sheet?version=${version}&n_questions=0`,
       '_blank'
     );
   } else {
@@ -6899,11 +7221,15 @@ bootstrap();
         <div>
           <label style="font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;">N° de preguntas</label>
           <select id="new-assessment-nq" style="width:100%;margin-top:6px;padding:10px 14px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:14px;outline:none;box-sizing:border-box;background:white;">
+            <option value="10">10 preguntas</option>
+            <option value="15">15 preguntas</option>
             <option value="20">20 preguntas</option>
+            <option value="25">25 preguntas</option>
             <option value="30">30 preguntas</option>
+            <option value="35">35 preguntas</option>
             <option value="40" selected>40 preguntas</option>
+            <option value="45">45 preguntas</option>
             <option value="50">50 preguntas</option>
-            <option value="60">60 preguntas</option>
           </select>
         </div>
         <div>
@@ -6972,13 +7298,14 @@ bootstrap();
           <label style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;">N de preguntas</label>
           <select id="cfg-nq" style="width:100%;margin-top:6px;padding:10px 14px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:14px;background:white;outline:none;">
             <option value="10">10 preguntas</option>
+            <option value="15">15 preguntas</option>
             <option value="20">20 preguntas</option>
+            <option value="25">25 preguntas</option>
             <option value="30">30 preguntas</option>
+            <option value="35">35 preguntas</option>
             <option value="40">40 preguntas</option>
+            <option value="45">45 preguntas</option>
             <option value="50">50 preguntas</option>
-            <option value="60">60 preguntas</option>
-            <option value="80">80 preguntas</option>
-            <option value="100">100 preguntas</option>
           </select>
         </div>
         <div>
@@ -7009,5 +7336,362 @@ bootstrap();
     </div>
   </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+/* ===== EVALYS · módulo de reportes in-app (Ver reportes) ===== */
+(function(){
+  const $=(id)=>document.getElementById(id);
+  let _view='dash';
+  const round=(x,d)=>{const f=Math.pow(10,d||0);return Math.round(x*f)/f;};
+  const mean=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:0;
+  const sdPop=(a,m)=>Math.sqrt(a.reduce((s,x)=>s+(x-m)*(x-m),0)/a.length);
+  const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const OPTS=["A","B","C","D","E"];
+  const BANDS={FBB:{c:'#c44536',t:'Reprobado'},BB:{c:'#d98c1f',t:'60–70%'},B:{c:'#8fb33a',t:'70–80%'},AB:{c:'#5a9a2e',t:'80–90%'},A:{c:'#2f7d3f',t:'90–100%'}};
+  const notaColor=n=>{if(n==null)return['#475569','#eef2f7'];if(n<4)return['#b23a28','#f8e7e2'];if(n<5)return['#a9760f','#f6ecd5'];if(n<6)return['#3b6d11','#eaf3de'];return['#1c5e36','#dcefe2'];};
+
+  const EVR_CSS=`
+  .evr-wrap{font-family:inherit;color:#16252e}
+  .evr-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:0 0 26px}
+  .evr-stat{background:#f6f8f9;border:1px solid #e6ebed;border-radius:12px;padding:14px 16px}
+  .evr-stat .l{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#64748b;font-weight:700}
+  .evr-stat .v{font-size:26px;font-weight:700;margin-top:5px;line-height:1.1}
+  .evr-stat .s{font-size:12px;color:#64748b;margin-top:2px}
+  .evr-stat.kr{background:#0F8B8D;border-color:#0c7173}.evr-stat.kr .l,.evr-stat.kr .s{color:#bfe6e1}.evr-stat.kr .v{color:#fff}
+  .evr-sec{margin:30px 0}
+  .evr-kicker{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#0F8B8D;font-weight:700;margin-bottom:6px}
+  .evr-h{font-size:21px;font-weight:700;margin:0 0 4px}
+  .evr-sub{color:#64748b;font-size:13px;margin:0 0 16px;max-width:70ch}
+  .evr-card{background:#fff;border:1px solid #e6ebed;border-radius:12px;padding:16px 18px}
+  .evr-brow{display:flex;align-items:center;gap:10px;margin-bottom:7px}
+  .evr-brow .lab{width:88px;font-size:12px;color:#64748b}
+  .evr-brow .trk{flex:1;background:#eef1f3;border-radius:5px;height:22px;overflow:hidden}
+  .evr-brow .fil{height:100%;display:flex;align-items:center;padding-left:8px;font-size:12px;font-weight:700;color:#fff}
+  .evr-grid2{display:grid;grid-template-columns:1.1fr .9fr;gap:26px;align-items:start}
+  .evr-diag{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
+  .evr-dcard{border:1px solid #e3b6ac;background:#fcf3f0;border-radius:12px;padding:14px 16px}
+  .evr-dcard.warn{border-color:#e6d2a0;background:#fbf5e4}
+  .evr-dcard .top{display:flex;justify-content:space-between;align-items:baseline}
+  .evr-dcard .q{font-size:16px;font-weight:700}.evr-dcard .pb{font-size:12px;font-weight:700;color:#b23a28}
+  .evr-dcard .sb{font-size:12px;color:#64748b;margin:2px 0 10px}
+  .evr-opt{display:flex;align-items:center;gap:7px;margin-bottom:4px;font-size:11px}
+  .evr-opt .o{width:12px;font-weight:700}.evr-opt .t{flex:1;height:13px;background:#ece9e2;border-radius:3px;overflow:hidden}
+  .evr-opt .f{height:100%;border-radius:3px}.evr-opt .n{width:34px;text-align:right;color:#64748b}
+  .evr-dmsg{margin-top:10px;font-size:11px;line-height:1.45;color:#b23a28;background:#f8e2dc;padding:7px 9px;border-radius:7px}
+  .evr-dcard.warn .evr-dmsg{color:#9a6a0e;background:#f5ecd2}
+  .evr-tabwrap{overflow-x:auto;border:1px solid #e6ebed;border-radius:12px}
+  .evr-itab{width:100%;border-collapse:collapse;font-size:12.5px}
+  .evr-itab th{font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;color:#64748b;font-weight:700;text-align:left;padding:10px;background:#f8fafc;border-bottom:2px solid #e6ebed;position:sticky;top:0}
+  .evr-itab td{padding:8px 10px;border-bottom:1px solid #eef1f3}
+  .evr-itab tr.cr{background:#fcf3f0}.evr-itab tr.wr{background:#fbf5e4}
+  .evr-key{display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;border-radius:5px;background:#dcefe2;color:#1c5e36;font-weight:700;font-size:11px}
+  .evr-dif{display:flex;align-items:center;gap:8px;min-width:104px}.evr-dif .t{flex:1;height:7px;background:#eef1f3;border-radius:4px;overflow:hidden}.evr-dif .f{height:100%}
+  .evr-mini{display:flex;gap:3px;align-items:flex-end;height:28px}.evr-mini .b{width:12px;border-radius:2px 2px 0 0}.evr-mini .x{font-size:8px;color:#94a3b8;text-align:center}
+  .evr-tag{font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;white-space:nowrap}
+  .evr-tag.ok{color:#1c5e36;background:#dcefe2}.evr-tag.cr{color:#b23a28;background:#f8e2dc}.evr-tag.wr{color:#9a6a0e;background:#f5ecd2}.evr-tag.df{color:#7a5b13;background:#f0e8d2}
+  .evr-band{margin-bottom:16px}.evr-bandh{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:8px}.evr-bandh .sw{width:13px;height:13px;border-radius:4px}
+  .evr-rgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:7px}
+  .evr-rcell{display:flex;justify-content:space-between;align-items:center;gap:8px;border:1px solid #e6ebed;border-radius:8px;padding:7px 11px;background:#fff;font-size:12.5px}
+  .evr-rcell .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.evr-rcell .nt{font-weight:700;font-size:14px;padding:1px 8px;border-radius:6px}
+  .evr-atab{width:100%;border-collapse:collapse;font-size:12.5px}
+  .evr-atab th{font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;color:#fff;background:#16252e;font-weight:600;text-align:left;padding:8px 10px;position:sticky;top:0}
+  .evr-atab td{padding:6px 10px;border-bottom:1px solid #eef1f3}.evr-atab tr:nth-child(even){background:#fbfcfd}
+  .evr-atab .c{text-align:center}.evr-atab .rut{color:#64748b}
+  .evr-mtab{border-collapse:collapse;font-size:10px}
+  .evr-mtab th,.evr-mtab td{border:1px solid #e6ebed;text-align:center;width:19px;height:19px;padding:0}
+  .evr-mtab thead th{background:#16252e;color:#dfe8e6;font-weight:500;height:22px}
+  .evr-mtab .nm{text-align:left;padding-left:8px;white-space:nowrap;font-size:11px;background:#fbfcfd;width:160px}
+  .evr-mtab .ck{color:#9bbfb0;background:#f3f8f5}.evr-mtab .cw{color:#b23a28;background:#fbeae6;font-weight:700}.evr-mtab .com{color:#94a3b8;background:#f1f3f5}
+  .evr-leg{display:flex;gap:16px;font-size:12px;color:#64748b;margin-top:10px;flex-wrap:wrap}.evr-leg span{display:flex;align-items:center;gap:6px}
+  .evr-loading,.evr-empty{text-align:center;color:#64748b;padding:70px 20px}.evr-empty-ic{font-size:34px;margin-bottom:10px}.evr-empty-sub{font-size:13px;color:#94a3b8;margin-top:6px}
+  .evr-viewtabs{display:flex;gap:6px;margin:0 0 22px;border-bottom:1px solid #e6ebed}
+  .evr-vtab{background:none;border:none;border-bottom:2px solid transparent;padding:9px 15px;font-size:14px;font-weight:600;color:#64748b;cursor:pointer;font-family:inherit;margin-bottom:-1px}
+  .evr-vtab:hover{color:#16252e}
+  .evr-vtab.active{color:#0F8B8D;border-bottom-color:#0F8B8D}
+  .evr-rsearch{margin:0 0 12px}
+  .evr-rsearch input{width:100%;max-width:340px;padding:9px 13px;border:1px solid #d8dee2;border-radius:9px;font-size:13px;font-family:inherit;outline:none;color:#16252e}
+  .evr-rsearch input:focus{border-color:#0F8B8D}
+  .evr-rhead{display:grid;grid-template-columns:18px minmax(120px,1.6fr) 96px minmax(110px,1.3fr) 62px 52px 48px;gap:10px;padding:8px 14px;font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;color:#64748b;font-weight:700;border:1px solid #e6ebed;border-bottom:2px solid #e6ebed;background:#f8fafc;border-radius:12px 12px 0 0}
+  .evr-rhead .ra{text-align:right}.evr-rhead .rc{text-align:center}
+  .evr-rlist{border:1px solid #e6ebed;border-top:none;border-radius:0 0 12px 12px;overflow:hidden}
+  .evr-ritem{border-bottom:1px solid #eef1f3}.evr-ritem:last-child{border-bottom:none}
+  .evr-rrow{display:grid;grid-template-columns:18px minmax(120px,1.6fr) 96px minmax(110px,1.3fr) 62px 52px 48px;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;font-size:13px}
+  .evr-rrow:hover{background:#f6f8f9}
+  .evr-rrow .chev{color:#94a3b8;font-size:10px;display:inline-block;transition:transform .15s}
+  .evr-rrow .rnm{font-weight:600;color:#16252e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .evr-rrow .rid{color:#64748b;font-size:12px}
+  .evr-rrow .rmiss{color:#94a3b8;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .evr-rrow .rpts{text-align:right;color:#475569;font-weight:600}
+  .evr-rrow .rsco{text-align:right;color:#64748b}
+  .evr-rrow .rnota{text-align:center;font-weight:700;padding:2px 6px;border-radius:6px;font-size:13px}
+  .evr-rdetail{background:#fafbfc;padding:14px 18px 18px;border-top:1px solid #eef1f3}
+  .evr-qgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(138px,1fr));gap:5px 20px}
+  .evr-qi{display:flex;align-items:center;gap:8px;font-size:13px;padding:3px 0}
+  .evr-qi .ic{width:18px;height:18px;line-height:18px;text-align:center;border-radius:50%;font-size:10px;font-weight:700;color:#fff;flex:none}
+  .evr-qi.ok .ic{background:#3a9d4f}.evr-qi.wr .ic{background:#cf4b3a}.evr-qi.om .ic{background:#cbd2d8;color:#5b6671}
+  .evr-qi .qn{color:#94a3b8;width:26px;text-align:right}
+  .evr-qi .mk{font-weight:700;color:#16252e;min-width:10px}
+  .evr-qi.wr .mk{color:#cf4b3a}
+  .evr-qi .cor{color:#2f8f44;font-weight:700;font-size:12px}
+  .evr-rempty{text-align:center;color:#94a3b8;padding:30px;font-size:13px}
+  @media print{.page-header .page-actions,#nav,.nav,.sidebar{display:none!important}.evr-sec{break-inside:avoid}.evr-itab tr,.evr-rcell,.evr-dcard{break-inside:avoid}}
+  `;
+
+  function injectCSS(){ if($('evr-style'))return; const s=document.createElement('style'); s.id='evr-style'; s.textContent=EVR_CSS; document.head.appendChild(s); }
+
+  window.openReports=function(id,name,nq){ window._evrCtx={id:id,name:name,nq:nq||0}; injectCSS(); navigate('reports'); loadReports(); };
+
+  async function loadReports(){
+    const ctx=window._evrCtx, body=$('evr-body'); if(!body)return;
+    const tEl=$('evr-title'); if(tEl)tEl.textContent=ctx&&ctx.name?ctx.name:'Reportes';
+    body.innerHTML='<div class="evr-loading">Calculando métricas desde los escaneos…</div>';
+    try{
+      const base=(typeof getApiBase==='function')?getApiBase():window.API_BASE;
+      const h=(typeof _authToken!=='undefined'&&_authToken)?{'Authorization':'Bearer '+_authToken}:{};
+      const res=await fetch(base.replace(/\/$/,'')+'/assessments/'+ctx.id+'/results',{headers:h});
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      const data=await res.json();
+      const results=(data&&data.results)||[];
+      if(!results.length){ body.innerHTML='<div class="evr-empty"><div class="evr-empty-ic">📋</div><div>Aún no hay escaneos validados para esta evaluación.</div><div class="evr-empty-sub">Escanea las hojas de la clase (y valida la pauta) y los reportes aparecerán aquí.</div></div>'; return; }
+      const m=computeFromResults(results, ctx.nq); window._evrMetrics=m;
+      body.innerHTML=`<div class="evr-viewtabs"><button id="evr-tab-dash" class="evr-vtab active" onclick="evrView('dash')">Dashboard</button><button id="evr-tab-resp" class="evr-vtab" onclick="evrView('resp')">Respuestas por alumno</button></div><div id="evr-content"></div>`;
+      _view='dash'; renderActive();
+    }catch(e){
+      body.innerHTML='<div class="evr-empty"><div class="evr-empty-ic">⚠️</div><div>No se pudieron cargar los resultados.</div><div class="evr-empty-sub">'+esc(e.message)+' — verifica que el backend esté desplegado con el endpoint de resultados.</div></div>';
+    }
+  }
+
+  function computeFromResults(results, nq){
+    const vc={}; results.forEach(r=>{const v=r.version||'A';vc[v]=(vc[v]||0)+1;});
+    const ver=Object.keys(vc).sort((a,b)=>vc[b]-vc[a])[0]||'A';
+    const rs0=results.filter(r=>(r.version||'A')===ver);
+    // 1 registro por alumno por prueba: dedup por RUT (luego identificador, luego firma de respuestas); gana el ultimo escaneo
+    const _normK=v=>String(v==null?'':v).replace(/[.\-\s]/g,'').toLowerCase();
+    const _keyOf=r=>{ if(r.student&&r.student.rut) return 'rut:'+_normK(r.student.rut);
+      if(r.student_identifier) return 'id:'+_normK(r.student_identifier);
+      const c=(r.correct_questions||[]).slice().sort((a,b)=>a-b).join('.');
+      const w=(r.incorrect_questions||[]).map(x=>''+x.question+(x.student||'')).slice().sort().join('.');
+      const o=(r.omitted_questions||[]).slice().sort((a,b)=>a-b).join('.');
+      return 'sig:'+c+'|'+w+'|'+o; };
+    const _seenK={}; rs0.forEach(r=>{_seenK[_keyOf(r)]=r;});
+    const rs=rs0.filter(r=>_seenK[_keyOf(r)]===r);
+    const annul=new Set(); rs.forEach(r=>(r.annulled_questions||[]).forEach(q=>annul.add(q)));
+    const qset=new Set();
+    rs.forEach(r=>{(r.correct_questions||[]).forEach(q=>qset.add(q));(r.incorrect_questions||[]).forEach(x=>qset.add(x.question));(r.omitted_questions||[]).forEach(q=>qset.add(q));});
+    annul.forEach(q=>qset.delete(q));
+    const qs=[...qset].sort((a,b)=>a-b); const k=qs.length||nq||rs[0].n_total||0;
+    const key={}; rs.forEach(r=>(r.incorrect_questions||[]).forEach(x=>{if(!annul.has(x.question))key[x.question]=x.correct;}));
+    const studs=rs.map(r=>{
+      const correct=new Set(r.correct_questions||[]); const chosen={};
+      (r.incorrect_questions||[]).forEach(x=>chosen[x.question]=x.student);
+      const st=r.student||{}; const ape=((st.apellido_paterno||'')+' '+(st.apellido_materno||'')).trim();
+      const punt0=(r.n_correct!=null?r.n_correct:correct.size);
+      const pctv=(r.percentage!=null?r.percentage:(k?punt0/k*100:0));
+      const thr=(r.passing_threshold!=null?r.passing_threshold:60)/100, pf=pctv/100;
+      let nv=pf<=thr?1+3*pf/thr:4+3*(pf-thr)/(1-thr); nv=Math.min(7,Math.round(nv*10)/10);
+      return {rut:st.rut||r.student_identifier||'', ape:ape||(r.student_name||''), nom:st.nombres||'',
+              name:r.student_name||r.student_identifier||'', correct:correct, chosen:chosen,
+              nota:nv, pct:pctv, punt:punt0};
+    });
+    const N=studs.length;
+    const M=studs.map(s=>qs.map(q=>s.correct.has(q)?1:0));
+    const total=M.map(row=>row.reduce((s,x)=>s+x,0));
+    const mt=mean(total), sd=sdPop(total,mt);
+    const p=qs.map((q,i)=>M.reduce((s,_,si)=>s+M[si][i],0)/N);
+    const KR20=sd>0?(k/(k-1))*(1-p.reduce((s,pi)=>s+pi*(1-pi),0)/(sd*sd)):0;
+    const pb=i=>{const rest=[],g1=[],g0=[];for(let s=0;s<N;s++){const rr=total[s]-M[s][i];rest.push(rr);(M[s][i]?g1:g0).push(rr);}if(!g1.length||!g0.length)return 0;const mr=mean(rest),sr=sdPop(rest,mr);return sr===0?0:(mean(g1)-mean(g0))/sr*Math.sqrt(p[i]*(1-p[i]));};
+    const ad=d=>{const tot=[];for(let s=0;s<N;s++){let t=0;for(let i=0;i<k;i++)if(i!==d)t+=M[s][i];tot.push(t);}const mtt=mean(tot),vt=Math.pow(sdPop(tot,mtt),2);if(vt<=0||k<3)return 0;let spq=0;for(let i=0;i<k;i++)if(i!==d)spq+=p[i]*(1-p[i]);return (k-1)/(k-2)*(1-spq/vt);};
+    const items=qs.map((q,i)=>{
+      const dist={A:0,B:0,C:0,D:0,E:0}; let om=0;
+      studs.forEach(s=>{ if(s.correct.has(q)){const kk=key[q]; if(kk&&dist[kk]!=null)dist[kk]++;} else if(s.chosen[q]!=null){const c=s.chosen[q]; if(dist[c]!=null)dist[c]++;} else om++; });
+      const nc=Math.round(p[i]*N), dif=Math.round(p[i]*100), pbv=round(pb(i),2);
+      let flag='ok',diag='';
+      if(pbv<0){const kk=key[q]; const wr=OPTS.filter(o=>o!==kk); const top=wr.reduce((a,b)=>(dist[b]||0)>(dist[a]||0)?b:a,wr[0]);
+        if(kk&&dist[top]>dist[kk]){flag='critico';diag='Más alumnos marcaron '+top+' ('+Math.round(dist[top]/N*100)+'%) que la clave '+kk+' ('+dif+'%). Revisar si la clave es correcta.';}
+        else{flag='critico';diag='Discriminación negativa: la aciertan más los de bajo rendimiento. Revisar redacción.';}
+      } else if(pbv<0.15){flag='debil';diag='Discrimina poco entre niveles; aporta poco a la confiabilidad.';}
+      else if(dif<35){flag='dificil';diag='Muy difícil; revisar si el contenido fue cubierto.';}
+      return {q:q,key:key[q]||'?',dif:dif,nc:nc,nw:N-nc,pb:pbv,ad:round(ad(i),2),dist:dist,om:om,flag:flag,diag:diag};
+    });
+    const band=pc=>pc>=90?'A':pc>=80?'AB':pc>=70?'B':pc>=60?'BB':'FBB';
+    const notas=studs.map(s=>s.nota).filter(x=>x!=null);
+    const pctOf=(s,si)=>Math.round(s.pct!=null?s.pct:total[si]/k*100);
+    const roster=studs.map((s,si)=>({name:(s.ape+' '+s.nom).trim()||s.name,raw:s.punt,pct:pctOf(s,si),nota:s.nota,band:band(pctOf(s,si))})).sort((a,b)=>b.raw-a.raw);
+    const acta=studs.map(s=>({rut:s.rut,ape:s.ape,nom:s.nom,punt:s.punt,nota:s.nota})).sort((a,b)=>a.ape===b.ape?(a.nom<b.nom?-1:1):(a.ape<b.ape?-1:1));
+    const matrix=studs.map((s,si)=>({name:(s.ape+' '+s.nom).trim()||s.name,raw:s.punt,nota:s.nota,cells:qs.map(q=>s.correct.has(q)?'ok':(s.chosen[q]!=null?s.chosen[q]:'om'))})).sort((a,b)=>b.raw-a.raw);
+    const hist=[0,0,0,0,0,0,0,0,0,0], bands={FBB:0,BB:0,B:0,AB:0,A:0};
+    roster.forEach(r=>{hist[Math.min(9,Math.floor(r.pct/10))]++;bands[r.band]++;});
+    const rngDef=[["1,0–1,9",1,2],["2,0–2,9",2,3],["3,0–3,9",3,4],["4,0–4,9",4,5],["5,0–5,9",5,6],["6,0–7,0",6,7.001]];
+    const nota_ranges=rngDef.map(d=>({r:d[0],n:notas.filter(x=>x>=d[1]&&(d[2]>7?x<=7:x<d[2])).length}));
+    const st=total.slice().sort((a,b)=>a-b);
+    const passN=notas.length?notas.filter(x=>x>=4).length:roster.filter(r=>r.pct>=60).length;
+    const responses=studs.map(s=>{
+      const detail=qs.map(q=>{
+        if(s.correct.has(q)) return {q:q,st:'ok',mark:(key[q]||''),correct:(key[q]||'')};
+        if(s.chosen[q]!=null) return {q:q,st:'wr',mark:s.chosen[q],correct:(key[q]||'?')};
+        return {q:q,st:'om',mark:'',correct:(key[q]||'?')};
+      });
+      const missed=detail.filter(d=>d.st!=='ok').map(d=>d.q);
+      return {rut:s.rut,name:(s.ape+' '+s.nom).trim()||s.name||'desconocido',ape:s.ape,nom:s.nom,raw:s.punt,pct:s.pct,nota:s.nota,missed:missed,detail:detail};
+    }).sort((a,b)=>{const an=(a.ape||a.name||'').toLowerCase(),bn=(b.ape||b.name||'').toLowerCase();return an<bn?-1:an>bn?1:0;});
+    return {qs:qs,N:N,k:k,ver:ver,key:key,responses:responses,
+      summary:{N:N,k:k,mean_pct:round(mean(roster.map(r=>r.pct)),1),mean_raw:round(mt,1),median:st[Math.floor(N/2)],
+        sd_pct:round(sd/k*100,1),min:Math.min.apply(null,total),max:Math.max.apply(null,total),kr20:round(KR20,2),
+        mean_nota:notas.length?round(mean(notas),1):null,pass:passN,fail:N-passN,
+        nota_min:notas.length?Math.min.apply(null,notas):null,nota_max:notas.length?Math.max.apply(null,notas):null},
+      items:items,roster:roster,acta:acta,matrix:matrix,hist:hist,bands:bands,nota_ranges:nota_ranges};
+  }
+
+  function buildDashboardHTML(m,ctx){
+    const S=m.summary, crit=m.items.filter(i=>i.flag==='critico'), weak=m.items.filter(i=>i.flag==='debil');
+    const krLab=S.kr20>=0.8?'alta':S.kr20>=0.7?'buena':S.kr20>=0.5?'moderada':'baja';
+    let h='<div class="evr-wrap">';
+    h+='<div style="font-size:13px;color:#64748b;margin:0 0 18px">'+esc(ctx?ctx.name:'')+' · '+S.N+' alumnos rendidos · '+S.k+' preguntas'+(m.ver?' · forma '+esc(m.ver):'')+'</div>';
+    // stats
+    const pass=Math.round(S.pass/S.N*100);
+    h+='<div class="evr-stats">'
+      +stat('Media',S.mean_pct+'%',(S.mean_nota!=null?'nota '+S.mean_nota.toFixed(1)+' · ':'')+'mediana '+S.median+'/'+S.k)
+      +stat('Aprobación',pass+'%',S.pass+' de '+S.N)
+      +stat('Dispersión','±'+S.sd_pct+'%','rango '+S.min+'–'+S.max)
+      +'<div class="evr-stat kr"><div class="l">KR-20</div><div class="v">'+S.kr20.toFixed(2)+'</div><div class="s">confiabilidad '+krLab+'</div></div>'
+      +'</div>';
+    // distribución
+    h+='<div class="evr-sec"><div class="evr-kicker">Distribución</div><div class="evr-h">Distribución de resultados</div>'
+      +'<div class="evr-grid2"><div class="evr-card">'+nivelBars(m)+'</div><div class="evr-card">'+notaRangeBars(m)+'</div></div></div>';
+    // diagnóstico
+    const probs=crit.concat(weak).slice(0,3);
+    if(probs.length){
+      h+='<div class="evr-sec"><div class="evr-kicker" style="color:#b23a28">Diagnóstico</div><div class="evr-h">Preguntas que requieren atención</div>'
+        +'<div class="evr-sub">EVALYS detecta automáticamente los ítems que restan calidad al instrumento.</div><div class="evr-diag">';
+      probs.forEach(it=>h+=diagCard(it,S.N)); h+='</div></div>';
+    }
+    // análisis de ítems
+    h+='<div class="evr-sec"><div class="evr-kicker">Análisis por pregunta</div><div class="evr-h">Análisis de ítems</div>'
+      +'<div class="evr-sub">Dificultad, discriminación (punto biserial), confiabilidad si se elimina y distribución de alternativas (clave en verde).</div>'
+      +'<div class="evr-tabwrap"><table class="evr-itab"><thead><tr><th>#</th><th>Clave</th><th>Dificultad</th><th>Discrim.</th><th>α si elim.</th><th>Distribución A–E</th><th>Estado</th></tr></thead><tbody>';
+    m.items.forEach(it=>h+=itemRow(it)); h+='</tbody></table></div></div>';
+    // ranking
+    h+='<div class="evr-sec"><div class="evr-kicker">Ranking</div><div class="evr-h">Ranking del curso</div>';
+    ['A','AB','B','BB','FBB'].forEach(b=>{const list=m.roster.filter(x=>x.band===b);if(!list.length)return;
+      h+='<div class="evr-band"><div class="evr-bandh"><span class="sw" style="background:'+BANDS[b].c+'"></span>'+BANDS[b].t+' · '+list.length+'</div><div class="evr-rgrid">';
+      list.forEach(x=>{const c=notaColor(x.nota);h+='<div class="evr-rcell"><span class="nm">'+esc(x.name)+'</span><span class="nt" style="color:'+c[0]+';background:'+c[1]+'">'+(x.nota!=null?x.nota.toFixed(1):'—')+'</span></div>';});
+      h+='</div></div>';});
+    h+='</div>';
+    // acta
+    h+='<div class="evr-sec"><div class="evr-kicker">Acta</div><div class="evr-h">Acta de calificaciones</div>'
+      +'<div class="evr-tabwrap"><table class="evr-atab"><thead><tr><th>Nº</th><th>RUT</th><th>Apellidos</th><th>Nombre</th><th class="c">Puntaje</th><th class="c">Nota</th></tr></thead><tbody>';
+    m.acta.forEach((a,i)=>{const c=notaColor(a.nota);h+='<tr><td class="c" style="color:#94a3b8">'+(i+1)+'</td><td class="rut">'+esc(a.rut)+'</td><td>'+esc(a.ape)+'</td><td>'+esc(a.nom)+'</td><td class="c">'+a.punt+'</td><td class="c"><span style="font-weight:700;padding:1px 8px;border-radius:6px;color:'+c[0]+';background:'+c[1]+'">'+(a.nota!=null?a.nota.toFixed(1):'—')+'</span></td></tr>';});
+    h+='</tbody></table></div></div>';
+    // matriz
+    h+='<div class="evr-sec"><div class="evr-kicker">Detalle</div><div class="evr-h">Matriz clase × pregunta</div>'
+      +'<div class="evr-sub">Cada respuesta de la clase. Verde = correcta, roja = incorrecta (letra marcada), gris = en blanco.</div>'
+      +'<div class="evr-tabwrap"><table class="evr-mtab"><thead><tr><th class="nm">Estudiante</th>';
+    m.qs.forEach(q=>h+='<th>'+q+'</th>'); h+='<th>Pje</th><th>Nota</th></tr></thead><tbody>';
+    m.matrix.forEach(r=>{h+='<tr><td class="nm">'+esc(r.name)+'</td>';
+      r.cells.forEach(c=>{ if(c==='ok')h+='<td class="ck">·</td>'; else if(c==='om')h+='<td class="com">–</td>'; else h+='<td class="cw">'+esc(c)+'</td>'; });
+      h+='<td style="font-weight:700">'+r.raw+'</td><td style="font-weight:700">'+(r.nota!=null?r.nota.toFixed(1):'—')+'</td></tr>';});
+    h+='</tbody></table></div><div class="evr-leg"><span><span style="width:14px;height:14px;border-radius:3px;background:#f3f8f5;border:1px solid #e6ebed"></span>correcta</span><span><span style="width:14px;height:14px;border-radius:3px;background:#fbeae6;border:1px solid #e6ebed"></span>incorrecta</span><span><span style="width:14px;height:14px;border-radius:3px;background:#f1f3f5;border:1px solid #e6ebed"></span>en blanco</span></div></div>';
+    h+='</div>';
+    return h;
+  }
+  function setActiveTab(){var d=$('evr-tab-dash'),r=$('evr-tab-resp');if(d)d.className='evr-vtab'+(_view==='dash'?' active':'');if(r)r.className='evr-vtab'+(_view==='resp'?' active':'');}
+  function renderActive(){var c=$('evr-content');if(!c||!window._evrMetrics)return;c.innerHTML=(_view==='resp')?buildResponsesHTML(window._evrMetrics,window._evrCtx):buildDashboardHTML(window._evrMetrics,window._evrCtx);setActiveTab();}
+  window.evrView=function(v){_view=v;renderActive();};
+  window.evrToggleResp=function(i){var d=$('evr-rd-'+i),ch=$('evr-chev-'+i);if(!d)return;var open=(d.style.display==='none');d.style.display=open?'block':'none';if(ch)ch.style.transform=open?'rotate(90deg)':'';};
+  window.evrFilterResp=function(q){q=(q||'').toLowerCase().trim();var items=document.querySelectorAll('.evr-ritem');for(var i=0;i<items.length;i++){var nm=items[i].getAttribute('data-nm')||'';items[i].style.display=(!q||nm.indexOf(q)>=0)?'':'none';}};
+  function buildResponsesHTML(m,ctx){
+    var R=m.responses||[], k=m.k;
+    var h='<div class="evr-wrap">';
+    h+='<div style="font-size:13px;color:#64748b;margin:0 0 6px">'+esc(ctx?ctx.name:'')+' · '+R.length+' registro'+(R.length===1?'':'s')+' · '+k+' preguntas'+(m.ver?' · forma '+esc(m.ver):'')+'</div>';
+    h+='<div class="evr-sub" style="margin:0 0 14px">Un registro por alumno. Toca una fila para ver el detalle: <b style="color:#2f8f44">verde</b> = correcta, <b style="color:#cf4b3a">roja</b> = marcó mal (entre paréntesis, la correcta), gris = en blanco.</div>';
+    h+='<div class="evr-rsearch"><input type="text" placeholder="Buscar alumno…" oninput="evrFilterResp(this.value)"></div>';
+    if(!R.length){h+='<div class="evr-rempty">No hay registros para mostrar.</div></div>';return h;}
+    h+='<div class="evr-rhead"><span></span><span>Estudiante</span><span>RUT</span><span>Preguntas erradas</span><span class="ra">Puntaje</span><span class="ra">%</span><span class="rc">Nota</span></div>';
+    h+='<div class="evr-rlist">';
+    R.forEach(function(r,idx){
+      var c=notaColor(r.nota);
+      h+='<div class="evr-ritem" data-nm="'+esc((r.name||'').toLowerCase()+' '+(r.rut||''))+'">';
+      h+='<div class="evr-rrow" onclick="evrToggleResp('+idx+')">'
+        +'<span class="chev" id="evr-chev-'+idx+'">&#9654;</span>'
+        +'<span class="rnm">'+esc(r.name||'—')+'</span>'
+        +'<span class="rid">'+esc(r.rut||'—')+'</span>'
+        +'<span class="rmiss">'+(r.missed.length?esc(r.missed.join(', ')):'<span style="color:#3a9d4f">sin errores</span>')+'</span>'
+        +'<span class="rpts">'+r.raw+'/'+k+'</span>'
+        +'<span class="rsco">'+Math.round(r.pct)+'%</span>'
+        +'<span class="rnota" style="color:'+c[0]+';background:'+c[1]+'">'+(r.nota!=null?r.nota.toFixed(1):'—')+'</span>'
+        +'</div>';
+      h+='<div class="evr-rdetail" id="evr-rd-'+idx+'" style="display:none"><div class="evr-qgrid">';
+      r.detail.forEach(function(d){
+        var cls=d.st==='ok'?'ok':d.st==='wr'?'wr':'om';
+        var ic=d.st==='ok'?'✓':d.st==='wr'?'✕':'–';
+        var mk=d.st==='ok'?(d.mark||(d.correct&&d.correct!=='?'?d.correct:'·')):d.st==='wr'?(d.mark||'?'):'';
+        var cor=(d.st!=='ok'&&d.correct&&d.correct!=='?')?(' <span class="cor">('+esc(d.correct)+')</span>'):'';
+        h+='<div class="evr-qi '+cls+'"><span class="ic">'+ic+'</span><span class="qn">'+d.q+'.</span><span class="mk">'+esc(mk)+'</span>'+cor+'</div>';
+      });
+      h+='</div></div></div>';
+    });
+    h+='</div></div>';
+    return h;
+  }
+  function stat(l,v,s){return '<div class="evr-stat"><div class="l">'+l+'</div><div class="v">'+v+'</div><div class="s">'+s+'</div></div>';}
+  function nivelBars(m){const mx=Math.max(1,...Object.values(m.bands));let h='<div style="font-size:13px;font-weight:700;color:#64748b;margin-bottom:10px">Niveles de logro</div>';
+    ['FBB','BB','B','AB','A'].forEach(b=>{const n=m.bands[b];h+='<div class="evr-brow"><span class="lab">'+BANDS[b].t+'</span><div class="trk"><div class="fil" style="width:'+(n/mx*100)+'%;background:'+BANDS[b].c+'">'+(n||'')+'</div></div></div>';});return h;}
+  function notaRangeBars(m){const mx=Math.max(1,...m.nota_ranges.map(x=>x.n));const col=['#c44536','#d98c1f','#caa83a','#7fae3c','#4f9a3a','#2f7d3f'];
+    let h='<div style="font-size:13px;font-weight:700;color:#64748b;margin-bottom:10px">Notas por rango</div>';
+    m.nota_ranges.forEach((x,i)=>{h+='<div class="evr-brow"><span class="lab">'+x.r+'</span><div class="trk"><div class="fil" style="width:'+(x.n/mx*100)+'%;background:'+col[i]+'">'+(x.n||'')+'</div></div></div>';});return h;}
+  function diagCard(it,N){const arr=OPTS.map(o=>({o:o,n:it.dist[o]||0})).filter(x=>x.n>0||x.o===it.key).sort((a,b)=>b.n-a.n).slice(0,3);
+    const mx=Math.max(1,...arr.map(a=>a.n));let opts='';
+    arr.forEach(x=>{const k=x.o===it.key;opts+='<div class="evr-opt"><span class="o" style="color:'+(k?'#1c5e36':'#64748b')+'">'+x.o+'</span><div class="t"><div class="f" style="width:'+(x.n/mx*100)+'%;background:'+(k?'#1c8568':'#cdb6af')+'"></div></div><span class="n">'+Math.round(x.n/N*100)+'%</span></div>';});
+    return '<div class="evr-dcard '+(it.flag==='critico'?'':'warn')+'"><div class="top"><span class="q">Pregunta '+it.q+'</span><span class="pb">disc '+it.pb.toFixed(2)+'</span></div><div class="sb">clave '+it.key+' · '+it.dif+'% acertó</div>'+opts+'<div class="evr-dmsg">'+esc(it.diag)+'</div></div>';}
+  function itemRow(it){const dc=it.dif<40?'#c44536':it.dif<70?'#d98c1f':'#5a9a2e';const pc=it.pb<0?'#b23a28':it.pb<0.15?'#9a6a0e':'#1c8568';
+    const mx=Math.max(1,...OPTS.map(o=>it.dist[o]||0),it.om);let dd='';
+    OPTS.forEach(o=>{const n=it.dist[o]||0;if(n===0&&o==='E')return;const k=o===it.key;dd+='<div style="display:flex;flex-direction:column;align-items:center;gap:2px"><div class="b" style="height:'+(n/mx*28)+'px;background:'+(k?'#1c8568':'#cbb8b0')+'" title="'+o+': '+n+'"></div><div class="x" style="'+(k?'color:#1c5e36;font-weight:700':'')+'">'+o+'</div></div>';});
+    const tg={ok:['ok','sólida'],critico:['cr','revisar'],debil:['wr','débil'],dificil:['df','difícil']}[it.flag];
+    return '<tr class="'+(it.flag==='critico'?'cr':it.flag==='debil'?'wr':'')+'"><td style="font-weight:700">'+it.q+'</td><td><span class="evr-key">'+it.key+'</span></td>'
+      +'<td><div class="evr-dif"><div class="t"><div class="f" style="width:'+it.dif+'%;background:'+dc+'"></div></div><span style="width:34px">'+it.dif+'%</span></div></td>'
+      +'<td style="font-weight:700;color:'+pc+'">'+it.pb.toFixed(2)+'</td><td style="color:#64748b">'+it.ad.toFixed(2)+'</td>'
+      +'<td><div class="evr-mini">'+dd+'</div></td><td><span class="evr-tag '+tg[0]+'">'+tg[1]+'</span></td></tr>';}
+
+  // ---- exportar PDF (ventana imprimible) ----
+  window.exportReportsPDF=function(){
+    const m=window._evrMetrics, ctx=window._evrCtx; if(!m){alert('Abre primero un reporte.');return;}
+    const w=window.open('','_blank'); if(!w){alert('Permite las ventanas emergentes para exportar el PDF.');return;}
+    w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>EVALYS · '+esc(ctx.name)+'</title><style>body{font-family:Arial,Helvetica,sans-serif;margin:28px;color:#16252e}h1{font-size:22px;color:#0F8B8D;margin:0 0 4px}'+EVR_CSS+'</style></head><body><h1>EVALYS · Reporte de métricas</h1>'+buildDashboardHTML(m,ctx)+'<script>window.onload=function(){setTimeout(function(){window.print();},300);}<\/script></body></html>');
+    w.document.close();
+  };
+
+  // ---- exportar Excel (6 pestañas) ----
+  window.exportReportsExcel=function(){
+    const m=window._evrMetrics, ctx=window._evrCtx; if(!m){alert('Abre primero un reporte.');return;}
+    if(typeof XLSX==='undefined'){alert('No se pudo cargar el motor de Excel (revisa la conexión).');return;}
+    const S=m.summary, wb=XLSX.utils.book_new();
+    const addS=(name,aoa,cols)=>{const ws=XLSX.utils.aoa_to_sheet(aoa); if(cols)ws['!cols']=cols.map(w=>({wch:w})); XLSX.utils.book_append_sheet(wb,ws,name);};
+    const resumen=[['EVALYS · Reporte de métricas'],[ctx.name||''],[],
+      ['Indicador','Valor'],['Alumnos',S.N],['Preguntas',S.k],['Forma',m.ver],['Media (%)',S.mean_pct],['Media (puntaje)',S.mean_raw],
+      ['Mediana',S.median],['Desv. estándar (%)',S.sd_pct],['Mínimo',S.min],['Máximo',S.max],
+      ['Nota media',S.mean_nota],['Aprobados',S.pass],['Reprobados',S.fail],['% aprobación',Math.round(S.pass/S.N*100)+'%'],['KR-20',S.kr20]];
+    addS('Resumen',resumen,[28,14]);
+    const acta=[['Nº','RUT','Apellidos','Nombre','Puntaje','Nota']];
+    m.acta.forEach((a,i)=>acta.push([i+1,a.rut,a.ape,a.nom,a.punt,a.nota!=null?Number(a.nota.toFixed(1)):'']));
+    addS('Acta',acta,[5,13,22,20,9,7]);
+    const rk=[['Nº','RUT','Estudiante','Puntaje','%','Nota','Nivel']];
+    m.roster.forEach((r,i)=>rk.push([i+1,'',r.name,r.raw,r.pct+'%',r.nota!=null?Number(r.nota.toFixed(1)):'',BANDS[r.band].t]));
+    addS('Ranking',rk,[5,13,28,9,7,7,14]);
+    const it=[['#','Clave','Aciertos','Errores','Dificultad %','Discriminación','α si elim.','A','B','C','D','E','Omit.','Estado','Diagnóstico']];
+    m.items.forEach(i=>it.push([i.q,i.key,i.nc,i.nw,i.dif,i.pb,i.ad,i.dist.A,i.dist.B,i.dist.C,i.dist.D,i.dist.E,i.om,i.flag,i.diag]));
+    addS('Análisis de ítems',it,[4,7,9,8,13,13,11,5,5,5,5,5,7,10,50]);
+    const di=[['Nivel de logro','Nº']]; ['FBB','BB','B','AB','A'].forEach(b=>di.push([BANDS[b].t,m.bands[b]]));
+    di.push([],['Rango de nota','Nº']); m.nota_ranges.forEach(x=>di.push([x.r,x.n]));
+    addS('Distribución',di,[16,6]);
+    const mx=[['Estudiante'].concat(m.qs.map(q=>'P'+q)).concat(['Puntaje','Nota'])];
+    m.matrix.forEach(r=>mx.push([r.name].concat(r.cells.map(c=>c==='ok'?'✓':c==='om'?'–':c)).concat([r.raw,r.nota!=null?Number(r.nota.toFixed(1)):''])));
+    addS('Matriz',mx,[26].concat(m.qs.map(function(){return 4;})).concat([8,7]));
+    XLSX.writeFile(wb,'EVALYS_Reportes_'+(ctx.name||'evaluacion').replace(/[^a-zA-Z0-9]+/g,'_')+'.xlsx');
+  };
+
+  window.EvalysReports={computeFromResults:computeFromResults, buildDashboardHTML:buildDashboardHTML, buildResponsesHTML:buildResponsesHTML};
+})();
+
+</script>
 </body>
 </html>
