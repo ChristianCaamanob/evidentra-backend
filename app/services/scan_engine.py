@@ -37,6 +37,8 @@ class ScanResult:
     confidence: float = 0.0
     debug_image: Optional[str] = None
     error: Optional[str] = None
+    detected_version: Optional[str] = None
+    detected_n: Optional[int] = None
 
 
 def preprocess(img):
@@ -327,6 +329,44 @@ def _fiducials_confiables(fiducials, shape):
     return True
 
 
+def read_form_id(gray):
+    """Decodifica el FORM IDENTIFIER (version + N). Mismas coords que el generador.
+    Devuelve (version_letter, n_questions) o (None, None) si no es legible o falla paridad."""
+    FACTOR = 2100.0 / 595.27
+    fid_xs = [353, 368, 383, 398, 413, 428, 443, 458, 473, 488, 503, 518, 533]
+    fid_y_rows_svg = [400, 420]
+    fid_bub_r = 5.0
+    r = int(fid_bub_r * FACTOR)
+    rows = []
+    for y_svg in fid_y_rows_svg:
+        cy = int(y_svg * FACTOR)
+        bits = []
+        for bx in fid_xs:
+            cx = int(bx * FACTOR)
+            filled, _ = is_bubble_filled(gray, cx, cy, r)
+            bits.append(1 if filled else 0)
+        rows.append(bits)
+    row0, row1 = rows[0], rows[1]
+    if row0[0] != 1 or row1[0] != 1:
+        return None, None
+    vbits = row0[1:6]
+    if sum(vbits) % 2 != row0[6]:
+        return None, None
+    v = 0
+    for b in vbits:
+        v = (v << 1) | b
+    if v < 1 or v > 31:
+        return None, None
+    version = chr(ord('A') + v - 1)
+    nbits = row1[1:8]
+    if sum(nbits) % 2 != row1[8]:
+        return None, None
+    nq = 0
+    for b in nbits:
+        nq = (nq << 1) | b
+    return version, (nq if nq > 0 else None)
+
+
 def scan_sheet(image_bytes: bytes, n_questions_override: int = 0) -> ScanResult:
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -354,15 +394,18 @@ def scan_sheet(image_bytes: bytes, n_questions_override: int = 0) -> ScanResult:
         gray = preprocess(img)
         img_original = img.copy()
     qr_data = read_qr(img_original)
-    n_questions = n_questions_override or (qr_data.n_questions if qr_data else 40)
+    fid_version, fid_n = read_form_id(gray)
+    n_questions = n_questions_override or fid_n or (qr_data.n_questions if qr_data else 40)
     if n_questions % 2 != 0:
         n_questions += 1
     rut_str, rut_digits, rut_conf, _ = read_rut(gray)
     answers, ambiguous = read_answers(gray, n_questions)
     debug_b64 = draw_debug(img, fiducials, qr_data, rut_digits, answers, ambiguous)
     answer_conf = sum(1 for a in answers if a is not None)/len(answers) if answers else 0
+    detected_version = fid_version or (qr_data.version if qr_data else None)
     return ScanResult(
         success=True, qr=qr_data, rut=rut_str, rut_digits=rut_digits,
         answers=answers, ambiguous=ambiguous,
         confidence=(rut_conf+answer_conf)/2, debug_image=debug_b64,
+        detected_version=detected_version, detected_n=fid_n,
     )

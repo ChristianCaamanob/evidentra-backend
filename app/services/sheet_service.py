@@ -255,29 +255,33 @@ def generate_answer_sheet_pdf(
     cv.setFillColor(MGRAY); cv.setFont('Helvetica-Oblique', 5.5)
     cv.drawString(fid_x + 11, fid_y + fid_h - 26, 'No marcar - uso del sistema')
 
-    # 2 filas de 13 burbujas: y_svg = 400 (fila sup), 420 (fila inf)
-    FID_PATTERN = [
-        [2,1,0,2,1,1,2,2,0,1,2,0,2],
-        [1,2,0,1,1,2,1,0,1,2,0,1,1],
-    ]
+    # ====== FORM IDENTIFIER: codifica VERSION + N (binario, relleno=1 vacio=0) ======
+    # Fila 0: [ancla=1][version 5 bits][paridad][6x relleno0]  -> version A..(1..31)
+    # Fila 1: [ancla=1][N 7 bits][paridad][4x relleno0]        -> N hasta 127
+    # El OCR lee este patron para auto-detectar la version y el N de la hoja.
     fid_xs = [353, 368, 383, 398, 413, 428, 443, 458, 473, 488, 503, 518, 533]
     fid_y_rows_svg = [400, 420]
     fid_bub_r = 5.0
 
-    for row_idx, row in enumerate(FID_PATTERN):
+    _vc = str(version)[0].upper() if version else "A"
+    _vn = (ord(_vc) - ord('A') + 1) if _vc.isalpha() else 1
+    if _vn < 1 or _vn > 31:
+        _vn = 1
+    _nq = max(0, min(127, int(n_questions)))
+    _vbits = [(_vn >> (4 - i)) & 1 for i in range(5)]
+    _row0 = [1] + _vbits + [sum(_vbits) % 2] + [0] * 6
+    _nbits = [(_nq >> (6 - i)) & 1 for i in range(7)]
+    _row1 = [1] + _nbits + [sum(_nbits) % 2] + [0] * 4
+    FID_BITS = [_row0, _row1]
+
+    for row_idx, row in enumerate(FID_BITS):
         y_rl = H - fid_y_rows_svg[row_idx]
-        for col_idx, state in enumerate(row):
+        for col_idx, bit in enumerate(row):
             bx = fid_xs[col_idx]
             cv.setStrokeColor(BLACK); cv.setLineWidth(0.6)
-            if state == 1:
+            if bit == 1:
                 cv.setFillColor(BLACK)
                 cv.circle(bx, y_rl, fid_bub_r, fill=1, stroke=1)
-            elif state == 2:
-                cv.setFillColor(WHITE)
-                cv.circle(bx, y_rl, fid_bub_r, fill=1, stroke=1)
-                cv.line(bx-fid_bub_r*0.7, y_rl-fid_bub_r*0.35, bx+fid_bub_r*0.7, y_rl-fid_bub_r*0.35)
-                cv.line(bx-fid_bub_r*0.8, y_rl, bx+fid_bub_r*0.8, y_rl)
-                cv.line(bx-fid_bub_r*0.7, y_rl+fid_bub_r*0.35, bx+fid_bub_r*0.7, y_rl+fid_bub_r*0.35)
             else:
                 cv.setFillColor(WHITE)
                 cv.circle(bx, y_rl, fid_bub_r, fill=1, stroke=1)

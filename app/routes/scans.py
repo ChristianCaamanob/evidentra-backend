@@ -44,7 +44,7 @@ async def process_scan_image(
     qr = result.qr
     # assessment_id puede venir del parametro (hoja v6 sin QR) o del QR (hojas viejas)
     final_aid = assessment_id or (qr.assessment_id if qr else None)
-    final_version = version or (qr.version if qr else None) or "A"
+    final_version = result.detected_version or version or (qr.version if qr else None) or "A"
     if not final_aid:
         raise HTTPException(status_code=400, detail="No se pudo identificar la evaluacion (sin QR ni assessment_id)")
 
@@ -81,6 +81,7 @@ async def process_scan_image(
         "scan_id": str(new_scan.id),
         "rut": result.rut,
         "version": final_version,
+        "detected_version": final_version,
         "n_questions": len(result.answers or []),
         "answers": result.answers,
         "ambiguous": result.ambiguous,
@@ -108,7 +109,7 @@ async def process_scan_pdf(
         raise HTTPException(status_code=400, detail=result.error or "Error al escanear")
     qr = result.qr
     final_aid = assessment_id or (qr.assessment_id if qr else None)
-    final_version = version or (qr.version if qr else None) or "A"
+    final_version = result.detected_version or version or (qr.version if qr else None) or "A"
     if not final_aid:
         raise HTTPException(status_code=400, detail="No se pudo identificar la evaluacion (sin QR ni assessment_id)")
     new_scan = Scan(
@@ -131,7 +132,7 @@ async def process_scan_pdf(
         resultado = get_result(db, new_scan.id)
     except Exception as e:
         resultado = {"error": str(e)}
-    return {"scan_id": str(new_scan.id), "rut": result.rut, "version": final_version,
+    return {"scan_id": str(new_scan.id), "rut": result.rut, "version": final_version, "detected_version": final_version,
             "n_questions": len(result.answers or []), "answers": result.answers,
             "ambiguous": result.ambiguous, "requires_review": new_scan.requires_review,
             "debug_image": result.debug_image, "resultado": resultado}
