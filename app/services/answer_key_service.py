@@ -94,14 +94,14 @@ def save_items(db, assessment_id, version: str, n_questions: int, answers: list,
     return {"saved": len(items), "version": version}
 
 
-def save_items_from_scan(db, scan_result):
+def save_items_from_scan(db, scan_result, assessment_id=None, version=None):
     from app.models.answer_key import AnswerKeyItem
     import uuid as _uuid
     qr = scan_result.qr
-    if not qr or not qr.assessment_id:
-        return {"error": "QR no detectado en la imagen"}
-    assessment_id = qr.assessment_id
-    version = qr.version or "A"
+    assessment_id = assessment_id or (qr.assessment_id if qr else None)
+    if not assessment_id:
+        return {"error": "No se pudo identificar la evaluacion (sin assessment_id ni QR)"}
+    version = scan_result.detected_version or version or (qr.version if qr else None) or "A"
     answers = scan_result.answers or []
     n_questions = len(answers)
     if n_questions == 0:

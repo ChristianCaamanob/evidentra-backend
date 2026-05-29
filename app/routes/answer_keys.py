@@ -33,17 +33,23 @@ def save_items(assessment_id: UUID, payload: SaveItemsIn, db: Session = Depends(
         payload.answers, payload.annulled
     )
 
-from fastapi import UploadFile, File
+from fastapi import UploadFile, File, Form
+from typing import Optional
 from app.services.scan_engine import scan_sheet
 from app.services.answer_key_service import save_items_from_scan
 
 @router.post("/scan-answer-key")
-async def scan_answer_key(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def scan_answer_key(
+    file: UploadFile = File(...),
+    assessment_id: Optional[str] = Form(None),
+    version: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
     image_bytes = await file.read()
     scan_result = scan_sheet(image_bytes)
     if not scan_result.success:
         raise HTTPException(status_code=400, detail=scan_result.error or "Error al escanear")
-    result = save_items_from_scan(db, scan_result)
+    result = save_items_from_scan(db, scan_result, assessment_id=assessment_id, version=version)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
