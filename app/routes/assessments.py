@@ -13,6 +13,7 @@ from app.schemas.assessment import (
     AttachAssessmentDocumentIn,
 )
 from app.services import assessment_service
+from app.services import result_service
 from app.services.sheet_service import generate_answer_sheet_pdf
 
 router = APIRouter(prefix="/assessments", tags=["assessments"])
@@ -192,3 +193,8 @@ def update_assessment_config(assessment_id: UUID, payload: dict, db: Session = D
 def list_grading_scales():
     from app.services.result_service import GRADING_SCALES
     return GRADING_SCALES
+
+
+@router.get("/{assessment_id}/results")
+def list_assessment_results(assessment_id: UUID, db: Session = Depends(get_db)):
+    return result_service.list_results_for_assessment(db, assessment_id)

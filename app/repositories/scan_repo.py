@@ -17,3 +17,11 @@ class ScanRepository:
         db.commit()
         db.refresh(scan)
         return scan
+
+    def list_by_assessment(self, db: Session, assessment_id):
+        return (
+            db.query(Scan)
+            .filter(Scan.assessment_id == assessment_id)
+            .order_by(Scan.created_at.asc())
+            .all()
+        )

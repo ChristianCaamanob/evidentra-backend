@@ -231,3 +231,15 @@ def get_result(db: Session, scan_id):
         "omitted_questions": omitted,
         "annulled_questions": annulled,
     }
+
+
+def list_results_for_assessment(db: Session, assessment_id):
+    scans = scan_repo.list_by_assessment(db, assessment_id)
+    results = []
+    skipped = 0
+    for scan in scans:
+        try:
+            results.append(get_result(db, scan.id))
+        except Exception:
+            skipped += 1
+    return {"assessment_id": str(assessment_id), "count": len(results), "skipped": skipped, "results": results}
