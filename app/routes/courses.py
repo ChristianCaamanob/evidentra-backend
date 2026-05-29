@@ -34,6 +34,16 @@ def complete_course_structure(
 def activate_course(course_id: UUID, db: Session = Depends(get_db)):
     return course_service.activate_course(db, course_id)
 
+
+@router.patch("/{course_id}", response_model=CourseOut)
+def update_course(course_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    return course_service.update_course(db, course_id, payload)
+
+
+@router.delete("/{course_id}")
+def delete_course(course_id: UUID, db: Session = Depends(get_db)):
+    return course_service.delete_course(db, course_id)
+
 from fastapi import UploadFile, File
 from app.services.nomina_service import parse_nomina_excel
 from app.models.student import Student

@@ -34,3 +34,19 @@ def activate_course(db: Session, course_id):
     course.status = "active"
     repo.save(db, course)
     return {"id": course.id, "status": course.status}
+
+
+def update_course(db: Session, course_id, payload: dict):
+    course = get_course(db, course_id)
+    for field in ("name", "code", "status", "passing_threshold", "grading_scale"):
+        if field in payload and payload[field] is not None:
+            setattr(course, field, payload[field])
+    repo.save(db, course)
+    return course
+
+
+def delete_course(db: Session, course_id):
+    course = get_course(db, course_id)
+    db.delete(course)
+    db.commit()
+    return {"deleted": True, "id": str(course_id)}
