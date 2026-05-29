@@ -257,11 +257,12 @@ def read_answers(gray, n_questions):
     col1_bub_xs = [87, 103, 119, 135, 151]
     col2_bub_xs = [210, 226, 242, 258, 274]
     row_y_top_svg = 184
-    row_gap = 26
     bub_r_pt = 6.5
     CHOICES = ["A", "B", "C", "D", "E"]
 
     n_per_col = n_questions // 2
+    # Misma formula adaptativa que el generador (deben coincidir exactamente)
+    row_gap = min(26.0, 498.0/(n_per_col-1)) if n_per_col > 1 else 26.0
     bubble_r = int(bub_r_pt * FACTOR)
     answers = []
     ambiguous = []
