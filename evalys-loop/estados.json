@@ -1,0 +1,308 @@
+{
+  "proyecto": "Evalys",
+  "objetivo_final": "Plataforma de inteligencia academica (Estudiante / Profesor / Investigador) que supera visiblemente a GradeCam. Horizonte cercano: reporte individual 'Nivel Evalys' -> vinculo curricular RA/Bloom -> motor de evaluacion de respuestas de desarrollo. El MVP de correccion (OCR seleccion multiple) se REUSA y se extiende; no se reescribe.",
+  "principio_rector": "Extender con red (control de versiones), no arrasar. Fuente: EVALYS_SESION5_RESUMEN ('85% se reusa, ningun tirar y empezar').",
+  "gobernanza": {
+    "G1_IA_NO_DECIDE": "La IA pre-califica; la nota final es responsabilidad indelegable del docente. Todo hito que asigne calificacion lleva gate humano. El codigo no puede eliminar ni eludir la validacion docente.",
+    "G2_SEUDONIMIZACION": "Ningun dato identificatorio (nombre, RUT, correo) puede viajar a la IA. Check automatico en cada iteracion; si un identificador real llega a una llamada al modelo, la iteracion falla.",
+    "G3_EXPORT_ETICA": "Todo export de datos para investigacion requiere aprobacion del comite de etica/IRB. Gate humano.",
+    "G4_CONSENTIMIENTO": "Features de IA e investigacion requieren consentimiento opt-in del estudiante (flag verificado).",
+    "G5_AUDIT_RLS": "Acceso a datos queda registrado (audit log inmutable) y protegido por Row Level Security. Invariante.",
+    "G6_PROPOSITIVA": "Lenguaje propositivo, no auditor. Terminos prohibidos en reportes/UI: 'auditar el curriculo', 'brecha del programa', 'desalineacion', 'evaluar calidad del curriculo'. Check automatico."
+  },
+  "config_ref": "loop_config.json",
+  "milestones": [
+    {
+      "id": "F0-git",
+      "fase": "Fundacion",
+      "title": "Repositorio bajo control de versiones + CI de tests",
+      "description": "git inicializado sobre el repo Evalys; pytest corre; baseline verde. Esto es lo que hace reversible cualquier 'destruir y reconstruir'.",
+      "depends_on": [],
+      "model_tier": "exec",
+      "gate": null,
+      "governance": [],
+      "definition_of_done": [
+        "El repo esta bajo git con un commit base",
+        "`pytest -q` corre sin error de coleccion",
+        "La suite baseline pasa en verde"
+      ],
+      "acceptance": {
+        "type": "cmd",
+        "cmd": "pytest -q tests/test_baseline.py"
+      },
+      "status": "done",
+      "updated_at": "2026-07-03T20:29:50+00:00"
+    },
+    {
+      "id": "F0-guardas",
+      "fase": "Fundacion",
+      "title": "Guardas de gobernanza automatizadas (seudonimizacion + lenguaje propositivo)",
+      "description": "Convierte G2 y G6 en checks ejecutables que el loop corre en CADA iteracion. Impide que el propio loop se 'mejore' hacia una violacion de gobernanza.",
+      "depends_on": [
+        "F0-git"
+      ],
+      "model_tier": "exec",
+      "gate": null,
+      "governance": [
+        "G2",
+        "G6"
+      ],
+      "definition_of_done": [
+        "checks/check_seudonimizacion.py falla si un identificador real (nombre/rut/correo) aparece en un call a la IA",
+        "checks/check_propositiva.py falla ante terminos prohibidos en reportes/UI",
+        "checks/run_all_checks.py agrega ambos y devuelve exit!=0 ante cualquier violacion"
+      ],
+      "acceptance": {
+        "type": "cmd",
+        "cmd": "python checks/run_all_checks.py --self-test"
+      },
+      "status": "done",
+      "updated_at": "2026-07-03T20:29:50+00:00"
+    },
+    {
+      "id": "C1-model-ra-bloom",
+      "fase": "C - Modelo curricular",
+      "title": "Modelo: RA + nivel Bloom + unidad por item/pregunta + migracion",
+      "description": "AnswerKeyItem / question ganan learning_outcome_id, bloom_level y unidad (vinculos OPCIONALES; el MVP sigue funcionando sin ellos). Migracion Alembic aditiva.",
+      "depends_on": [
+        "F0-git"
+      ],
+      "model_tier": "exec",
+      "gate": null,
+      "governance": [],
+      "definition_of_done": [
+        "Campos learning_outcome_id, bloom_level, unidad agregados (nullable)",
+        "Migracion Alembic corre hacia arriba y hacia abajo",
+        "Tests de modelo verdes; el scoring existente no se rompe"
+      ],
+      "acceptance": {
+        "type": "cmd",
+        "cmd": "pytest -q tests/test_model_ra_bloom.py"
+      },
+      "status": "done",
+      "updated_at": "2026-07-03T20:29:50+00:00"
+    },
+    {
+      "id": "C2-import-curriculo",
+      "fase": "C - Modelo curricular",
+      "title": "Importar programa / RA / tabla de especificaciones (texto original preservado)",
+      "description": "Carga el programa DMOR0030 y sus RA SIN reformular. Postura propositiva: se preserva el texto aprobado, solo se vincula.",
+      "depends_on": [
+        "C1-model-ra-bloom"
+      ],
+      "model_tier": "exec",
+      "gate": null,
+      "governance": [
+        "G6"
+      ],
+      "definition_of_done": [
+        "Carga DMOR0030; RA almacenados literalmente",
+        "check_propositiva verde sobre el modulo",
+        "Tests de importacion verdes"
+      ],
+      "acceptance": {
+        "type": "cmd",
+        "cmd": "pytest -q tests/test_import_curriculo.py && python checks/check_propositiva.py"
+      },
+      "status": "done",
+      "updated_at": "2026-07-03T20:29:50+00:00"
+    },
+    {
+      "id": "C3-tag-items",
+      "fase": "C - Modelo curricular",
+      "title": "Etiquetado item -> RA -> Bloom (DMOR0030, 30 items) + validacion del especialista",
+      "description": "Mapeo de cada pregunta a su RA y nivel Bloom. Es un juicio pedagogico: lo propone la IA, lo VALIDA el docente antes de darse por hecho.",
+      "depends_on": [
+        "C2-import-curriculo"
+      ],
+      "model_tier": "planner",
+      "gate": "human",
+      "governance": [],
+      "definition_of_done": [
+        "Los 30 items quedan etiquetados con RA + Bloom",
+        "Se genera reportes/tag_dmor0030.md con cobertura por RA y por nivel",
+        "El especialista revisa y valida el mapeo (gate humano)"
+      ],
+      "acceptance": {
+        "type": "human_review",
+        "artifact": "reportes/tag_dmor0030.md"
+      },
+      "status": "needs_review",
+      "updated_at": "2026-07-03T20:29:50+00:00"
+    },
+    {
+      "id": "E1-datos-endpoint",
+      "fase": "E - Reporte individual",
+      "title": "Endpoint que ensambla el contrato `datos`",
+      "description": "GET /results/{id}/informe: arma Result (nota, percentil, item-a-item) + agregacion por RA/Bloom + distribucion de curso + retroalimentacion, en la forma exacta del contrato `datos`.",
+      "depends_on": [
+        "C1-model-ra-bloom"
+      ],
+      "model_tier": "exec",
+      "gate": null,
+      "governance": [
+        "G2"
+      ],
+      "definition_of_done": [
+        "El endpoint devuelve el `datos` completo (estudiante, evaluacion, desempeno, distribucion_curso, dimensiones_bloom, mapa_preguntas, brechas, plan, metadata)",
+        "Test de forma del contrato verde",
+        "Si el ensamblado invoca IA, va seudonimizado (check_seudonimizacion verde)"
+      ],
+      "acceptance": {
+        "type": "cmd",
+        "cmd": "pytest -q tests/test_datos_shape.py && python checks/check_seudonimizacion.py"
+      },
+      "status": "done",
+      "updated_at": "2026-07-03T20:29:50+00:00"
+    },
+    {
+      "id": "E2-generacion-rica",
+      "fase": "E - Reporte individual",
+      "title": "Generacion cualitativa rica (brechas + plan + dimensiones Bloom)",
+      "description": "Sube la retroalimentacion de generica a rica: prompt calibrado con RA/Bloom + contenido + corpus, modelo potente, salida en la forma `datos` (brechas con RA/unidad/que-muestra/por-que-importa, plan de consolidacion, dimensiones).",
+      "depends_on": [
+        "E1-datos-endpoint",
+        "C3-tag-items"
+      ],
+      "model_tier": "planner",
+      "gate": "human",
+      "governance": [
+        "G1",
+        "G2"
+      ],
+      "definition_of_done": [
+        "Genera brechas, plan y dimensiones Bloom bien formados",
+        "Seudonimizado (G2) y con validacion docente del contenido (G1)",
+        "Test de forma de la generacion verde"
+      ],
+      "acceptance": {
+        "type": "human_review",
+        "cmd": "pytest -q tests/test_generacion_rica.py",
+        "artifact": "reportes/muestra_generacion.md"
+      },
+      "status": "needs_review",
+      "updated_at": "2026-07-03T20:29:50+00:00"
+    },
+    {
+      "id": "E3-render-informe",
+      "fase": "E - Reporte individual",
+      "title": "Render renderInformeIndividual(datos) en el front (Estandar Evalys)",
+      "description": "Convierte el informe hardcodeado (caso Rojas) en render data-driven que consume `datos`, bajo el Estandar Evalys. No rompe el resto de la app.",
+      "depends_on": [
+        "E1-datos-endpoint"
+      ],
+      "model_tier": "exec",
+      "gate": null,
+      "governance": [],
+      "definition_of_done": [
+        "Renderiza el `datos` de prueba de Morfologia completo",
+        "El resto de las pantallas sigue funcionando (smoke test)",
+        "Cumple el checklist visual del Estandar Evalys"
+      ],
+      "acceptance": {
+        "type": "cmd",
+        "cmd": "pytest -q tests/test_render_smoke.py"
+      },
+      "status": "done",
+      "updated_at": "2026-07-03T20:29:50+00:00"
+    },
+    {
+      "id": "E4-e2e",
+      "fase": "E - Reporte individual",
+      "title": "End-to-end verde: escaneo -> correccion -> informe individual",
+      "description": "El pipeline completo pasa sobre el scan de prueba. Esta es la definicion medible de 'funcional de punta a punta'.",
+      "depends_on": [
+        "E2-generacion-rica",
+        "E3-render-informe"
+      ],
+      "model_tier": "exec",
+      "gate": null,
+      "governance": [],
+      "definition_of_done": [
+        "El e2e (scan de prueba -> nota/percentil -> `datos` -> render) pasa",
+        "Sin regresiones en la suite completa"
+      ],
+      "acceptance": {
+        "type": "cmd",
+        "cmd": "pytest -q tests/test_e2e_informe.py"
+      },
+      "status": "pending"
+    },
+    {
+      "id": "F1-rubric-model",
+      "fase": "F - Respuestas de desarrollo (meta)",
+      "title": "Modelo de rubrica: question.type=open_response + rubric_criterion",
+      "description": "Habilita preguntas abiertas: tipo de pregunta + criterios de rubrica (nombre, descriptor, peso). Base del motor de evaluacion universal.",
+      "depends_on": [
+        "C1-model-ra-bloom"
+      ],
+      "model_tier": "exec",
+      "gate": null,
+      "governance": [],
+      "definition_of_done": [
+        "question.type (multiple_choice|open_response) + tabla rubric_criterion",
+        "Migracion corre; tests verdes"
+      ],
+      "acceptance": {
+        "type": "cmd",
+        "cmd": "pytest -q tests/test_rubric_model.py"
+      },
+      "status": "done",
+      "updated_at": "2026-07-03T20:29:50+00:00"
+    },
+    {
+      "id": "F2-precalifica-desarrollo",
+      "fase": "F - Respuestas de desarrollo (meta)",
+      "title": "IA pre-califica respuestas de desarrollo con calibracion (parametros + corpus + few-shot)",
+      "description": "La IA evalua cada respuesta abierta contra la rubrica y la calibracion del docente, entregando logrado/parcial/no logrado + confianza POR criterio. La IA propone; NO decide.",
+      "depends_on": [
+        "F1-rubric-model",
+        "C2-import-curriculo"
+      ],
+      "model_tier": "planner",
+      "gate": "human",
+      "governance": [
+        "G1",
+        "G2",
+        "G4"
+      ],
+      "definition_of_done": [
+        "Salida por criterio con nivel + confianza + nota propuesta",
+        "Seudonimizado (G2), requiere consentimiento (G4)",
+        "La nota queda PENDIENTE de validacion docente (G1, indelegable)"
+      ],
+      "acceptance": {
+        "type": "human_review",
+        "cmd": "pytest -q tests/test_precalifica.py",
+        "artifact": "reportes/muestra_precalifica.md"
+      },
+      "status": "needs_review",
+      "updated_at": "2026-07-03T20:29:50+00:00"
+    },
+    {
+      "id": "F3-validacion-docente",
+      "fase": "F - Respuestas de desarrollo (meta)",
+      "title": "UI de validacion graduada del docente (auditoria ligera/media/profunda) + trazabilidad",
+      "description": "El docente aprueba/ajusta la pre-calificacion; cada nota guarda pre-eval IA + accion del docente + timestamps (defendible ante reclamos y acreditacion).",
+      "depends_on": [
+        "F2-precalifica-desarrollo"
+      ],
+      "model_tier": "exec",
+      "gate": "human",
+      "governance": [
+        "G1",
+        "G5"
+      ],
+      "definition_of_done": [
+        "Flujo aprobar/ajustar con modos masivos (>=90%, etc.)",
+        "Trazabilidad completa por nota (pre-eval IA + accion + timestamp)"
+      ],
+      "acceptance": {
+        "type": "human_review",
+        "artifact": "reportes/validacion_flujo.md"
+      },
+      "status": "needs_review",
+      "updated_at": "2026-07-03T20:29:50+00:00"
+    }
+  ]
+}

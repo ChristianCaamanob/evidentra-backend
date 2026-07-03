@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.task_*.md
+loop_log.jsonl
+.venv/
+.pytest_cache/
