@@ -4505,6 +4505,163 @@ function brfRADataFor(student, test) {
   ];
 }
 
+// ══════════════════════════════════════════════════════
+//  E3 — Render data-driven del informe individual (Estándar Evalys)
+//
+//  Consume el contrato `datos` que arma el backend (E1, GET
+//  /results/{scan_id}/informe). Reemplaza el informe hardcodeado (caso Rojas,
+//  que queda como plantilla de referencia) por un render que se dibuja SOLO a
+//  partir de `datos`. Postura propositiva (G6): describe el logro del estudiante
+//  y propone dónde seguir avanzando; no juzga el programa.
+// ══════════════════════════════════════════════════════
+function _escInforme(v) {
+  if (v === null || v === undefined) return '';
+  return String(v).replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+function _pctBar(pct) {
+  const p = Math.max(0, Math.min(100, Number(pct) || 0));
+  const tone = p >= 80 ? 'var(--success, #16a34a)' : p >= 60 ? 'var(--warning, #d97706)' : 'var(--danger, #dc2626)';
+  return `<div style="background:#e5e7eb;border-radius:6px;height:8px;overflow:hidden;">
+    <div style="width:${p}%;height:100%;background:${tone};"></div></div>`;
+}
+
+// Devuelve el HTML del informe individual construido íntegramente desde `datos`.
+function renderInformeIndividual(datos) {
+  if (!datos || typeof datos !== 'object') {
+    return '<div class="brf-report-section"><p>No hay datos de informe disponibles.</p></div>';
+  }
+  const est = datos.estudiante || {};
+  const ev = datos.evaluacion || {};
+  const des = datos.desempeno || {};
+  const dist = datos.distribucion_curso || {};
+  const bloom = datos.dimensiones_bloom || [];
+  const mapa = datos.mapa_preguntas || [];
+  const brechas = datos.brechas || [];
+  const fortalezas = datos.fortalezas || [];
+  const plan = datos.plan_consolidacion || {};
+  const meta = datos.metadata || {};
+
+  const nota = (des.nota !== undefined && des.nota !== null)
+    ? String(des.nota).replace('.', ',') : (des.etiqueta_nota || '—');
+
+  const estadoLabel = e => (
+    { correcta: '✓ Correcta', incorrecta: '✗ Incorrecta', omitida: '— Omitida', anulada: '∅ Anulada' }[e] || e
+  );
+
+  const secFortalezas = fortalezas.length ? `
+    <div class="brf-report-section">
+      <h3>Fortalezas demostradas</h3>
+      ${fortalezas.map(f => `<div style="margin:8px 0;">
+        <div style="display:flex;justify-content:space-between;font-size:13px;">
+          <strong>${_escInforme(f.ra || 'General')}</strong><span>${_escInforme(f.porcentaje)}%</span></div>
+        ${_pctBar(f.porcentaje)}
+        ${f.ra_texto ? `<div style="font-size:12px;color:#64748b;margin-top:4px;">${_escInforme(f.ra_texto)}</div>` : ''}
+      </div>`).join('')}
+    </div>` : '';
+
+  const secBrechas = brechas.length ? `
+    <div class="brf-report-section">
+      <h3>Focos de consolidación</h3>
+      ${brechas.map(b => `<div style="margin:8px 0;">
+        <div style="display:flex;justify-content:space-between;font-size:13px;">
+          <strong>${_escInforme(b.ra || 'General')}</strong><span>${_escInforme(b.porcentaje)}%</span></div>
+        ${_pctBar(b.porcentaje)}
+        ${b.ra_texto ? `<div style="font-size:12px;color:#64748b;margin-top:4px;">${_escInforme(b.ra_texto)}</div>` : ''}
+        ${b.que_muestra ? `<div style="font-size:12px;margin-top:2px;">${_escInforme(b.que_muestra)}</div>` : ''}
+      </div>`).join('')}
+    </div>` : '';
+
+  const secBloom = bloom.length ? `
+    <div class="brf-report-section">
+      <h3>Dimensiones cognitivas (Bloom)</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead><tr><th style="text-align:left;">Nivel</th><th style="text-align:right;">Logro</th></tr></thead>
+        <tbody>${bloom.map(g => `<tr>
+          <td style="padding:4px 0;">${_escInforme(g.clave)}</td>
+          <td style="text-align:right;">${_escInforme(g.correctas)}/${_escInforme(g.total)} · ${_escInforme(g.porcentaje)}%</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>` : '';
+
+  const secMapa = mapa.length ? `
+    <div class="brf-report-section">
+      <h3>Mapa pregunta a pregunta</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead><tr>
+          <th style="text-align:left;">N°</th><th style="text-align:left;">Estado</th>
+          <th style="text-align:left;">RA</th><th style="text-align:left;">Bloom</th><th style="text-align:left;">Unidad</th>
+        </tr></thead>
+        <tbody>${mapa.map(q => `<tr>
+          <td>${_escInforme(q.numero)}</td>
+          <td>${estadoLabel(q.estado)}</td>
+          <td>${_escInforme(q.ra || '—')}</td>
+          <td>${_escInforme(q.bloom || '—')}</td>
+          <td>${_escInforme(q.unidad || '—')}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>` : '';
+
+  const secPlan = (plan.enfoque && plan.enfoque.length) ? `
+    <div class="brf-report-section">
+      <h3>Plan de consolidación</h3>
+      <p>Foco propuesto en: ${plan.enfoque.map(_escInforme).join(', ')}.</p>
+    </div>` : '';
+
+  return `
+    <div class="brf-report" data-informe="datos">
+      <div class="brf-report-section">
+        <h2>${_escInforme(est.nombre || est.identificador || 'Estudiante')}</h2>
+        <p style="color:#64748b;font-size:13px;">
+          ${_escInforme(ev.nombre || '')}${ev.curso ? ' · ' + _escInforme(ev.curso) : ''}
+          ${ev.version ? ' · Versión ' + _escInforme(ev.version) : ''}
+        </p>
+      </div>
+
+      <div class="brf-report-section">
+        <h3>Nivel Evalys</h3>
+        <div style="display:flex;gap:24px;flex-wrap:wrap;">
+          <div><div style="font-size:28px;font-weight:700;">${_escInforme(nota)}</div><div style="font-size:12px;color:#64748b;">Nota</div></div>
+          <div><div style="font-size:28px;font-weight:700;">${_escInforme(des.porcentaje)}%</div><div style="font-size:12px;color:#64748b;">Logro (${_escInforme(des.nivel || '')})</div></div>
+          <div><div style="font-size:28px;font-weight:700;">${_escInforme(dist.tu_percentil !== undefined && dist.tu_percentil !== null ? dist.tu_percentil : '—')}</div><div style="font-size:12px;color:#64748b;">Percentil del curso</div></div>
+        </div>
+        <p style="font-size:13px;color:#475569;margin-top:8px;">
+          ${_escInforme(des.correctas)} correctas · ${_escInforme(des.incorrectas)} incorrectas ·
+          ${_escInforme(des.omitidas)} omitidas · ${_escInforme(des.anuladas)} anuladas
+        </p>
+        ${datos.mensaje_personalizado ? `<p style="font-size:13px;margin-top:6px;">${_escInforme(datos.mensaje_personalizado)}</p>` : ''}
+      </div>
+
+      ${secFortalezas}
+      ${secBrechas}
+      ${secBloom}
+      ${secPlan}
+      ${secMapa}
+
+      <div class="brf-report-section" style="font-size:11px;color:#94a3b8;">
+        Informe generado por ${_escInforme(meta.generado_por || 'Evalys')}
+        · contrato ${_escInforme(meta.contrato_version || '')}
+        ${meta.ia_utilizada === false ? '· cálculo determinista (sin IA)' : ''}
+      </div>
+    </div>`;
+}
+
+// Trae el contrato `datos` del backend (E1) y pinta el informe en un contenedor.
+async function fetchInforme(scanId, containerId) {
+  const el = containerId ? document.getElementById(containerId) : null;
+  try {
+    const datos = await apiRequest(`/results/${scanId}/informe`);
+    const html = renderInformeIndividual(datos);
+    if (el) el.innerHTML = html;
+    return datos;
+  } catch (e) {
+    if (el) el.innerHTML = `<div class="brf-report-section"><p>No se pudo cargar el informe: ${_escInforme(e && e.message)}</p></div>`;
+    throw e;
+  }
+}
+
 function brfExportCurrent() {
   showToast('Generando PDF del informe...', 'info');
   setTimeout(() => showToast('✓ PDF disponible (demo)', 'success'), 1200);
