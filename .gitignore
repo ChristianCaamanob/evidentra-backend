@@ -37,3 +37,13 @@ env/
 _archivo_viejo/
 .DS_Store
 *.png
+
+# --- Loop Evalys: backups y binarios que NO deben entrar en commits del loop ---
+*.bak*
+*.zip
+*.pdf
+*.docx
+/main
+EVALYS - DOSSIER - BLUEPOINT/
+EVALYS RESUMEN - GOBERNANZA - INFORME/
+EVALYS_HANDOFF_MASTER.md
