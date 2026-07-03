@@ -33,4 +33,11 @@ class AnswerKeyItem(UUIDMixin, Base):
     is_annulled: Mapped[bool] = mapped_column(Boolean, default=False)
     partial_credit_rule_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # C1 - vinculo curricular (RA / Bloom / unidad). OPCIONALES y nullable:
+    # el MVP de correccion sigue funcionando sin ellos; solo enriquecen el item
+    # cuando el curriculo esta cargado (C2) y etiquetado (C3).
+    learning_outcome_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    bloom_level: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    unidad: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
     answer_key = relationship("AnswerKey", back_populates="items")
