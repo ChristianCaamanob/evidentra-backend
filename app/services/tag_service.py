@@ -79,10 +79,18 @@ def coverage_report(tags: list[dict], titulo: str = "DMOR0030",
 
     L.append("## Detalle item -> RA -> Bloom")
     L.append("")
-    L.append("| Item | RA | Bloom | Unidad |")
-    L.append("|---:|---|---|---|")
-    for t in sorted(tags, key=lambda x: x["item"]):
-        L.append(f"| {t['item']} | {t.get('ra','-')} | {t.get('bloom','-')} | {t.get('unidad','-')} |")
+    con_enunciado = any(t.get("enunciado") for t in tags)
+    if con_enunciado:
+        L.append("| Item | Enunciado (resumen) | RA | Bloom | Unidad |")
+        L.append("|---:|---|---|---|---|")
+        for t in sorted(tags, key=lambda x: x["item"]):
+            en = (t.get("enunciado") or "").replace("|", "/")
+            L.append(f"| {t['item']} | {en} | {t.get('ra','-')} | {t.get('bloom','-')} | {t.get('unidad','-')} |")
+    else:
+        L.append("| Item | RA | Bloom | Unidad |")
+        L.append("|---:|---|---|---|")
+        for t in sorted(tags, key=lambda x: x["item"]):
+            L.append(f"| {t['item']} | {t.get('ra','-')} | {t.get('bloom','-')} | {t.get('unidad','-')} |")
     L.append("")
     return "\n".join(L) + "\n"
 
