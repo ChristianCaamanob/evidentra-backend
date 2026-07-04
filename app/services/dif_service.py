@@ -149,14 +149,19 @@ def analizar_dif(X, grupo, matching, items_meta: list | None = None,
     for j in range(k):
         mh = mantel_haenszel(X[:, j], g, matching)
         lr = logistica_dif(X[:, j], g, matching)
-        # bandera combinada: DIF relevante si MH clase B/C significativo o LR con efecto B/C
-        clase = mh["clase_ets"]
+        # Bandera combinada: DIF relevante SOLO si hay SIGNIFICANCIA ademas de tamano de
+        # efecto B/C (evita falsos positivos por ruido con muestras chicas).
+        mh_dif = mh["clase_ets"] in ("B", "C")  # _clasifica_ets ya exige p<0.05
+        lr_sig = lr.get("disponible") and (
+            (lr.get("p_uniforme", 1) < 0.05) or (lr.get("p_no_uniforme", 1) < 0.05))
         lr_clase = lr.get("clase_jodoin_gierl", "A") if lr.get("disponible") else "A"
-        peor = max(clase, lr_clase)  # A<B<C alfabetico
+        lr_dif = bool(lr_sig and lr_clase in ("B", "C"))
+        clases_activas = [c for c, activo in ((mh["clase_ets"], mh_dif), (lr_clase, lr_dif)) if activo]
+        clase = max(clases_activas) if clases_activas else "A"
         resultados.append({
             "item": j + 1, "ra": (meta.get(j + 1, {}) or {}).get("ra"),
-            "mh": mh, "logistica": lr, "clase": peor,
-            "con_dif": peor in ("B", "C"),
+            "mh": mh, "logistica": lr, "clase": clase,
+            "con_dif": bool(mh_dif or lr_dif),
         })
 
     con_dif = [r for r in resultados if r["con_dif"]]
