@@ -1,69 +1,68 @@
-# Etiquetado DMOR003 - Solemne Nº1 (Ver.A) - RA / Bloom (propuesta)
+# Etiquetado DMOR0030 - Solemne 1 (Tabla de Especificaciones oficial)
 
-> **Estado:** propuesta generada por la IA. Requiere validacion del especialista antes de cerrarse (gate humano, G1). Ajusta lo que corresponda.
+> **Fuente:** VF TE PS1 DMOR0030 2026.10 (Depto. de Ciencias Morfologicas). Texto de
+> criterios e indicadores preservado literalmente. Taxonomia: **Marzano** (no Bloom).
 
-**Items etiquetados:** 30/30
+**Items:** 30/30  ·  **Unidad:** Unidad 1  ·  **Nivel taxonomico:** Comprension (todos)
 
-## Cobertura por Resultado de Aprendizaje (RA)
+**Resultado de aprendizaje de unidad:** Examina la composicion morfologico general del cuerpo humano, tomando conciencia de la importancia de la integridad, honestidad, fortaleza y perseverancia en su rol de estudiante.
 
-| RA | Items | Cobertura | Texto del RA |
-|---|---:|---:|---|
-| RA1 | 6 | 20.0% | Generalidades morfologicas y desarrollo (embriologia). |
-| RA2 | 8 | 26.7% | Histologia: tejidos basicos (epitelial, conectivo, nervioso). |
-| RA3 | 4 | 13.3% | Terminologia anatomica: posicion, planos, ejes y relaciones. |
-| RA4 | 6 | 20.0% | Sistema osteoarticular: hueso, esqueleto y articulaciones. |
-| RA5 | 6 | 20.0% | Sistema nervioso: organizacion central y periferica. |
+## Cobertura por nivel taxonomico (Marzano)
 
-## Cobertura por nivel Bloom
-
-| Nivel Bloom | Items | Cobertura |
+| Nivel | Items | Cobertura |
 |---|---:|---:|
-| recordar | 13 | 43.3% |
-| comprender | 13 | 43.3% |
-| aplicar | 4 | 13.3% |
+| Comprension | 30 | 100.0% |
 
-## Cobertura por unidad
+## Cobertura por criterio de evaluacion
 
-| Unidad | Items | Cobertura |
-|---|---:|---:|
-| U1 Generalidades/Embriologia | 6 | 20.0% |
-| U2 Histologia/Tejidos | 8 | 26.7% |
-| U3 Terminologia anatomica | 4 | 13.3% |
-| U4 Sistema osteoarticular | 6 | 20.0% |
-| U5 Sistema nervioso | 6 | 20.0% |
+| Items | Criterio de evaluacion |
+|---|---|
+| 1, 2 | Explica las caracteristicas anatomicas, histologicas y del desarrollo embriologico, de las principales estructuras del cuerpo humano, con un enfoque topografico-funcional. |
+| 3, 4, 5 | Relaciona las etapas del desarrollo embrionario con la organizacion del cuerpo humano. |
+| 6, 7, 8, 9, 10, 11, 12 | Relaciona los tejidos basicos con su organizacion morfofuncional en el cuerpo. |
+| 13, 14, 15, 16, 17 | Comprende la organizacion macroscopica topografica de las regiones corporales. |
+| 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30 | Explica la organizacion macroscopica topografica de las regiones corporales. |
 
-## Detalle item -> RA -> Bloom
+## Detalle item -> indicador de logro
 
-| Item | Enunciado (resumen) | RA | Bloom | Unidad |
-|---:|---|---|---|---|
-| 1 | Ciencia morfologica que estudia el desarrollo fetal | RA1 | recordar | U1 Generalidades/Embriologia |
-| 2 | Nivel de organizacion de la neurona | RA1 | comprender | U1 Generalidades/Embriologia |
-| 3 | Semana de implantacion del blastocisto | RA1 | recordar | U1 Generalidades/Embriologia |
-| 4 | Periodo del desarrollo (osificacion/modelado facial) | RA1 | comprender | U1 Generalidades/Embriologia |
-| 5 | Capa germinal de la epidermis | RA1 | recordar | U1 Generalidades/Embriologia |
-| 6 | Tejido de conduccion rapida de impulsos | RA2 | recordar | U2 Histologia/Tejidos |
-| 7 | Identificar epitelio en imagen | RA2 | aplicar | U2 Histologia/Tejidos |
-| 8 | Reconocer epitelio en imagen | RA2 | aplicar | U2 Histologia/Tejidos |
-| 9 | Funcion del urotelio | RA2 | comprender | U2 Histologia/Tejidos |
-| 10 | Funcion de la queratina en epidermis | RA2 | comprender | U2 Histologia/Tejidos |
-| 11 | Funcion de fibras reticulares (colageno III) | RA2 | comprender | U2 Histologia/Tejidos |
-| 12 | Clasificacion del tejido hematopoyetico | RA2 | comprender | U2 Histologia/Tejidos |
-| 13 | Posicion de los antebrazos en posicion anatomica | RA3 | recordar | U3 Terminologia anatomica |
-| 14 | Plano y eje de rotacion de cabeza (atlantoaxoidea) | RA3 | aplicar | U3 Terminologia anatomica |
-| 15 | Ubicacion del pie respecto de la cadera | RA3 | comprender | U3 Terminologia anatomica |
-| 16 | Ubicacion de la nariz respecto de pabellones | RA3 | comprender | U3 Terminologia anatomica |
-| 17 | Examen inicial para confirmar gestacion (ecografia) | RA1 | aplicar | U1 Generalidades/Embriologia |
-| 18 | Tejido oseo con trabeculas y espacios medulares | RA4 | recordar | U4 Sistema osteoarticular |
-| 19 | Funcion del esqueleto | RA4 | recordar | U4 Sistema osteoarticular |
-| 20 | Segmento corporal de la fibula | RA4 | recordar | U4 Sistema osteoarticular |
-| 21 | Celulas fijas del tejido conectivo | RA2 | recordar | U2 Histologia/Tejidos |
-| 22 | Clasificacion de la articulacion coxofemoral | RA4 | comprender | U4 Sistema osteoarticular |
-| 23 | Articulacion fibrosa subtipo gonfosis | RA4 | comprender | U4 Sistema osteoarticular |
-| 24 | Estructura que da congruencia a la coxofemoral | RA4 | comprender | U4 Sistema osteoarticular |
-| 25 | Division del SN de la sustancia gris medular | RA5 | recordar | U5 Sistema nervioso |
-| 26 | Estructura de coordinacion del movimiento/equilibrio | RA5 | recordar | U5 Sistema nervioso |
-| 27 | Componentes neuronales en sustancia blanca medular | RA5 | comprender | U5 Sistema nervioso |
-| 28 | Ubicacion de los ganglios simpaticos | RA5 | recordar | U5 Sistema nervioso |
-| 29 | Neuronas del asta anterior de la medula | RA5 | comprender | U5 Sistema nervioso |
-| 30 | Ubicacion de la sustancia gris en el encefalo | RA5 | recordar | U5 Sistema nervioso |
+| Item | Nivel | Indicador de logro (literal) |
+|---:|---|---|
+| 1 | Comprension | Relaciona los enfoques morfologicos y/o los niveles de organizacion estructural del cuerpo humano, con estructuras de su nivel correspondiente. |
+| 2 | Comprension | Relaciona los enfoques morfologicos y/o los niveles de organizacion estructural del cuerpo humano, con estructuras de su nivel correspondiente. |
+| 3 | Comprension | Analiza el desarrollo embrionario relacionando etapas, periodos, hitos temporales y capas germinativas con sus caracteristicas y derivados anatomicos. |
+| 4 | Comprension | Analiza el desarrollo embrionario relacionando etapas, periodos, hitos temporales y capas germinativas con sus caracteristicas y derivados anatomicos. |
+| 5 | Comprension | Analiza el desarrollo embrionario relacionando etapas, periodos, hitos temporales y capas germinativas con sus caracteristicas y derivados anatomicos. |
+| 6 | Comprension | Relaciona los tejidos basicos, en especial el epitelial, con sus tipos celulares, organizacion y funciones en una situacion anatomica. |
+| 7 | Comprension | Relaciona los tejidos basicos, en especial el epitelial, con sus tipos celulares, organizacion y funciones en una situacion anatomica. |
+| 8 | Comprension | Relaciona los tejidos basicos, en especial el epitelial, con sus tipos celulares, organizacion y funciones en una situacion anatomica. |
+| 9 | Comprension | Relaciona los tejidos basicos, en especial el epitelial, con sus tipos celulares, organizacion y funciones en una situacion anatomica. |
+| 10 | Comprension | Relaciona los tejidos basicos, en especial el epitelial, con sus tipos celulares, organizacion y funciones en una situacion anatomica. |
+| 11 | Comprension | Relaciona los componentes del tejido conectivo, su matriz extracelular y organizacion con su morfofuncion y localizacion en una situacion anatomica. |
+| 12 | Comprension | Relaciona los componentes del tejido conectivo, su matriz extracelular y organizacion con su morfofuncion y localizacion en una situacion anatomica. |
+| 13 | Comprension | Aplica la terminologia anatomica (posicion, planos, ejes y terminos de relacion y comparacion) en descripciones anatomicas. |
+| 14 | Comprension | Aplica la terminologia anatomica (posicion, planos, ejes y terminos de relacion y comparacion) en descripciones anatomicas. |
+| 15 | Comprension | Aplica la terminologia anatomica (posicion, planos, ejes y terminos de relacion y comparacion) en descripciones anatomicas. |
+| 16 | Comprension | Aplica la terminologia anatomica (posicion, planos, ejes y terminos de relacion y comparacion) en descripciones anatomicas. |
+| 17 | Comprension | Reconoce el tipo de examen imagenologico adecuado para visualizar una estructura en una situacion clinica. |
+| 18 | Comprension | Relaciona los distintos tipos de huesos con sus respectivas caracteristicas morfofuncionales en una situacion anatomica simple. |
+| 19 | Comprension | Relaciona los distintos tipos de huesos con sus respectivas caracteristicas morfofuncionales en una situacion anatomica simple. |
+| 20 | Comprension | Relaciona las caracteristicas histologicas del tejido oseo con una caracteristica morfofuncional del esqueleto. |
+| 21 | Comprension | Relaciona reparos oseos importantes con una caracteristica morfofuncional en una situacion anatomica. |
+| 22 | Comprension | Relaciona cartilago hialino, elastico o fibroso segun una caracteristica morfofuncional en una situacion anatomica simple. |
+| 23 | Comprension | Relaciona cartilago hialino, elastico o fibroso segun una caracteristica histologica en un contexto histologico simple. |
+| 24 | Comprension | Relaciona los tipos de anexos articulares con una caracteristica morfofuncional en una situacion anatomica. |
+| 25 | Comprension | Relaciona las caracteristicas morfofuncionales de las neuronas y/o celulas de la glia con su localizacion en el SNC y/o periferico. |
+| 26 | Comprension | Reconoce la organizacion del sistema nervioso central y periferico, incluyendo estructuras encefalicas y sus funciones. |
+| 27 | Comprension | Relaciona los componentes del segmento medular con la organizacion de la sustancia gris y blanca y su morfofuncion. |
+| 28 | Comprension | Relaciona los componentes del segmento medular con la organizacion de la sustancia gris y blanca y su morfofuncion. |
+| 29 | Comprension | Relaciona componentes microscopicos del tejido nervioso con su morfofuncion en una situacion anatomica simple. |
+| 30 | Comprension | Relaciona el sistema nervioso simpatico o parasimpatico con una caracteristica morfofuncional. |
+
+## Nota de validacion
+
+- Toda la prueba esta disenada a nivel **Comprension** (Marzano). Si se busca elevar la
+  demanda cognitiva, los indicadores con verbo *Analiza* (items 3-5) son candidatos a
+  subir de nivel taxonomico.
+- La numeracion corresponde a la TE base; la **Ver.A** puede reordenar items por version
+  (barajado). Para asociar a la hoja de un alumno se usa la pauta de esa version.
 
