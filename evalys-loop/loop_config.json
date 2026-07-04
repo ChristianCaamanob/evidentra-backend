@@ -16,7 +16,9 @@
     "escalate_model_after": 1
   },
   "_escalate_help": "escalate_model_after: nro de intentos fallidos en un hito 'exec' (Sonnet 5) antes de subir a 'planner' (Opus 4.8) para los intentos restantes. 0 = nunca escalar. Con max_repairs=2 hay 3 intentos: con 1, Sonnet tiene el primero y Opus los otros dos. Los hitos ya 'planner' no escalan.",
-  "human_approvals": [],
+  "human_approvals": [
+    "C3-tag-items"
+  ],
   "_human_approvals_help": "Los hitos con gate humano (C3-tag-items, E2-generacion-rica, F2-precalifica-desarrollo, F3-validacion-docente) NO avanzan hasta que agregues su id a esta lista, tras revisarlos tu. Ej: [\"C3-tag-items\"].",
   "escalation_webhook": null,
   "_escalation_help": "URL opcional (Slack/webhook) para que el loop te avise cuando se atasca o llega a un gate, en vez de que revises cada 30 min. Si es null, escribe en ESCALATION.md."

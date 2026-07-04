@@ -1,8 +1,8 @@
-# Evalys - Estado de avance (2026-07-03T20:29:51+00:00)
+# Evalys - Estado de avance (2026-07-04T16:25:36+00:00)
 
 **Objetivo:** Plataforma de inteligencia academica (Estudiante / Profesor / Investigador) que supera visiblemente a GradeCam. Horizonte cercano: reporte individual 'Nivel Evalys' -> vinculo curricular RA/Bloom -> motor de evaluacion de respuestas de desarrollo. El MVP de correccion (OCR seleccion multiple) se REUSA y se extiende; no se reescribe.
 
-**Progreso:** 7/12 hitos
+**Progreso:** 8/12 hitos
 
 
 ## Fundacion
@@ -12,7 +12,7 @@
 ## C - Modelo curricular
 - [x] **C1-model-ra-bloom** Modelo: RA + nivel Bloom + unidad por item/pregunta + migracion
 - [x] **C2-import-curriculo** Importar programa / RA / tabla de especificaciones (texto original preservado)
-- [?] **C3-tag-items** Etiquetado item -> RA -> Bloom (DMOR0030, 30 items) + validacion del especialista (gate humano)
+- [x] **C3-tag-items** Etiquetado item -> RA -> Bloom (DMOR0030, 30 items) + validacion del especialista (gate humano)
 
 ## E - Reporte individual
 - [x] **E1-datos-endpoint** Endpoint que ensambla el contrato `datos`
