@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db
+from app.api.deps import get_db, req_profesor
 from app.schemas.answer_key import AnswerKeyValidationOut, ValidateAnswerKeyOut
 from app.services import answer_key_service
 
@@ -15,7 +15,8 @@ def get_validation(assessment_id: UUID, db: Session = Depends(get_db)):
     return answer_key_service.get_validation(db, assessment_id)
 
 
-@router.post("/{assessment_id}/validate", response_model=ValidateAnswerKeyOut)
+@router.post("/{assessment_id}/validate", response_model=ValidateAnswerKeyOut,
+             dependencies=[Depends(req_profesor)])
 def validate_answer_key(assessment_id: UUID, db: Session = Depends(get_db)):
     return answer_key_service.validate_answer_key(db, assessment_id)
 
@@ -25,7 +26,7 @@ from app.schemas.answer_key import AnswerKeyItemsOut, SaveItemsIn
 def get_items(assessment_id: UUID, db: Session = Depends(get_db)):
     return answer_key_service.get_items(db, assessment_id)
 
-@router.post("/{assessment_id}/items")
+@router.post("/{assessment_id}/items", dependencies=[Depends(req_profesor)])
 def save_items(assessment_id: UUID, payload: SaveItemsIn, db: Session = Depends(get_db)):
     return answer_key_service.save_items(
         db, assessment_id,
@@ -38,7 +39,7 @@ from typing import Optional
 from app.services.scan_engine import scan_sheet
 from app.services.answer_key_service import save_items_from_scan
 
-@router.post("/scan-answer-key")
+@router.post("/scan-answer-key", dependencies=[Depends(req_profesor)])
 async def scan_answer_key(
     file: UploadFile = File(...),
     assessment_id: Optional[str] = Form(None),

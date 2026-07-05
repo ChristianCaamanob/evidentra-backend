@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db
+from app.api.deps import get_db, req_profesor
 from app.schemas.course import ActivateCourseOut, CompleteCourseStructureIn, CourseOut, CourseReadinessOut
 from app.services import course_service
 
@@ -21,7 +21,8 @@ def get_course_readiness(course_id: UUID, db: Session = Depends(get_db)):
     return course_service.get_course_readiness(db, course_id)
 
 
-@router.post("/{course_id}/complete-structure", response_model=CourseReadinessOut)
+@router.post("/{course_id}/complete-structure", response_model=CourseReadinessOut,
+             dependencies=[Depends(req_profesor)])
 def complete_course_structure(
     course_id: UUID,
     payload: CompleteCourseStructureIn,
@@ -30,17 +31,18 @@ def complete_course_structure(
     return course_service.complete_course_structure(db, course_id, payload.has_learning_structure)
 
 
-@router.post("/{course_id}/activate", response_model=ActivateCourseOut)
+@router.post("/{course_id}/activate", response_model=ActivateCourseOut,
+             dependencies=[Depends(req_profesor)])
 def activate_course(course_id: UUID, db: Session = Depends(get_db)):
     return course_service.activate_course(db, course_id)
 
 
-@router.patch("/{course_id}", response_model=CourseOut)
+@router.patch("/{course_id}", response_model=CourseOut, dependencies=[Depends(req_profesor)])
 def update_course(course_id: UUID, payload: dict, db: Session = Depends(get_db)):
     return course_service.update_course(db, course_id, payload)
 
 
-@router.delete("/{course_id}")
+@router.delete("/{course_id}", dependencies=[Depends(req_profesor)])
 def delete_course(course_id: UUID, db: Session = Depends(get_db)):
     return course_service.delete_course(db, course_id)
 
@@ -48,7 +50,7 @@ from fastapi import UploadFile, File
 from app.services.nomina_service import parse_nomina_excel
 from app.models.student import Student
 
-@router.post("/{course_id}/upload-nomina")
+@router.post("/{course_id}/upload-nomina", dependencies=[Depends(req_profesor)])
 async def upload_nomina(course_id: UUID, file: UploadFile = File(...), db: Session = Depends(get_db)):
     file_bytes = await file.read()
     result = parse_nomina_excel(file_bytes)
@@ -86,7 +88,7 @@ class StudentIn(BaseModel):
     apellido_materno: str = ""
     nombres: str
 
-@router.post("/{course_id}/students")
+@router.post("/{course_id}/students", dependencies=[Depends(req_profesor)])
 def add_student(course_id: UUID, payload: StudentIn, db: Session = Depends(get_db)):
     from app.models.student import Student
     # Verificar RUT duplicado
@@ -121,7 +123,7 @@ class CourseIn(BaseModel):
     grading_scale: str = "chile_1_7"
     passing_threshold: float = 60.0
 
-@router.post("/")
+@router.post("/", dependencies=[Depends(req_profesor)])
 def create_course(payload: CourseIn, db: Session = Depends(get_db)):
     from app.models.course import Course
     existing = db.query(Course).filter(Course.code == payload.code).first()

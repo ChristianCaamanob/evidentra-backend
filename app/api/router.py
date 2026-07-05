@@ -1,5 +1,6 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.api.deps import req_lectura_datos
 from app.core.db import SessionLocal
 from app.models.assessment import Assessment
 from app.models.course import Course
@@ -36,12 +37,16 @@ def bootstrap_ids():
         db.close()
 
 
-api_router.include_router(courses_router)
-api_router.include_router(assessments_router)
-api_router.include_router(answer_keys_router)
-api_router.include_router(scans_router)
-api_router.include_router(results_router)
-api_router.include_router(feedback_router)
+# Todos los routers legados requieren, como minimo, autenticacion + rol con acceso a datos
+# (profesor/investigador/director/creador). Asi el director ve/exporta pero, en las rutas de
+# ESCRITURA, cada endpoint anade req_profesor para excluirlo (no modifica).
+_legado = dict(dependencies=[Depends(req_lectura_datos)])
+api_router.include_router(courses_router, **_legado)
+api_router.include_router(assessments_router, **_legado)
+api_router.include_router(answer_keys_router, **_legado)
+api_router.include_router(scans_router, **_legado)
+api_router.include_router(results_router, **_legado)
+api_router.include_router(feedback_router, **_legado)
 from app.routes.investigador import router as investigador_router
 api_router.include_router(investigador_router)
 from app.routes.desarrollo import router as desarrollo_router

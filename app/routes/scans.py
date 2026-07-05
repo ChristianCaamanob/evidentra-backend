@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db
+from app.api.deps import get_db, req_profesor
 from app.schemas.scan import ResolveScanReviewIn, ResolveScanReviewOut, ScanReviewOut
 from app.services import scan_service
 
@@ -15,7 +15,8 @@ def get_scan_review(scan_id: UUID, db: Session = Depends(get_db)):
     return scan_service.get_scan_review(db, scan_id)
 
 
-@router.post("/{scan_id}/resolve-review", response_model=ResolveScanReviewOut)
+@router.post("/{scan_id}/resolve-review", response_model=ResolveScanReviewOut,
+             dependencies=[Depends(req_profesor)])
 def resolve_scan_review(
     scan_id: UUID,
     payload: ResolveScanReviewIn,
@@ -28,7 +29,7 @@ from fastapi import UploadFile, File, Form, HTTPException
 from app.services.scan_engine import scan_sheet
 from app.models.scan import Scan
 
-@router.post("/process-image")
+@router.post("/process-image", dependencies=[Depends(req_profesor)])
 async def process_scan_image(
     file: UploadFile = File(...),
     assessment_id: Optional[str] = Form(None),
@@ -90,7 +91,7 @@ async def process_scan_image(
         "resultado": resultado,
     }
 
-@router.post("/process-pdf")
+@router.post("/process-pdf", dependencies=[Depends(req_profesor)])
 async def process_scan_pdf(
     file: UploadFile = File(...),
     assessment_id: Optional[str] = Form(None),
@@ -145,7 +146,7 @@ from app.core.errors import not_found as _not_found_scan
 _scan_repo_del = _ScanRepoDel()
 
 
-@router.delete("/{scan_id}")
+@router.delete("/{scan_id}", dependencies=[Depends(req_profesor)])
 def delete_scan(scan_id: UUID, db: Session = Depends(get_db)):
     deleted = _scan_repo_del.delete(db, scan_id)
     if not deleted:

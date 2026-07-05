@@ -5,7 +5,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import io
 
-from app.api.deps import get_db
+from app.api.deps import get_db, req_profesor
 from app.schemas.assessment import (
     ActivateAssessmentOut,
     AssessmentOut,
@@ -29,7 +29,8 @@ def get_assessment_readiness(assessment_id: UUID, db: Session = Depends(get_db))
     return assessment_service.get_assessment_readiness(db, assessment_id)
 
 
-@router.post("/{assessment_id}/attach-document", response_model=AssessmentReadinessOut)
+@router.post("/{assessment_id}/attach-document", response_model=AssessmentReadinessOut,
+             dependencies=[Depends(req_profesor)])
 def attach_document(
     assessment_id: UUID,
     payload: AttachAssessmentDocumentIn,
@@ -38,7 +39,8 @@ def attach_document(
     return assessment_service.attach_document(db, assessment_id, payload.assessment_document_url)
 
 
-@router.post("/{assessment_id}/activate", response_model=ActivateAssessmentOut)
+@router.post("/{assessment_id}/activate", response_model=ActivateAssessmentOut,
+             dependencies=[Depends(req_profesor)])
 def activate_assessment(assessment_id: UUID, db: Session = Depends(get_db)):
     return assessment_service.activate_assessment(db, assessment_id)
 
@@ -116,7 +118,7 @@ def list_assessments(course_id: UUID, db: Session = Depends(get_db)):
         })
     return result
 
-@router.post("/")
+@router.post("/", dependencies=[Depends(req_profesor)])
 def create_assessment(payload: AssessmentIn, db: Session = Depends(get_db)):
     import uuid as _uuid
     from app.models.assessment import Assessment
@@ -169,7 +171,7 @@ def get_assessment_config(assessment_id: UUID, db: Session = Depends(get_db)):
         "available_scales": GRADING_SCALES,
     }
 
-@router.patch("/{assessment_id}/config")
+@router.patch("/{assessment_id}/config", dependencies=[Depends(req_profesor)])
 def update_assessment_config(assessment_id: UUID, payload: dict, db: Session = Depends(get_db)):
     from app.models.assessment import Assessment
     a = db.query(Assessment).filter(Assessment.id == assessment_id).first()

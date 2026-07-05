@@ -130,6 +130,20 @@ def test_profesor_endpoint_scope(tokens):
         assert r.status_code not in (401, 403), rol
 
 
+def test_legacy_director_lee_pero_no_escribe(tokens):
+    c, tok = tokens["client"], tokens["tok"]
+    # sin token -> 401 (antes estaba TODO abierto)
+    assert c.get("/api/v1/courses/").status_code == 401
+    # el director VE/EXPORTA datos (lectura)
+    assert c.get("/api/v1/courses/", headers=_h(tok["director"])).status_code == 200
+    # el director NO modifica
+    assert c.post("/api/v1/courses/", json={"name": "X", "code": "X1"},
+                  headers=_h(tok["director"])).status_code == 403
+    # el profesor si escribe (pasa la guarda)
+    assert c.post("/api/v1/courses/", json={"name": "Y", "code": "Y1"},
+                  headers=_h(tok["profesor"])).status_code not in (401, 403)
+
+
 def test_token_lleva_el_rol():
     t = type("T", (), {"id": uuid.uuid4(), "email": "a@b.cl", "rol": "investigador"})()
     payload = auth_service.decode_token(auth_service.create_token(auth_service._token_payload(t)))
