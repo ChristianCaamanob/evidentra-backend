@@ -18,7 +18,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db
+from app.api.deps import get_db, req_profesor, req_investigador
 from app.core.errors import not_found, conflict
 from app.models.validacion import RegistroValidacion
 from app.models.aprendizaje import RubricaVersion, AjusteCalibracion
@@ -34,7 +34,7 @@ router = APIRouter(tags=["desarrollo"])
 logger = logging.getLogger("evalys")
 
 
-@router.post("/results/{scan_id}/validar")
+@router.post("/results/{scan_id}/validar", dependencies=[Depends(req_profesor)])
 def validar_desarrollo(scan_id: UUID, payload: dict, db: Session = Depends(get_db)):
     """
     F3 - Registra la validacion docente de una respuesta de desarrollo. Persiste un
@@ -79,7 +79,7 @@ def validar_desarrollo(scan_id: UUID, payload: dict, db: Session = Depends(get_d
         raise
 
 
-@router.post("/answer-key-items/{item_id}/precalificar")
+@router.post("/answer-key-items/{item_id}/precalificar", dependencies=[Depends(req_profesor)])
 def precalificar(item_id: UUID, payload: dict, db: Session = Depends(get_db)):
     """
     F2 - Pre-califica una respuesta de desarrollo criterio por criterio (la IA propone; la
@@ -117,7 +117,7 @@ def precalificar(item_id: UUID, payload: dict, db: Session = Depends(get_db)):
         raise
 
 
-@router.get("/answer-keys/{ak_id}/rubrica/versiones")
+@router.get("/answer-keys/{ak_id}/rubrica/versiones", dependencies=[Depends(req_profesor)])
 def listar_versiones(ak_id: UUID, db: Session = Depends(get_db)):
     """F4 - Historial de versiones de la rubrica (replicabilidad: cada corrida se clava a una)."""
     vers = (db.query(RubricaVersion)
@@ -128,7 +128,7 @@ def listar_versiones(ak_id: UUID, db: Session = Depends(get_db)):
                           for v in vers]}
 
 
-@router.post("/answer-keys/{ak_id}/rubrica/versiones/activar")
+@router.post("/answer-keys/{ak_id}/rubrica/versiones/activar", dependencies=[Depends(req_profesor)])
 def activar_version(ak_id: UUID, payload: dict, db: Session = Depends(get_db)):
     """
     F4 - Aplica los ajustes APROBADOS por el docente y activa una version NUEVA de la rubrica
@@ -173,7 +173,7 @@ def activar_version(ak_id: UUID, payload: dict, db: Session = Depends(get_db)):
         raise
 
 
-@router.get("/assessments/{assessment_id}/rubrica/mfrm")
+@router.get("/assessments/{assessment_id}/rubrica/mfrm", dependencies=[Depends(req_investigador)])
 def rubrica_mfrm(assessment_id: UUID, db: Session = Depends(get_db)):
     """I6 - Severidad del corrector IA vs docente (MFRM) sobre las validaciones persistidas."""
     try:
@@ -184,7 +184,7 @@ def rubrica_mfrm(assessment_id: UUID, db: Session = Depends(get_db)):
         raise
 
 
-@router.get("/assessments/{assessment_id}/rubrica/psicometria")
+@router.get("/assessments/{assessment_id}/rubrica/psicometria", dependencies=[Depends(req_investigador)])
 def rubrica_psicometria(assessment_id: UUID, db: Session = Depends(get_db)):
     """R - Psicometria de la rubrica (estadigrafos por criterio, fiabilidad, categorias, G-theory)."""
     try:
@@ -195,7 +195,7 @@ def rubrica_psicometria(assessment_id: UUID, db: Session = Depends(get_db)):
         raise
 
 
-@router.get("/assessments/{assessment_id}/rubrica/aprendizaje")
+@router.get("/assessments/{assessment_id}/rubrica/aprendizaje", dependencies=[Depends(req_profesor)])
 def rubrica_aprendizaje(assessment_id: UUID, db: Session = Depends(get_db)):
     """F4 - Propuestas de ajuste aprendidas del docente (solo propone; el docente aprueba, G1)."""
     try:

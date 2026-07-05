@@ -21,6 +21,28 @@ def create_token(data):
     to_encode["exp"] = datetime.utcnow() + timedelta(days=7)
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
+def decode_token(token: str):
+    try:
+        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        return None
+
+def usuario_desde_token(db, token: str):
+    """Devuelve el Teacher del JWT (o None). El rol se relee de la BD, no del token,
+    para que un cambio de rol tenga efecto inmediato."""
+    import uuid as _uuid
+    payload = decode_token(token)
+    if not payload or not payload.get("sub"):
+        return None
+    try:
+        uid = _uuid.UUID(str(payload["sub"]))
+    except (ValueError, TypeError):
+        return None
+    return db.query(Teacher).filter(Teacher.id == uid).first()
+
+def _token_payload(teacher):
+    return {"sub": str(teacher.id), "email": teacher.email, "rol": teacher.rol}
+
 def get_teacher_by_email(db, email):
     return db.query(Teacher).filter(Teacher.email == email.lower()).first()
 
@@ -28,17 +50,21 @@ def register_teacher(db, email, password, name):
     email = email.lower().strip()
     if get_teacher_by_email(db, email):
         return {"error": "Este correo ya está registrado"}
+    # El auto-registro SIEMPRE crea 'profesor'. Elevar a investigador/director/creador es
+    # una accion del creador (no se puede autoasignar un rol privilegiado).
     teacher = Teacher(email=email, hashed_password=hash_password(password), name=name)
     db.add(teacher); db.commit(); db.refresh(teacher)
-    return {"token": create_token({"sub": str(teacher.id), "email": teacher.email}),
-            "teacher": {"id": str(teacher.id), "email": teacher.email, "name": teacher.name}}
+    return {"token": create_token(_token_payload(teacher)),
+            "teacher": {"id": str(teacher.id), "email": teacher.email, "name": teacher.name,
+                        "rol": teacher.rol}}
 
 def login_teacher(db, email, password):
     teacher = get_teacher_by_email(db, email)
     if not teacher: return {"error": "Correo no registrado"}
     if not verify_password(password, teacher.hashed_password): return {"error": "Contraseña incorrecta"}
-    return {"token": create_token({"sub": str(teacher.id), "email": teacher.email}),
-            "teacher": {"id": str(teacher.id), "email": teacher.email, "name": teacher.name}}
+    return {"token": create_token(_token_payload(teacher)),
+            "teacher": {"id": str(teacher.id), "email": teacher.email, "name": teacher.name,
+                        "rol": teacher.rol}}
 
 import secrets
 from app.models.password_reset import PasswordResetToken

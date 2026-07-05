@@ -17,7 +17,8 @@ import numpy as np
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db
+from fastapi import Depends as _Dep
+from app.api.deps import get_db, req_investigador
 from app.services import matriz_service
 from app.services import irt_service
 from app.services import dimensionalidad_service
@@ -25,7 +26,10 @@ from app.services import dina_service
 from app.services import dif_service
 from app.services import invarianza_service
 
-router = APIRouter(prefix="/assessments", tags=["investigador"])
+# Todo el modulo Investigador exige rol investigador (o creador). El director NO accede a
+# este modulo de investigacion; su alcance es ver/exportar datos de estudiante y profesor.
+router = APIRouter(prefix="/assessments", tags=["investigador"],
+                   dependencies=[_Dep(req_investigador)])
 logger = logging.getLogger("evalys")
 
 

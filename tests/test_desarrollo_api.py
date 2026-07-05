@@ -25,8 +25,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.main import app
-from app.api.deps import get_db
+from app.api.deps import get_db, usuario_actual
 from app.models.base import Base
+
+_CREADOR = type("U", (), {"rol": "creador"})()   # superadmin para pasar las guardas RBAC
 from app.models.course import Course
 from app.models.assessment import Assessment
 from app.models.answer_key import AnswerKey, AnswerKeyItem, RubricCriterion, RubricAncla
@@ -80,6 +82,7 @@ def entorno():
             db.close()
 
     app.dependency_overrides[get_db] = _override
+    app.dependency_overrides[usuario_actual] = lambda: _CREADOR
     yield {"assessment_id": aid, "scan_ids": scan_ids, "client": TestClient(app)}
     app.dependency_overrides.clear()
 
@@ -187,6 +190,7 @@ def entorno_rubrica():
             db.close()
 
     app.dependency_overrides[get_db] = _override
+    app.dependency_overrides[usuario_actual] = lambda: _CREADOR
     yield {"ak_id": ak_id, "item_id": item_id, "client": TestClient(app)}
     app.dependency_overrides.clear()
 
