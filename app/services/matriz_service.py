@@ -13,12 +13,16 @@ import hashlib
 
 import numpy as np
 
-from app.core.errors import conflict, not_found
+from app.core.errors import conflict, not_found, unprocessable
 from app.repositories.answer_key_repo import AnswerKeyRepository
 from app.repositories.scan_repo import ScanRepository
 
 answer_key_repo = AnswerKeyRepository()
 scan_repo = ScanRepository()
+
+# Lista blanca de variables de agrupacion permitidas para equidad (G4). NO se puede
+# agrupar por texto libre ni por identificadores: solo estas, y solo con consentimiento.
+GRUPOS_PERMITIDOS = ("sexo", "dependencia")
 
 
 def _pseudo(valor) -> str:
@@ -26,22 +30,16 @@ def _pseudo(valor) -> str:
     return "e:" + hashlib.sha256(str(valor).encode("utf-8")).hexdigest()[:10]
 
 
-def cargar_matriz_respuestas(db, assessment_id, min_personas: int = 3,
-                             min_items: int = 3) -> dict:
+def _matriz_cruda(db, assessment_id) -> dict:
     """
-    Devuelve la matriz 0/1 (persona x item) de una evaluacion, mas metadatos:
-
-        {X, personas[seudonimos], items[nums de pregunta], tags{num->{ra,bloom,unidad}},
-         n_personas, n_items, n_omitidas_pct}
-
-    Escanea todos los escaneos NO en revision; la correccion usa la version de cada uno.
-    Los items anulados se excluyen. Omitidas -> 0 (como en el analisis de curso).
+    Armado comun: pauta por version + una fila de correctitud (0/1, NaN si anulada en esa
+    version) por cada escaneo NO en revision, conservando el objeto scan (para el vinculo
+    con el estudiante en el analisis por grupo). Omitidas -> 0.
     """
     answer_key = answer_key_repo.get_by_assessment_id(db, assessment_id)
     if not answer_key or not answer_key.is_valid:
         raise conflict("La pauta no esta validada; no hay datos para el analisis.")
 
-    # pauta por version: {version -> {num_pregunta -> item}}
     por_version: dict[str, dict[int, object]] = {}
     tags: dict[int, dict] = {}
     for it in answer_key.items:
@@ -54,34 +52,41 @@ def cargar_matriz_respuestas(db, assessment_id, min_personas: int = 3,
     if not items:
         raise conflict("Todos los items estan anulados; no hay que analizar.")
 
-    scans = scan_repo.list_by_assessment(db, assessment_id)
-    filas, personas = [], []
-    n_celdas = n_omit = 0
-    for scan in scans:
+    filas_scan = []
+    for scan in scan_repo.list_by_assessment(db, assessment_id):
         if getattr(scan, "requires_review", False):
             continue
-        ocr = scan.raw_ocr_payload_json or {}
-        respuestas = ocr.get("answers", [])
-        ver = (scan.detected_version or "A").upper()
-        clave = por_version.get(ver)
+        respuestas = (scan.raw_ocr_payload_json or {}).get("answers", [])
+        clave = por_version.get((scan.detected_version or "A").upper())
         if not clave:
             continue
-        fila = []
+        fila = []; celdas = omit = 0
         for q in items:
             item = clave.get(q)
             if item is None or item.is_annulled:
                 fila.append(np.nan)
                 continue
-            idx = q - 1
-            elegida = respuestas[idx] if idx < len(respuestas) else None
-            n_celdas += 1
+            elegida = respuestas[q - 1] if (q - 1) < len(respuestas) else None
+            celdas += 1
             if elegida is None:
-                n_omit += 1
+                omit += 1
                 fila.append(0.0)
             else:
                 fila.append(1.0 if str(elegida).upper() == str(item.correct_answer).upper() else 0.0)
-        filas.append(fila)
-        personas.append(_pseudo(scan.id))
+        filas_scan.append({"scan": scan, "fila": fila, "celdas": celdas, "omit": omit})
+
+    return {"items": items, "tags": tags, "filas_scan": filas_scan}
+
+
+def cargar_matriz_respuestas(db, assessment_id, min_personas: int = 3,
+                             min_items: int = 3) -> dict:
+    """Matriz 0/1 (persona x item) SEUDONIMIZADA (G2) de una evaluacion, mas metadatos."""
+    cruda = _matriz_cruda(db, assessment_id)
+    items = cruda["items"]
+    filas = [fs["fila"] for fs in cruda["filas_scan"]]
+    personas = [_pseudo(fs["scan"].id) for fs in cruda["filas_scan"]]
+    n_celdas = sum(fs["celdas"] for fs in cruda["filas_scan"])
+    n_omit = sum(fs["omit"] for fs in cruda["filas_scan"])
 
     X = np.array(filas, dtype=float) if filas else np.empty((0, len(items)))
     if X.shape[0] < min_personas or X.shape[1] < min_items:
@@ -90,9 +95,74 @@ def cargar_matriz_respuestas(db, assessment_id, min_personas: int = 3,
             f"y >= {min_items} items; hay {X.shape[0]} personas y {X.shape[1]} items validos).")
 
     return {
-        "X": X, "personas": personas, "items": items, "tags": tags,
+        "X": X, "personas": personas, "items": items, "tags": cruda["tags"],
         "n_personas": int(X.shape[0]), "n_items": int(X.shape[1]),
         "omitidas_pct": round(n_omit / n_celdas * 100, 1) if n_celdas else 0.0,
+    }
+
+
+def cargar_matriz_con_grupo(db, assessment_id, grupo: str, min_por_grupo: int = 10) -> dict:
+    """
+    Prepara la matriz 0/1 + la variable de grupo para DIF / invarianza (equidad), aplicando
+    las tres salvaguardas de la Ley 21.719:
+      - LISTA BLANCA : grupo debe estar en GRUPOS_PERMITIDOS (si no, 422).
+      - CONSENTIMIENTO: solo se incluyen estudiantes con consiente_equidad = True (G4).
+      - ANTI-REIDENTIFICACION: cada grupo comparado exige >= min_por_grupo estudiantes.
+    Si la variable tiene >2 categorias, compara las 2 mayores y declara las omitidas.
+    """
+    if grupo not in GRUPOS_PERMITIDOS:
+        raise unprocessable(
+            f"Variable de agrupacion '{grupo}' no permitida. Permitidas (consentidas): "
+            f"{', '.join(GRUPOS_PERMITIDOS)}.")
+
+    from app.models.assessment import Assessment
+    from app.models.student import Student
+
+    cruda = _matriz_cruda(db, assessment_id)
+    assessment = db.get(Assessment, assessment_id)
+    por_rut = {}
+    if assessment is not None:
+        for st in db.query(Student).filter(Student.course_id == assessment.course_id).all():
+            por_rut[st.rut] = st
+
+    filas, valores = [], []
+    sin_consent = sin_dato = 0
+    for fs in cruda["filas_scan"]:
+        st = por_rut.get(fs["scan"].student_identifier)
+        if st is None or getattr(st, grupo, None) in (None, ""):
+            sin_dato += 1
+            continue
+        if not getattr(st, "consiente_equidad", False):
+            sin_consent += 1
+            continue
+        filas.append(fs["fila"]); valores.append(str(getattr(st, grupo)))
+
+    if not filas:
+        raise conflict(
+            f"No hay estudiantes con consentimiento y con '{grupo}' registrado para esta evaluacion.")
+
+    X = np.array(filas, dtype=float)
+    valores = np.array(valores)
+    cats, counts = np.unique(valores, return_counts=True)
+    orden = np.argsort(counts)[::-1]
+    cats, counts = cats[orden], counts[orden]
+    if len(cats) < 2:
+        raise conflict(f"Se requieren al menos 2 categorias de '{grupo}' con datos (hay {len(cats)}).")
+    if counts[0] < min_por_grupo or counts[1] < min_por_grupo:
+        raise conflict(
+            f"Cada grupo requiere >= {min_por_grupo} estudiantes para proteger contra "
+            f"reidentificacion. Tamanos: {dict(zip(cats.tolist(), counts.tolist()))}.")
+
+    top2 = cats[:2]
+    mask = np.isin(valores, top2)
+    return {
+        "X": X[mask], "grupo": valores[mask].tolist(),
+        "referencia": str(top2[0]), "focal": str(top2[1]),
+        "variable": grupo, "n": int(mask.sum()),
+        "categorias_comparadas": [str(top2[0]), str(top2[1])],
+        "categorias_omitidas": [str(c) for c in cats[2:]],
+        "excluidos_sin_consentimiento": int(sin_consent),
+        "excluidos_sin_dato": int(sin_dato),
     }
 
 

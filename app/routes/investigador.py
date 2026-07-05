@@ -13,6 +13,7 @@ import logging
 import traceback
 from uuid import UUID
 
+import numpy as np
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
@@ -21,6 +22,8 @@ from app.services import matriz_service
 from app.services import irt_service
 from app.services import dimensionalidad_service
 from app.services import dina_service
+from app.services import dif_service
+from app.services import invarianza_service
 
 router = APIRouter(prefix="/assessments", tags=["investigador"])
 logger = logging.getLogger("evalys")
@@ -77,4 +80,43 @@ def psicometria_dina(assessment_id: UUID, base: str = Query("ra", pattern="^(ra|
         return rep
     except Exception:
         logger.error(f"Error en psicometria_dina {assessment_id}: {traceback.format_exc()}")
+        raise
+
+
+def _meta_equidad(d: dict) -> dict:
+    return {"variable": d["variable"], "comparados": d["categorias_comparadas"],
+            "categorias_omitidas": d["categorias_omitidas"], "n": d["n"],
+            "excluidos_sin_consentimiento": d["excluidos_sin_consentimiento"],
+            "gobernanza": "Solo estudiantes que CONSINTIERON el analisis de equidad (G4); "
+                          "datos seudonimizados (G2); grupos con minimo para evitar "
+                          "reidentificacion. No altera notas (G1)."}
+
+
+@router.get("/{assessment_id}/psicometria/dif")
+def psicometria_dif(assessment_id: UUID, grupo: str = Query(..., pattern="^(sexo|dependencia)$"),
+                    db: Session = Depends(get_db)):
+    """I2 - DIF (Mantel-Haenszel + logistica) entre 2 grupos consentidos. Equidad del item."""
+    try:
+        d = matriz_service.cargar_matriz_con_grupo(db, assessment_id, grupo)
+        X = np.asarray(d["X"], dtype=float)
+        matching = np.nansum(X, axis=1)                # puntaje total como variable de igualacion
+        rep = dif_service.analizar_dif(X, d["grupo"], matching, etiqueta_focal=d["focal"])
+        rep["_meta"] = _meta_equidad(d)
+        return rep
+    except Exception:
+        logger.error(f"Error en psicometria_dif {assessment_id}: {traceback.format_exc()}")
+        raise
+
+
+@router.get("/{assessment_id}/psicometria/invarianza")
+def psicometria_invarianza(assessment_id: UUID, grupo: str = Query(..., pattern="^(sexo|dependencia)$"),
+                           db: Session = Depends(get_db)):
+    """I8b - Invarianza de medicion de Rasch entre 2 grupos consentidos."""
+    try:
+        d = matriz_service.cargar_matriz_con_grupo(db, assessment_id, grupo)
+        rep = invarianza_service.invarianza_rasch(np.asarray(d["X"], dtype=float), d["grupo"])
+        rep["_meta"] = _meta_equidad(d)
+        return rep
+    except Exception:
+        logger.error(f"Error en psicometria_invarianza {assessment_id}: {traceback.format_exc()}")
         raise
