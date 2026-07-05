@@ -262,16 +262,17 @@ def read_answers(gray, n_questions):
     bub_r_pt = 6.5
     CHOICES = ["A", "B", "C", "D", "E"]
 
-    n_per_col = n_questions // 2
-    # Misma formula adaptativa que el generador (deben coincidir exactamente)
-    row_gap = min(26.0, 498.0/(n_per_col-1)) if n_per_col > 1 else 26.0
+    # Columnas desiguales para N impar: la col. 1 lleva una pregunta mas (13+12 para 25).
+    # El espaciado usa la columna mayor -> misma formula EXACTA que el generador.
+    n_col1 = (n_questions + 1) // 2
+    n_col2 = n_questions // 2
+    row_gap = min(26.0, 498.0/(n_col1-1)) if n_col1 > 1 else 26.0
     bubble_r = int(bub_r_pt * FACTOR)
     answers = []
     ambiguous = []
 
-    for col_idx, bub_xs in enumerate([col1_bub_xs, col2_bub_xs]):
-        q_start = col_idx * n_per_col
-        for q_idx in range(n_per_col):
+    for bub_xs, q_start, n_col in [(col1_bub_xs, 0, n_col1), (col2_bub_xs, n_col1, n_col2)]:
+        for q_idx in range(n_col):
             y_svg = row_y_top_svg + q_idx * row_gap
             cy = int(y_svg * FACTOR)
             row_res = []

@@ -92,9 +92,12 @@ def generate_answer_sheet_pdf(
 ) -> bytes:
     """Hoja Evalys v6: tres recuadros separados, sin QR.
     Layout estilo GradeCam con identidad Evalys."""
-    if n_questions % 2 != 0:
-        n_questions += 1  # redondear a par (la hoja usa 2 columnas)
-    N_PER_COL = n_questions // 2
+    # 2 columnas. Si N es IMPAR, la columna 1 lleva una pregunta mas que la 2 (p. ej.
+    # 25 -> 13 + 12), en vez de redondear al par siguiente. El espaciado usa la columna
+    # mayor para que ambas queden alineadas (y el lector use la misma formula).
+    n_col1 = (n_questions + 1) // 2
+    n_col2 = n_questions // 2
+    N_PER_COL = n_col1
 
     buf = io.BytesIO()
     cv = canvas.Canvas(buf, pagesize=A4)
@@ -190,9 +193,11 @@ def generate_answer_sheet_pdf(
     # se comprime solo con muchas filas (50+). Misma formula que el OCR.
     row_gap = min(26.0, 498.0/(N_PER_COL-1)) if N_PER_COL > 1 else 26.0
 
-    for col_idx, (num_x, bub_xs) in enumerate([(col1_num_x, col1_bub_xs), (col2_num_x, col2_bub_xs)]):
-        q_start = col_idx*N_PER_COL + 1
-        for q_idx, q_num in enumerate(range(q_start, q_start+N_PER_COL)):
+    for num_x, bub_xs, q_start, n_col in [
+            (col1_num_x, col1_bub_xs, 1, n_col1),
+            (col2_num_x, col2_bub_xs, 1 + n_col1, n_col2)]:
+        for q_idx in range(n_col):
+            q_num = q_start + q_idx
             y_svg = row_y_top_svg + q_idx*row_gap
             y_rl = H - y_svg
             cv.setFillColor(NAVY); cv.setFont('Helvetica-Bold', 9)
