@@ -19,8 +19,13 @@ class RegistroValidacion(UUIDMixin, Base):
     __tablename__ = "registros_validacion"
 
     # A que respuesta/criterio corresponde (seudonimizado: sin nombre/RUT).
-    respuesta_ref: Mapped[str] = mapped_column(String(120))     # p. ej. "scan:<id>#item:3"
+    respuesta_ref: Mapped[str] = mapped_column(String(120))     # p. ej. "e:<hash>#<criterio>"
     criterio: Mapped[str] = mapped_column(String(255))
+
+    # A que evaluacion pertenece (para agregar por instrumento: R, MFRM, F4).
+    assessment_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # Version de rubrica bajo la que se pre-califico (pinning -> replicabilidad, F4).
+    rubrica_version_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # Propuesta de la IA (F2)
     nivel_ia: Mapped[str] = mapped_column(String(20))

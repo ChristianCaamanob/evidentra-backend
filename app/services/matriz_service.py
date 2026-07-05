@@ -94,3 +94,28 @@ def cargar_matriz_respuestas(db, assessment_id, min_personas: int = 3,
         "n_personas": int(X.shape[0]), "n_items": int(X.shape[1]),
         "omitidas_pct": round(n_omit / n_celdas * 100, 1) if n_celdas else 0.0,
     }
+
+
+def cargar_registros_validacion(db, assessment_id, min_registros: int = 3) -> list[dict]:
+    """
+    Lee los RegistroValidacion persistidos (F3) de una evaluacion y los devuelve en el
+    formato que consumen R, MFRM y F4. El 'alumno' sale seudonimizado del respuesta_ref
+    (formato 'e:<hash>#<criterio>'), nunca de un identificador real (G2).
+    """
+    from app.models.validacion import RegistroValidacion
+
+    filas = (db.query(RegistroValidacion)
+             .filter(RegistroValidacion.assessment_id == str(assessment_id))
+             .all())
+    if len(filas) < min_registros:
+        raise conflict(
+            f"Aun no hay suficientes validaciones docentes para esta evaluacion "
+            f"(hay {len(filas)}; se requieren >= {min_registros}). Corre F3 primero.")
+    out = []
+    for r in filas:
+        alumno = str(r.respuesta_ref).split("#")[0]
+        out.append({"alumno": alumno, "criterio": r.criterio,
+                    "nivel_ia": r.nivel_ia, "confianza_ia": r.confianza_ia,
+                    "nivel_docente": r.nivel_docente, "accion": r.accion,
+                    "comentario": r.comentario, "respuesta_ref": r.respuesta_ref})
+    return out
