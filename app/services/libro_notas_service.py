@@ -55,15 +55,24 @@ def libro_notas(db, assessment_id, escala: str = "chile_1_7", exigencia: float =
         pseudo = str(r.respuesta_ref).split("#")[0]
         validado.setdefault(pseudo, {})[r.criterio] = _PUNTAJE.get(r.nivel_docente, 0.0)
 
+    # Sujetos de evaluacion: en 'oral' es cada estudiante de la nomina (rubrica directa, sin
+    # hoja); en 'escrita' es cada escaneo. Ambos comparten el resto del calculo.
+    from app.models.assessment import Assessment, MODALIDAD_ORAL
+    from app.models.student import Student
+
+    assessment = db.get(Assessment, assessment_id)
+    oral = assessment is not None and assessment.modalidad == MODALIDAD_ORAL
+    if oral:
+        estudiantes = db.query(Student).filter(Student.course_id == assessment.course_id).all()
+        sujetos = [(_pseudo(st.id), None) for st in estudiantes]
+    else:
+        sujetos = [(_pseudo(sc.id), sc) for sc in scan_repo.list_by_assessment(db, assessment_id)
+                   if not getattr(sc, "requires_review", False)]
+
     filas = []
-    for scan in scan_repo.list_by_assessment(db, assessment_id):
-        if getattr(scan, "requires_review", False):
-            continue
-        clave = por_version.get((scan.detected_version or "A").upper())
-        if not clave:
-            continue
-        pseudo = _pseudo(scan.id)
-        respuestas = (scan.raw_ocr_payload_json or {}).get("answers", [])
+    for pseudo, scan in sujetos:
+        clave = por_version.get((scan.detected_version or "A").upper()) if scan else None
+        respuestas = (scan.raw_ocr_payload_json or {}).get("answers", []) if scan else []
         sv = validado.get(pseudo, {})
         contrib = 0.0
         pendiente = False
@@ -80,7 +89,7 @@ def libro_notas(db, assessment_id, escala: str = "chile_1_7", exigencia: float =
                     pendiente = True             # aun sin validar
                 contrib += logro * w
             else:
-                item = clave.get(q)
+                item = clave.get(q) if clave else None
                 if item is None:
                     continue
                 elegida = respuestas[q - 1] if (q - 1) < len(respuestas) else None

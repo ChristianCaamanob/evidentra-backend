@@ -34,48 +34,92 @@ router = APIRouter(tags=["desarrollo"])
 logger = logging.getLogger("evalys")
 
 
+def _persistir_validaciones(db, subject_pseudo: str, assessment_id, payload: dict):
+    """Persiste un RegistroValidacion por criterio (trazabilidad inmutable, G5). Comun a la
+    validacion por escaneo (escrita) y por estudiante (oral). Si no hay nivel_ia (correccion
+    directa sin IA), se toma el nivel del docente -> accion 'aprobado'."""
+    docente = payload.get("docente") or "docente"
+    version_hash = payload.get("rubrica_version_hash")
+    registros = []
+    for c in payload.get("criterios", []):
+        nivel_doc = c["nivel_docente"]
+        nivel_ia = c.get("nivel_ia", nivel_doc)
+        reg = validacion_service.registrar_validacion(
+            ref=f"{subject_pseudo}#{c['criterio']}", criterio=c["criterio"],
+            nivel_ia=nivel_ia, confianza=c.get("confianza_ia", 1.0),
+            nivel_docente=nivel_doc, docente=docente, comentario=c.get("comentario"))
+        db.add(RegistroValidacion(
+            respuesta_ref=reg["respuesta_ref"], criterio=reg["criterio"],
+            nivel_ia=reg["nivel_ia"], confianza_ia=reg["confianza_ia"],
+            nivel_docente=reg["nivel_docente"], accion=reg["accion"],
+            comentario=reg["comentario"], docente=reg["docente"],
+            assessment_id=str(assessment_id), rubrica_version_hash=version_hash))
+        registros.append(reg)
+    db.commit()
+    return registros, version_hash
+
+
 @router.post("/results/{scan_id}/validar", dependencies=[Depends(req_profesor)])
 def validar_desarrollo(scan_id: UUID, payload: dict, db: Session = Depends(get_db)):
     """
-    F3 - Registra la validacion docente de una respuesta de desarrollo. Persiste un
-    RegistroValidacion por criterio (trazabilidad inmutable, G5). La nota es del docente (G1).
+    F3 (escrita) - Valida la respuesta de desarrollo de un ESCANEO. La nota es del docente (G1).
 
     payload = {docente, rubrica_version_hash?, criterios:[
-                 {criterio, nivel_ia, confianza_ia, nivel_docente, comentario?}]}
+                 {criterio, nivel_ia?, confianza_ia?, nivel_docente, comentario?}]}
     """
     try:
         scan = matriz_service.scan_repo.get(db, scan_id)
         if not scan:
             raise not_found("Escaneo no encontrado.")
-        docente = payload.get("docente") or "docente"
-        version_hash = payload.get("rubrica_version_hash")
         pseudo = matriz_service._pseudo(scan.id)
-        registros = []
-        for c in payload.get("criterios", []):
-            reg = validacion_service.registrar_validacion(
-                ref=f"{pseudo}#{c['criterio']}", criterio=c["criterio"],
-                nivel_ia=c["nivel_ia"], confianza=c.get("confianza_ia", 0.0),
-                nivel_docente=c["nivel_docente"], docente=docente,
-                comentario=c.get("comentario"))
-            db.add(RegistroValidacion(
-                respuesta_ref=reg["respuesta_ref"], criterio=reg["criterio"],
-                nivel_ia=reg["nivel_ia"], confianza_ia=reg["confianza_ia"],
-                nivel_docente=reg["nivel_docente"], accion=reg["accion"],
-                comentario=reg["comentario"], docente=reg["docente"],
-                assessment_id=str(scan.assessment_id), rubrica_version_hash=version_hash))
-            registros.append(reg)
-        db.commit()
+        registros, version_hash = _persistir_validaciones(db, pseudo, scan.assessment_id, payload)
         return {
-            "scan": pseudo, "n_registrados": len(registros),
+            "sujeto": pseudo, "n_registrados": len(registros),
             "acuerdo": validacion_service.acuerdo_qwk(registros) if registros else {},
             "rubrica_version_hash": version_hash,
-            "gobernanza": "Nota fijada por el docente (G1, indelegable). Trazabilidad "
-                          "inmutable con sello temporal (G5). Seudonimizado (G2).",
+            "gobernanza": "Nota fijada por el docente (G1). Trazabilidad inmutable (G5). "
+                          "Seudonimizado (G2).",
         }
     except KeyError as e:
         raise not_found(f"Falta el campo {e} en un criterio del payload.")
     except Exception:
         logger.error(f"Error en validar_desarrollo {scan_id}: {traceback.format_exc()}")
+        raise
+
+
+@router.post("/assessments/{assessment_id}/students/{student_id}/rubrica/validar",
+             dependencies=[Depends(req_profesor)])
+def validar_oral(assessment_id: UUID, student_id: UUID, payload: dict,
+                 db: Session = Depends(get_db)):
+    """
+    F3 (oral) - Aplica la rubrica parametrizada DIRECTAMENTE a un estudiante (oral, presentacion,
+    practica): no hay hoja/escaneo, el sujeto es el estudiante de la nomina. Misma trazabilidad
+    y gobernanza que la escrita. La IA es opcional (el docente puede puntuar directo).
+    """
+    try:
+        from app.models.student import Student
+        from app.models.assessment import Assessment
+        st = db.get(Student, student_id)
+        if not st:
+            raise not_found("Estudiante no encontrado.")
+        a = db.get(Assessment, assessment_id)
+        if not a:
+            raise not_found("Evaluacion no encontrada.")
+        if st.course_id != a.course_id:
+            raise conflict("El estudiante no pertenece al curso de la evaluacion.")
+        pseudo = matriz_service._pseudo(st.id)
+        registros, version_hash = _persistir_validaciones(db, pseudo, assessment_id, payload)
+        return {
+            "sujeto": pseudo, "modalidad": "oral", "n_registrados": len(registros),
+            "acuerdo": validacion_service.acuerdo_qwk(registros) if registros else {},
+            "rubrica_version_hash": version_hash,
+            "gobernanza": "Nota fijada por el docente (G1). Rubrica aplicada directo al estudiante. "
+                          "Trazabilidad inmutable (G5). Seudonimizado (G2).",
+        }
+    except KeyError as e:
+        raise not_found(f"Falta el campo {e} en un criterio del payload.")
+    except Exception:
+        logger.error(f"Error en validar_oral {assessment_id}/{student_id}: {traceback.format_exc()}")
         raise
 
 

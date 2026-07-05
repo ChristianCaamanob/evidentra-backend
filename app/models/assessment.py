@@ -6,6 +6,14 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDMixin
 
+# Modalidad de la evaluacion:
+#   escrita -> sobre hoja/escaneo (alternativas y/o desarrollo escrito). El sujeto es el Scan.
+#   oral    -> una rubrica parametrizada aplicada DIRECTAMENTE a cada estudiante (oral,
+#              presentacion, practica). No hay hoja: el sujeto es el estudiante de la nomina.
+MODALIDAD_ESCRITA = "escrita"
+MODALIDAD_ORAL = "oral"
+MODALIDADES = (MODALIDAD_ESCRITA, MODALIDAD_ORAL)
+
 
 class Assessment(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "assessments"
@@ -22,6 +30,9 @@ class Assessment(UUIDMixin, TimestampMixin, Base):
     version: Mapped[str] = mapped_column(String(10), default="A")
     grading_scale: Mapped[str] = mapped_column(String(50), default="chile_1_7")
     passing_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Aditivo: las evaluaciones existentes quedan 'escrita' (server_default), sin cambios.
+    modalidad: Mapped[str] = mapped_column(String(20), default=MODALIDAD_ESCRITA,
+                                           server_default=MODALIDAD_ESCRITA, nullable=False)
 
     course = relationship("Course", back_populates="assessments")
     answer_key = relationship("AnswerKey", back_populates="assessment", uselist=False, cascade="all, delete-orphan")
