@@ -13,6 +13,21 @@ QUESTION_TYPE_MULTIPLE_CHOICE = "multiple_choice"
 QUESTION_TYPE_OPEN_RESPONSE = "open_response"
 QUESTION_TYPES = (QUESTION_TYPE_MULTIPLE_CHOICE, QUESTION_TYPE_OPEN_RESPONSE)
 
+# F1 (blueprint modulo F) - nivel de exigencia con que la IA corrige un criterio.
+# estricto : concepto correcto y completo; errores conceptuales O formales penalizan.
+# tolerante: acepta la idea aunque este incompleta/imprecisa; separa forma de contenido (default).
+# flexible : premia la comprension central; lo inesperado-valido se marca para el docente.
+EXIGENCIA_ESTRICTO = "estricto"
+EXIGENCIA_TOLERANTE = "tolerante"
+EXIGENCIA_FLEXIBLE = "flexible"
+NIVELES_EXIGENCIA = (EXIGENCIA_ESTRICTO, EXIGENCIA_TOLERANTE, EXIGENCIA_FLEXIBLE)
+
+# Niveles de logro que asigna la pre-calificacion (F2) y las anclas de calibracion.
+LOGRO_LOGRADO = "logrado"
+LOGRO_PARCIAL = "parcial"
+LOGRO_NO = "no_logrado"
+NIVELES_LOGRO = (LOGRO_LOGRADO, LOGRO_PARCIAL, LOGRO_NO)
+
 
 class AnswerKey(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "answer_keys"
@@ -80,4 +95,34 @@ class RubricCriterion(UUIDMixin, Base):
     weight: Mapped[float] = mapped_column(Float, default=1.0)
     order: Mapped[int] = mapped_column(Integer, default=0)
 
+    # F1 (blueprint) - parametrizacion docente de la revision IA. Todo con default
+    # sensato: configurar es opcional, no engorroso.
+    nivel_exigencia: Mapped[str] = mapped_column(
+        String(20), default=EXIGENCIA_TOLERANTE, server_default=EXIGENCIA_TOLERANTE, nullable=False)
+    penaliza_forma: Mapped[bool] = mapped_column(Boolean, default=False)   # ortografia/termino inexacto
+    sinonimos_json: Mapped[list | None] = mapped_column(JSON, nullable=True)  # equivalencias aceptadas
+    umbral_confianza: Mapped[float] = mapped_column(Float, default=0.7)    # < umbral -> revision docente
+    politica_creativo: Mapped[str] = mapped_column(String(20), default="marcar")  # marcar | penalizar
+    fuera_de_alcance: Mapped[str | None] = mapped_column(Text, nullable=True)     # que NO evaluar aqui
+
     item = relationship("AnswerKeyItem", back_populates="rubric_criteria")
+    # Anclas de calibracion (few-shot): respuestas ya corregidas por el docente que
+    # fijan el estandar de este criterio. Es la forma NO engorrosa de configurar.
+    anclas = relationship("RubricAncla", back_populates="criterio",
+                          cascade="all, delete-orphan", order_by="RubricAncla.order")
+
+
+class RubricAncla(UUIDMixin, Base):
+    """
+    F1 - Ancla de calibracion: una respuesta de ejemplo con su nivel de logro asignado
+    por el docente. El few-shot que calibra a la IA (F2) sin escribir reglas.
+    """
+    __tablename__ = "rubric_anclas"
+
+    rubric_criterion_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("rubric_criteria.id"), nullable=False)
+    texto: Mapped[str] = mapped_column(Text)
+    nivel: Mapped[str] = mapped_column(String(20))   # logrado | parcial | no_logrado
+    order: Mapped[int] = mapped_column(Integer, default=0)
+
+    criterio = relationship("RubricCriterion", back_populates="anclas")

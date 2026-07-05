@@ -15,6 +15,9 @@ class Course(UUIDMixin, TimestampMixin, Base):
     grading_scale: Mapped[str | None] = mapped_column(String(100), nullable=True)
     passing_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
     base_score_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # F1 (blueprint) - norma terminologica vigente de la disciplina, fijada una vez y
+    # heredada por las rubricas. La IA la usa como autoridad (p. ej. "TA2 (IFAA)").
+    norma_terminologica: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
     assessments = relationship("Assessment", back_populates="course", cascade="all, delete-orphan")
     students = relationship("Student", back_populates="course", cascade="all, delete-orphan")
