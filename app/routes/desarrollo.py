@@ -25,6 +25,7 @@ from app.models.aprendizaje import RubricaVersion, AjusteCalibracion
 from app.services import matriz_service
 from app.services import validacion_service
 from app.services import precalificacion_service
+from app.services import coder_llm
 from app.services import mfrm_service
 from app.services import rubrica_psicometria_service
 from app.services import aprendizaje_service
@@ -91,9 +92,23 @@ def precalificar(item_id: UUID, payload: dict, db: Session = Depends(get_db)):
         criterios = matriz_service.cargar_criterios_item(db, item_id)
         if not criterios:
             raise conflict("El item no tiene criterios de rubrica definidos.")
-        from app.models.answer_key import AnswerKeyItem
+        from app.models.answer_key import AnswerKeyItem, AnswerKey
+        from app.models.assessment import Assessment
+        from app.models.course import Course
         item = db.get(AnswerKeyItem, item_id)
-        rep = precalificacion_service.precalificar_respuesta(payload.get("respuesta", ""), criterios)
+
+        # Norma terminologica heredada del curso (para el modo estricto del LLM).
+        ak = db.get(AnswerKey, item.answer_key_id)
+        assessment = db.get(Assessment, ak.assessment_id) if ak else None
+        course = db.get(Course, assessment.course_id) if assessment else None
+        norma = getattr(course, "norma_terminologica", None) if course else None
+        for c in criterios:
+            c["norma_terminologica"] = norma
+
+        coder = coder_llm.coder_por_defecto()      # LLM si hay API key; si no, grader determinista
+        rep = precalificacion_service.precalificar_respuesta(
+            payload.get("respuesta", ""), criterios, coder=coder, norma_terminologica=norma)
+        rep["motor"] = "llm" if coder else "deterministico"
         rep["rubrica_version_hash"] = matriz_service.version_activa_hash(
             db, item.answer_key_id, criterios)
         return rep
