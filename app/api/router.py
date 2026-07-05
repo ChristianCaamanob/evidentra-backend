@@ -42,5 +42,7 @@ api_router.include_router(answer_keys_router)
 api_router.include_router(scans_router)
 api_router.include_router(results_router)
 api_router.include_router(feedback_router)
+from app.routes.investigador import router as investigador_router
+api_router.include_router(investigador_router)
 from app.routes.auth import router as auth_router
 api_router.include_router(auth_router)
