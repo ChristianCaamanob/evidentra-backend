@@ -114,6 +114,21 @@ def test_veredicto_multidimensional_en_dos_factores():
     assert "MULTIDIMENSIONAL" in rep["veredicto"]
 
 
+def test_veredicto_dicotomico_usa_analisis_paralelo():
+    # Datos Rasch-like dicotomicos: phi atenua la varianza, pero PA detecta 1 factor ->
+    # el veredicto debe declararlo unidimensional con fuerza 'moderada' (no bloquear por umbral).
+    rng = np.random.default_rng(42)
+    n, k = 300, 8
+    theta = rng.normal(0, 1, n); dif = np.linspace(-1.5, 1.5, k)
+    P = 1 / (1 + np.exp(-(theta[:, None] - dif[None, :])))
+    X = (rng.random((n, k)) < P).astype(float)
+    rep = dz.analizar_dimensionalidad(X, dicotomico=True)
+    assert rep["n_factores"]["n_factores_sugeridos"] == 1
+    assert rep["unidimensional"] is True
+    assert "moderada" in rep["fuerza_evidencia"] or "fuerte" in rep["fuerza_evidencia"]
+    assert "tetracorica" in rep["fuerza_evidencia"] or rep["fuerza_evidencia"] == "fuerte"
+
+
 def test_kr20_dicotomico_razonable():
     X = (_un_factor(carga=0.7) > 0).astype(float)           # dicotomiza
     val = dz.kr20(X)["kr20"]

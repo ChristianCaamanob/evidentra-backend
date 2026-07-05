@@ -224,17 +224,30 @@ def analizar_dimensionalidad(X: np.ndarray, dicotomico: bool = True) -> dict:
     if dicotomico:
         fiab["kr20"] = kr20(Xc)
 
-    # Unidimensionalidad esencial: factorable + PA sugiere 1 + primer factor domina.
+    # Unidimensionalidad esencial. El analisis paralelo (nº de factores) es la senal
+    # PRIMARIA y es robusto. La varianza del 1er factor y el ratio 1º/2º son la FUERZA de
+    # la evidencia -pero para items dicotomicos las correlaciones phi los atenuan-, asi que
+    # no se usan como compuerta en modo dicotomico (se confirmaria con tetracorica).
     var_primer = estructura["varianza_explicada"][0]
     ratio = pa["ratio_primer_segundo"] or 99
-    unidim = bool(factorab_kmo["kmo"] >= 0.6 and bart["factorable"]
-                  and n_fac == 1 and var_primer >= 0.20 and ratio >= 3.0)
+    factorable = factorab_kmo["kmo"] >= 0.6 and bart["factorable"]
+    fuerte = var_primer >= 0.20 and ratio >= 3.0
+    if dicotomico:
+        unidim = bool(factorable and n_fac == 1)
+        fuerza = "fuerte" if fuerte else "moderada (phi atenua; confirmar con tetracorica)"
+    else:
+        unidim = bool(factorable and n_fac == 1 and fuerte)
+        fuerza = "fuerte" if fuerte else "debil"
+
     if unidim:
         verdicto = ("Test esencialmente UNIDIMENSIONAL: el modelo de Rasch (I1) esta "
-                    "justificado y los puntajes miden un solo constructo.")
+                    f"justificado y los puntajes miden un solo constructo. Fuerza: {fuerza}.")
+    elif not factorable:
+        verdicto = ("Datos poco factorables (KMO/Bartlett insuficientes): el analisis "
+                    "factorial no es interpretable; revisar muestra e items.")
     elif n_fac == 1:
-        verdicto = ("Un solo factor por analisis paralelo, pero la evidencia es debil "
-                    "(KMO/varianza bajos): interpretar con cautela.")
+        verdicto = ("Un solo factor por analisis paralelo, pero la evidencia de dominancia "
+                    f"es debil (varianza {round(var_primer*100)}%, ratio {ratio}): cautela.")
     else:
         verdicto = (f"Test MULTIDIMENSIONAL ({n_fac} factores): el Rasch unidimensional "
                     "no es apropiado sin subescalas o un modelo multidimensional/bifactor.")
@@ -246,6 +259,7 @@ def analizar_dimensionalidad(X: np.ndarray, dicotomico: bool = True) -> dict:
         "estructura_efa": estructura,
         "fiabilidad": fiab,
         "unidimensional": unidim,
+        "fuerza_evidencia": fuerza,
         "veredicto": verdicto,
         "nota_metodo": ("Correlaciones de Pearson (phi) para items dicotomicos; la tetracorica "
                         "es un refinamiento futuro." if dicotomico else
