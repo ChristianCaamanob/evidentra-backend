@@ -41,7 +41,7 @@ from app.models.scan import Scan
 from app.services import matriz_service
 
 
-def _sembrar(engine, n=30, k=8, seed=1, anular_ultimo=False, en_revision=0):
+def _sembrar(engine, n=30, k=8, seed=1, anular_ultimo=False, en_revision=0, con_ra=True):
     rng = np.random.default_rng(seed)
     theta = rng.normal(0, 1, n)
     b = np.linspace(-1.5, 1.5, k)
@@ -58,7 +58,8 @@ def _sembrar(engine, n=30, k=8, seed=1, anular_ultimo=False, en_revision=0):
             s.add(AnswerKeyItem(answer_key_id=ak.id, question_number=q, version="A",
                                 correct_answer="A", weight=1.0,
                                 is_annulled=(anular_ultimo and q == k),
-                                learning_outcome_id=f"RA{(q % 3) + 1}", bloom_level="aplicar"))
+                                learning_outcome_id=(f"RA{(q % 3) + 1}" if con_ra else None),
+                                bloom_level="aplicar"))
         s.commit()
         for i in range(n):
             P = 1 / (1 + np.exp(-(theta[i] - b)))
@@ -134,6 +135,38 @@ def test_endpoint_dimensionalidad(entorno):
     assert "veredicto" in body and "fiabilidad" in body
     assert body["_meta"]["n_personas"] == 30
     assert body["n_factores"]["n_factores_sugeridos"] >= 1
+
+
+def test_endpoint_dina(entorno):
+    r = entorno["client"].get(f"/api/v1/assessments/{entorno['assessment_id']}/psicometria/dina")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["atributos"]) == 3                 # RA1, RA2, RA3 derivados de C3
+    assert body["_meta"]["base_atributos"] == "ra"
+    assert len(body["personas"]) == 30
+    assert all("pregunta" in it for it in body["items"])
+
+
+def test_dina_sin_etiquetas_c3_da_conflict():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
+                           poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    aid = _sembrar(engine, con_ra=False)               # items sin RA -> no hay Q-matrix
+    TS = sessionmaker(bind=engine)
+
+    def _override():
+        db = TS()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = _override
+    try:
+        r = TestClient(app).get(f"/api/v1/assessments/{aid}/psicometria/dina")
+        assert r.status_code == 409                    # faltan etiquetas C3
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_datos_insuficientes_da_conflict():

@@ -13,13 +13,14 @@ import logging
 import traceback
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
 from app.services import matriz_service
 from app.services import irt_service
 from app.services import dimensionalidad_service
+from app.services import dina_service
 
 router = APIRouter(prefix="/assessments", tags=["investigador"])
 logger = logging.getLogger("evalys")
@@ -56,4 +57,24 @@ def psicometria_dimensionalidad(assessment_id: UUID, db: Session = Depends(get_d
         return rep
     except Exception:
         logger.error(f"Error en psicometria_dimensionalidad {assessment_id}: {traceback.format_exc()}")
+        raise
+
+
+@router.get("/{assessment_id}/psicometria/dina")
+def psicometria_dina(assessment_id: UUID, base: str = Query("ra", pattern="^(ra|bloom)$"),
+                     db: Session = Depends(get_db)):
+    """I9 - Diagnostico cognitivo (DINA). La Q-matrix se deriva del etiquetado C3: cada
+    item carga en su RA (base=ra) o nivel Bloom (base=bloom)."""
+    try:
+        d = matriz_service.cargar_dina(db, assessment_id, base=base)
+        rep = dina_service.estimar_dina(d["X"], d["Q"], atributos=d["atributos"])
+        for it, num in zip(rep["items"], d["items"]):
+            it["pregunta"] = num                       # numero real de pregunta
+        rep["_meta"] = {"n_personas": d["n_personas"], "n_items": len(d["items"]),
+                        "base_atributos": base,
+                        "gobernanza": "Diagnostico agregado y seudonimizado (G2); orienta "
+                                      "remediacion, no altera notas (G1). Q-matrix derivada de C3."}
+        return rep
+    except Exception:
+        logger.error(f"Error en psicometria_dina {assessment_id}: {traceback.format_exc()}")
         raise

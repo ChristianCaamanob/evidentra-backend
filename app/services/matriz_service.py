@@ -96,6 +96,41 @@ def cargar_matriz_respuestas(db, assessment_id, min_personas: int = 3,
     }
 
 
+def cargar_dina(db, assessment_id, base: str = "ra", min_personas: int = 10) -> dict:
+    """
+    Prepara los insumos de DINA (I9) derivando la Q-matrix del etiquetado C3: cada item
+    'carga' en su RA (o nivel Bloom). base in {'ra','bloom'}. Requiere que los items esten
+    etiquetados (C3) y al menos 2 atributos distintos.
+    """
+    datos = cargar_matriz_respuestas(db, assessment_id)
+    X, items, tags = datos["X"], datos["items"], datos["tags"]
+    etiqueta = {q: (tags.get(q) or {}).get(base) for q in items}
+    usados = [i for i, q in enumerate(items) if etiqueta[q]]
+    if len(usados) < 3:
+        raise conflict(
+            f"Faltan etiquetas C3 ({base.upper()}) en los items; DINA las necesita para la "
+            f"Q-matrix (hay {len(usados)} items etiquetados). Etiqueta el instrumento en C3.")
+    atributos = sorted({etiqueta[items[i]] for i in usados})
+    if len(atributos) < 2:
+        raise conflict("Se requieren al menos 2 atributos (RA/Bloom distintos) para el diagnostico.")
+
+    Xr = X[:, usados]
+    fila_ok = ~np.isnan(Xr).any(axis=1)          # DINA requiere respuestas completas
+    Xr = Xr[fila_ok]
+    if Xr.shape[0] < min_personas:
+        raise conflict(f"Datos insuficientes para DINA (se requieren >= {min_personas} "
+                       f"estudiantes con respuestas completas; hay {Xr.shape[0]}).")
+
+    idx_attr = {a: k for k, a in enumerate(atributos)}
+    Q = np.zeros((len(usados), len(atributos)))
+    for r, i in enumerate(usados):
+        Q[r, idx_attr[etiqueta[items[i]]]] = 1.0
+
+    return {"X": Xr, "Q": Q, "atributos": atributos,
+            "items": [items[i] for i in usados], "n_personas": int(Xr.shape[0]),
+            "base": base}
+
+
 def cargar_registros_validacion(db, assessment_id, min_registros: int = 3) -> list[dict]:
     """
     Lee los RegistroValidacion persistidos (F3) de una evaluacion y los devuelve en el
