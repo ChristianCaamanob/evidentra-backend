@@ -19,10 +19,12 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
-from app.core.errors import not_found
+from app.core.errors import not_found, conflict
 from app.models.validacion import RegistroValidacion
+from app.models.aprendizaje import RubricaVersion, AjusteCalibracion
 from app.services import matriz_service
 from app.services import validacion_service
+from app.services import precalificacion_service
 from app.services import mfrm_service
 from app.services import rubrica_psicometria_service
 from app.services import aprendizaje_service
@@ -73,6 +75,86 @@ def validar_desarrollo(scan_id: UUID, payload: dict, db: Session = Depends(get_d
         raise not_found(f"Falta el campo {e} en un criterio del payload.")
     except Exception:
         logger.error(f"Error en validar_desarrollo {scan_id}: {traceback.format_exc()}")
+        raise
+
+
+@router.post("/answer-key-items/{item_id}/precalificar")
+def precalificar(item_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    """
+    F2 - Pre-califica una respuesta de desarrollo criterio por criterio (la IA propone; la
+    nota es del docente, G1). Devuelve el hash de la version de rubrica ACTIVA para que el
+    docente lo fije al validar (pinning -> replicabilidad).
+
+    payload = {respuesta}
+    """
+    try:
+        criterios = matriz_service.cargar_criterios_item(db, item_id)
+        if not criterios:
+            raise conflict("El item no tiene criterios de rubrica definidos.")
+        from app.models.answer_key import AnswerKeyItem
+        item = db.get(AnswerKeyItem, item_id)
+        rep = precalificacion_service.precalificar_respuesta(payload.get("respuesta", ""), criterios)
+        rep["rubrica_version_hash"] = matriz_service.version_activa_hash(
+            db, item.answer_key_id, criterios)
+        return rep
+    except Exception:
+        logger.error(f"Error en precalificar {item_id}: {traceback.format_exc()}")
+        raise
+
+
+@router.get("/answer-keys/{ak_id}/rubrica/versiones")
+def listar_versiones(ak_id: UUID, db: Session = Depends(get_db)):
+    """F4 - Historial de versiones de la rubrica (replicabilidad: cada corrida se clava a una)."""
+    vers = (db.query(RubricaVersion)
+            .filter(RubricaVersion.answer_key_id == str(ak_id))
+            .order_by(RubricaVersion.version).all())
+    return {"versiones": [{"version": v.version, "hash": v.hash, "parent_hash": v.parent_hash,
+                           "estado": v.estado, "resumen": v.resumen, "autor": v.autor}
+                          for v in vers]}
+
+
+@router.post("/answer-keys/{ak_id}/rubrica/versiones/activar")
+def activar_version(ak_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    """
+    F4 - Aplica los ajustes APROBADOS por el docente y activa una version NUEVA de la rubrica
+    (la anterior queda archivada e inmutable). El docente aprueba la regla (G1 extendido); si
+    un ajuste relaja la norma disciplinar, exige justificacion (se rechaza si falta).
+
+    payload = {autor, aprobados:[{criterio, tipo, payload?, recurrencia?, requiere_override?,
+               justificacion?, aprobado_por?}]}
+    """
+    try:
+        autor = payload.get("autor", "docente")
+        criterios = matriz_service.cargar_criterios_rubrica(db, ak_id)
+        actual = (db.query(RubricaVersion)
+                  .filter(RubricaVersion.answer_key_id == str(ak_id))
+                  .order_by(RubricaVersion.version.desc()).first())
+        nueva = aprendizaje_service.aplicar_ajustes(
+            criterios, payload.get("aprobados", []),
+            version_actual=(actual.version if actual else 1), autor=autor)
+
+        db.query(RubricaVersion).filter(
+            RubricaVersion.answer_key_id == str(ak_id),
+            RubricaVersion.estado == "activa").update({"estado": "archivada"})
+        db.add(RubricaVersion(answer_key_id=str(ak_id), version=nueva["version"],
+                              hash=nueva["hash"], parent_hash=nueva["parent_hash"],
+                              estado="activa", resumen=nueva["resumen"], autor=autor))
+        for ch in nueva["changelog"]:
+            db.add(AjusteCalibracion(
+                rubrica_version_hash=nueva["hash"], criterio=ch["criterio"], tipo=ch["tipo"],
+                direccion=ch.get("direccion") or "sube", descripcion=ch["tipo"],
+                recurrencia=ch.get("recurrencia") or 1,
+                requiere_override=bool(ch.get("requiere_override")),
+                justificacion=ch.get("justificacion"), estado="aprobado",
+                aprobado_por=ch.get("aprobado_por") or autor))
+        db.commit()
+        return {"version": nueva["version"], "hash": nueva["hash"], "estado": "activa",
+                "n_cambios": nueva["n_cambios"], "resumen": nueva["resumen"],
+                "gobernanza": nueva["gobernanza"]}
+    except ValueError as e:                    # relaja la norma sin justificacion (G1)
+        raise conflict(str(e))
+    except Exception:
+        logger.error(f"Error en activar_version {ak_id}: {traceback.format_exc()}")
         raise
 
 

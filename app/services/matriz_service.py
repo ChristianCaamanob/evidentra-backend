@@ -119,3 +119,52 @@ def cargar_registros_validacion(db, assessment_id, min_registros: int = 3) -> li
                     "nivel_docente": r.nivel_docente, "accion": r.accion,
                     "comentario": r.comentario, "respuesta_ref": r.respuesta_ref})
     return out
+
+
+def cargar_criterios_item(db, answer_key_item_id) -> list[dict]:
+    """
+    Carga los criterios de rubrica (con sus anclas) de un item, en el formato que consume
+    F2 (precalificacion_service) y F4 (aprendizaje_service). Incluye 'name' y 'nombre' por
+    compatibilidad con ambos motores.
+    """
+    from app.models.answer_key import AnswerKeyItem
+
+    item = db.get(AnswerKeyItem, answer_key_item_id)
+    if not item:
+        raise not_found("Item de pauta no encontrado.")
+    criterios = []
+    for c in sorted(item.rubric_criteria, key=lambda x: x.order):
+        anclas = [{"texto": a.texto, "nivel": a.nivel}
+                  for a in sorted(c.anclas, key=lambda x: x.order)]
+        criterios.append({
+            "name": c.name, "nombre": c.name, "weight": float(c.weight),
+            "nivel_exigencia": c.nivel_exigencia, "sinonimos": c.sinonimos_json or [],
+            "umbral_confianza": float(c.umbral_confianza), "anclas": anclas,
+        })
+    return criterios
+
+
+def cargar_criterios_rubrica(db, answer_key_id) -> list[dict]:
+    """Todos los criterios de la rubrica de una pauta (a lo largo de sus items), para versionar."""
+    from app.models.answer_key import AnswerKey
+
+    ak = db.get(AnswerKey, answer_key_id)
+    if not ak:
+        raise not_found("Pauta no encontrada.")
+    criterios = []
+    for item in ak.items:
+        criterios.extend(cargar_criterios_item(db, item.id))
+    return criterios
+
+
+def version_activa_hash(db, answer_key_id, criterios: list[dict]) -> str:
+    """Hash de la version de rubrica ACTIVA (pinning). Si no hay versiones, el hash del
+    contenido actual (v1 implicita)."""
+    from app.models.aprendizaje import RubricaVersion
+    from app.services.aprendizaje_service import hash_criterios
+
+    activa = (db.query(RubricaVersion)
+              .filter(RubricaVersion.answer_key_id == str(answer_key_id),
+                      RubricaVersion.estado == "activa")
+              .order_by(RubricaVersion.version.desc()).first())
+    return activa.hash if activa else hash_criterios(criterios)
