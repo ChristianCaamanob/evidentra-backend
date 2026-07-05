@@ -42,8 +42,8 @@ def test_marca_item_desplazado():
     X, g = _genera(11, dif, shift_item=2, shift=1.8)      # item 3 (idx 2) mas dificil en B
     rep = invarianza_rasch(X, g)
     assert 3 in rep["items_no_invariantes"]               # el item desplazado se marca
-    # los demas no deberian marcarse en masa
-    assert len(rep["items_no_invariantes"]) <= 2
+    # con purificacion por anclaje, SOLO el item desplazado se marca (no contamina a los demas)
+    assert rep["items_no_invariantes"] == [3]
     assert rep["invariante"] is False
 
 

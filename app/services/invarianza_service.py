@@ -40,23 +40,44 @@ def invarianza_rasch(X: np.ndarray, grupo, umbral_z: float = 1.96,
     rA = estimar_rasch(X[grupo == gA])
     rB = estimar_rasch(X[grupo == gB])
 
+    bA = np.array([it["b"] for it in rA["items"]], dtype=float)
+    bB = np.array([it["b"] for it in rB["items"]], dtype=float)
+    se = np.sqrt(np.array([it["se_b"] for it in rA["items"]]) ** 2 +
+                 np.array([it["se_b"] for it in rB["items"]]) ** 2)
+    extremo = np.array([iA["extremo"] or iB["extremo"]
+                        for iA, iB in zip(rA["items"], rB["items"])])
+
+    # Purificacion por anclaje iterativo: re-alinear los grupos usando SOLO los items
+    # invariantes actuales, para que el desplazamiento de un item no contamine a los demas
+    # (mismo problema de sobre-marcado que se corrigio en el DIF de I2).
+    ancla = ~extremo
+    z = np.zeros_like(bA)
+    for _ in range(10):
+        base = ancla.copy()
+        offset = (bA[base].mean() - bB[base].mean()) if base.any() else 0.0
+        dif = bA - (bB + offset)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            z = np.where(se > 0, dif / se, 0.0)
+        flag = (~extremo) & (np.abs(z) > umbral_z) & (np.abs(dif) > umbral_dif)
+        nueva_ancla = (~extremo) & (~flag)
+        if nueva_ancla.sum() < 2:            # no colapsar el anclaje
+            break
+        if np.array_equal(nueva_ancla, ancla):
+            break
+        ancla = nueva_ancla
+
     items = []
     bAs, bBs = [], []
-    for iA, iB in zip(rA["items"], rB["items"]):
-        extremo = iA["extremo"] or iB["extremo"]
-        bA, bB = iA["b"], iB["b"]
-        se = float(np.sqrt(iA["se_b"] ** 2 + iB["se_b"] ** 2))
-        dif = bA - bB
-        z = dif / se if se > 0 else 0.0
-        no_invariante = (not extremo) and abs(z) > umbral_z and abs(dif) > umbral_dif
+    for j, (iA, iB) in enumerate(zip(rA["items"], rB["items"])):
         items.append({
             "item": iA["item"],
-            "b_grupo_A": round(float(bA), 3), "b_grupo_B": round(float(bB), 3),
-            "diferencia": round(float(dif), 3), "z": round(float(z), 2),
-            "no_invariante": bool(no_invariante), "extremo": bool(extremo),
+            "b_grupo_A": round(float(bA[j]), 3), "b_grupo_B": round(float(bB[j] + offset), 3),
+            "diferencia": round(float(dif[j]), 3), "z": round(float(z[j]), 2),
+            "no_invariante": bool((~extremo[j]) and abs(z[j]) > umbral_z and abs(dif[j]) > umbral_dif),
+            "extremo": bool(extremo[j]),
         })
-        if not extremo:
-            bAs.append(bA); bBs.append(bB)
+        if not extremo[j]:
+            bAs.append(float(bA[j])); bBs.append(float(bB[j] + offset))
 
     corr = float(np.corrcoef(bAs, bBs)[0, 1]) if len(bAs) > 2 else 0.0
     flagged = [it for it in items if it["no_invariante"]]
@@ -80,7 +101,8 @@ def invarianza_rasch(X: np.ndarray, grupo, umbral_z: float = 1.96,
             "items o modelar la no-invarianza antes de comparar grupos."),
         "grafico_invarianza": {"b_A": bAs, "b_B": bBs},
         "nota_metodo": "Enfoque Rasch (invarianza de estimadores del item), no CFA multigrupo. "
-                       "Purificacion iterativa del anclaje queda como refinamiento futuro.",
+                       "Incluye purificacion por anclaje iterativo (re-alineacion sobre el "
+                       "subconjunto invariante) para evitar el sobre-marcado por contaminacion.",
         "gobernanza": "Analisis agregado y seudonimizado (G2); evidencia de equidad, no altera "
                       "notas (G1). Complementa el DIF de I2.",
     }
