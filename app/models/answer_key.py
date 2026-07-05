@@ -105,6 +105,18 @@ class RubricCriterion(UUIDMixin, Base):
     politica_creativo: Mapped[str] = mapped_column(String(20), default="marcar")  # marcar | penalizar
     fuera_de_alcance: Mapped[str | None] = mapped_column(Text, nullable=True)     # que NO evaluar aqui
 
+    # Robustecimiento para rubricas analiticas reales (aditivo, nullable):
+    #  - niveles_json: escala PROPIA del criterio [{nivel, puntos, descriptor}], mejor->peor
+    #    (p. ej. Excelente=3 / Bueno=2 / Regular=1 / Deficiente=0). Si es None, se usa la
+    #    escala de 3 niveles por defecto (logrado/parcial/no_logrado). `weight` = factor de
+    #    multiplicacion.
+    #  - seccion: dimension que agrupa criterios (Contenido, Organizacion, Preguntas finales).
+    #  - ambito: 'grupal' (mismo puntaje a todo el grupo) o 'individual' (por estudiante).
+    niveles_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    seccion: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    ambito: Mapped[str] = mapped_column(String(20), default="individual",
+                                        server_default="individual", nullable=False)
+
     item = relationship("AnswerKeyItem", back_populates="rubric_criteria")
     # Anclas de calibracion (few-shot): respuestas ya corregidas por el docente que
     # fijan el estandar de este criterio. Es la forma NO engorrosa de configurar.

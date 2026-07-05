@@ -22,7 +22,7 @@ from __future__ import annotations
 from app.core.errors import conflict
 from app.models.validacion import RegistroValidacion
 from app.services.result_service import calculate_grade
-from app.services.precalificacion_service import _PUNTAJE
+from app.services.rubrica_escala_service import fraccion_logro
 from app.services.matriz_service import _pseudo, answer_key_repo, scan_repo
 
 
@@ -42,7 +42,8 @@ def libro_notas(db, assessment_id, escala: str = "chile_1_7", exigencia: float =
         es_desarrollo = bool(criterios)          # robusto: lo define la rubrica, no la etiqueta
         items_meta[it.question_number] = {"desarrollo": es_desarrollo, "weight": float(it.weight)}
         if es_desarrollo:
-            dev_criterios[it.question_number] = [(c.name, float(c.weight)) for c in criterios]
+            dev_criterios[it.question_number] = [
+                (c.name, float(c.weight), c.niveles_json) for c in criterios]
 
     if not items_meta:
         raise conflict("La evaluacion no tiene items validos.")
@@ -53,7 +54,7 @@ def libro_notas(db, assessment_id, escala: str = "chile_1_7", exigencia: float =
     for r in db.query(RegistroValidacion).filter(
             RegistroValidacion.assessment_id == str(assessment_id)).all():
         pseudo = str(r.respuesta_ref).split("#")[0]
-        validado.setdefault(pseudo, {})[r.criterio] = _PUNTAJE.get(r.nivel_docente, 0.0)
+        validado.setdefault(pseudo, {})[r.criterio] = r.nivel_docente   # nivel crudo (str)
 
     # Sujetos de evaluacion: en 'oral' es cada estudiante de la nomina (rubrica directa, sin
     # hoja); en 'escrita' es cada escaneo. Ambos comparten el resto del calculo.
@@ -79,11 +80,12 @@ def libro_notas(db, assessment_id, escala: str = "chile_1_7", exigencia: float =
         for q, meta in items_meta.items():
             w = meta["weight"]
             if meta["desarrollo"]:
-                crits = dev_criterios.get(q, [])
-                obtenidos = [(sv[cn], cw) for cn, cw in crits if cn in sv]
+                crits = dev_criterios.get(q, [])          # [(name, weight, niveles)]
+                obtenidos = [(cw, niv, sv[cn]) for cn, cw, niv in crits if cn in sv]
                 if obtenidos:
-                    tw = sum(cw for _, cw in obtenidos) or 1.0
-                    logro = sum(lg * cw for lg, cw in obtenidos) / tw
+                    tw = sum(cw for cw, _, _ in obtenidos) or 1.0
+                    logro = sum(fraccion_logro(niv, lvl) * cw
+                                for cw, niv, lvl in obtenidos) / tw
                 else:
                     logro = 0.0
                     pendiente = True             # aun sin validar
