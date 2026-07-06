@@ -10,6 +10,7 @@ from app.models.scan import Scan
 from app.models.student import Student
 from app.models.teacher import Teacher
 from app.models.password_reset import PasswordResetToken
+from app.models.en_vivo import SesionEnVivo, ParticipanteVivo, RespuestaVivo  # noqa: F401
 
 connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
 engine = create_engine(settings.database_url, future=True, connect_args=connect_args)

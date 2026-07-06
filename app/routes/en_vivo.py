@@ -1,0 +1,92 @@
+"""
+Router del modo EN VIVO (quiz sincronico estilo Socrative).
+
+Docente (requiere rol profesor/investigador):
+  POST /assessments/{id}/en-vivo            -> abre una sala; retorna codigo + QR
+  POST /en-vivo/{codigo}/avanzar            -> pasa a la siguiente pregunta (o cierra)
+  POST /en-vivo/{codigo}/pausar             -> congela la sala
+  POST /en-vivo/{codigo}/reanudar           -> reactiva la sala
+  POST /en-vivo/{codigo}/cerrar             -> termina la sesion
+  GET  /en-vivo/{codigo}/resultados         -> distribucion por pregunta + ranking (en vivo)
+  GET  /en-vivo/{codigo}/matriz             -> matriz binaria participante x item (psicometria)
+
+Participantes (publico, sin login: los estudiantes se unen con el codigo):
+  POST /en-vivo/{codigo}/unir               -> entra a la sala; retorna participante_id + token
+  POST /en-vivo/{codigo}/responder          -> responde la pregunta activa
+  GET  /en-vivo/{codigo}/estado             -> polling: estado, pregunta_actual, conteos
+
+Gobernanza: en vivo NO se salta la corrección con pauta ya validada; al cerrar, la
+matriz alimenta la misma psicometría (Rasch/KR-20), sin silos.
+"""
+from uuid import UUID
+
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from app.api.deps import get_db, req_profesor
+from app.services import en_vivo_service as ev
+
+router = APIRouter(tags=["en-vivo"])
+
+
+def _sesion_dict(s) -> dict:
+    return {"codigo": s.codigo, "estado": s.estado, "pregunta_actual": s.pregunta_actual,
+            "n_preguntas": s.n_preguntas}
+
+
+# ── docente ──────────────────────────────────────────────────────────────────────────
+@router.post("/assessments/{assessment_id}/en-vivo", dependencies=[Depends(req_profesor)])
+def crear_sesion(assessment_id: UUID, payload: dict | None = None,
+                 db: Session = Depends(get_db)):
+    version = (payload or {}).get("version", "A")
+    s = ev.crear_sesion(db, assessment_id, version=version)
+    join_url = f"/en-vivo/{s.codigo}"
+    return {**_sesion_dict(s), "join_url": join_url, "qr": ev.qr_data_url(s.codigo)}
+
+
+@router.post("/en-vivo/{codigo}/avanzar", dependencies=[Depends(req_profesor)])
+def avanzar(codigo: str, db: Session = Depends(get_db)):
+    return _sesion_dict(ev.avanzar(db, codigo))
+
+
+@router.post("/en-vivo/{codigo}/pausar", dependencies=[Depends(req_profesor)])
+def pausar(codigo: str, db: Session = Depends(get_db)):
+    return _sesion_dict(ev.pausar(db, codigo))
+
+
+@router.post("/en-vivo/{codigo}/reanudar", dependencies=[Depends(req_profesor)])
+def reanudar(codigo: str, db: Session = Depends(get_db)):
+    return _sesion_dict(ev.reanudar(db, codigo))
+
+
+@router.post("/en-vivo/{codigo}/cerrar", dependencies=[Depends(req_profesor)])
+def cerrar(codigo: str, db: Session = Depends(get_db)):
+    return _sesion_dict(ev.cerrar(db, codigo))
+
+
+@router.get("/en-vivo/{codigo}/resultados", dependencies=[Depends(req_profesor)])
+def resultados(codigo: str, db: Session = Depends(get_db)):
+    return ev.resultados(db, codigo)
+
+
+@router.get("/en-vivo/{codigo}/matriz", dependencies=[Depends(req_profesor)])
+def matriz(codigo: str, db: Session = Depends(get_db)):
+    return ev.matriz_binaria(db, codigo)
+
+
+# ── participantes (publico) ──────────────────────────────────────────────────────────
+@router.post("/en-vivo/{codigo}/unir")
+def unir(codigo: str, payload: dict, db: Session = Depends(get_db)):
+    p = ev.unir(db, codigo, payload.get("alias", ""), payload.get("student_id"))
+    return {"participante_id": str(p.id), "token": p.token, "alias": p.alias}
+
+
+@router.post("/en-vivo/{codigo}/responder")
+def responder(codigo: str, payload: dict, db: Session = Depends(get_db)):
+    return ev.responder(db, codigo, payload.get("participante_id"),
+                        payload.get("token", ""), payload.get("respuesta", ""))
+
+
+@router.get("/en-vivo/{codigo}/estado")
+def estado(codigo: str, db: Session = Depends(get_db)):
+    return ev.estado(db, codigo)
