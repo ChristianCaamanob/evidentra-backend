@@ -1,3 +1,4 @@
+from decimal import Decimal, ROUND_HALF_UP
 from sqlalchemy.orm import Session
 from app.core.errors import conflict, not_found
 from app.repositories.answer_key_repo import AnswerKeyRepository
@@ -11,106 +12,192 @@ scan_repo = ScanRepository()
 #  ESCALAS DE CALIFICACIÓN INTERNACIONALES
 # ══════════════════════════════════════════════════════
 
+# El registro es la ÚNICA fuente de verdad: cada escala describe su metadata Y su
+# regla de conversion ("compute"). El invariante es SIEMPRE el % de logro; la
+# exigencia y la escala son solo renderizado (ver conversor "Escala universal").
+#
+#   compute.kind = "linear"  -> nota interpolada por tramos desde la exigencia.
+#       better="high": la nota SUBE con el logro; points = (piso, aprueba, techo).
+#       better="low" : la nota BAJA con el logro (Alemania); points = (optimo, aprueba, reprueba).
+#   compute.kind = "band"    -> letra por bandas nacionales fijas (referencia).
+#   compute.kind = "percentage" -> porcentaje directo.
 GRADING_SCALES = {
+    # ── Escalas lineales: la aprobacion se mueve con la exigencia ──────────────
     "chile_1_7": {
-        "name": "Escala chilena 1.0 – 7.0",
-        "country": "Chile",
-        "type": "numeric",
-        "min": 1.0, "max": 7.0, "passing": 4.0,
-        "description": "Escala nacional chilena. Nota mínima aprobación 4.0."
+        "name": "Escala chilena 1.0 – 7.0", "country": "Chile", "region": "CL",
+        "type": "numeric", "min": 1.0, "max": 7.0, "passing": 4.0,
+        "compute": {"kind": "linear", "better": "high", "points": (1.0, 4.0, 7.0), "decimals": 1},
+        "description": "Escala nacional chilena. Nota minima de aprobacion 4.0.",
     },
-    "usa_letter": {
-        "name": "Escala estadounidense A–F",
-        "country": "Estados Unidos",
-        "type": "letter",
-        "description": "A+ A A- B+ B B- C+ C C- D F"
+    "mexico_10": {
+        "name": "Escala mexicana 0 – 10", "country": "México", "region": "MX",
+        "type": "numeric", "min": 0.0, "max": 10.0, "passing": 6.0,
+        "compute": {"kind": "linear", "better": "high", "points": (0.0, 6.0, 10.0), "decimals": 1},
+        "description": "Escala 0-10 usada en Mexico. Aprobacion 6.0.",
+    },
+    "colombia_5": {
+        "name": "Escala colombiana 0 – 5", "country": "Colombia", "region": "CO",
+        "type": "numeric", "min": 0.0, "max": 5.0, "passing": 3.0,
+        "compute": {"kind": "linear", "better": "high", "points": (0.0, 3.0, 5.0), "decimals": 1},
+        "description": "Escala 0-5 usada en Colombia. Aprobacion 3.0.",
+    },
+    "brasil_10": {
+        "name": "Escala brasileña 0 – 10", "country": "Brasil", "region": "BR",
+        "type": "numeric", "min": 0.0, "max": 10.0, "passing": 6.0,
+        "compute": {"kind": "linear", "better": "high", "points": (0.0, 6.0, 10.0), "decimals": 1},
+        "description": "Escala 0-10 usada en Brasil. Aprobacion habitual 6.0.",
+    },
+    "espana_10": {
+        "name": "Escala española 0 – 10", "country": "España", "region": "ES",
+        "type": "numeric", "min": 0.0, "max": 10.0, "passing": 5.0,
+        "compute": {"kind": "linear", "better": "high", "points": (0.0, 5.0, 10.0), "decimals": 1},
+        "description": "Escala 0-10 usada en Espana. Aprobacion 5.0.",
+    },
+    "francia_20": {
+        "name": "Escala francesa 0 – 20", "country": "Francia", "region": "FR",
+        "type": "numeric", "min": 0.0, "max": 20.0, "passing": 10.0,
+        "compute": {"kind": "linear", "better": "high", "points": (0.0, 10.0, 20.0), "decimals": 1},
+        "description": "Echelle 0-20 usada en Francia. Aprobacion 10.0.",
+    },
+    "alemania_5": {
+        "name": "Escala alemana 1 – 5 (invertida)", "country": "Alemania", "region": "DE",
+        "type": "numeric", "min": 1.0, "max": 5.0, "passing": 4.0,
+        # 1,0 es lo optimo; 4,0 es la peor nota que aprueba; 5,0 reprueba.
+        "compute": {"kind": "linear", "better": "low", "points": (1.0, 4.0, 5.0), "decimals": 1},
+        "description": "Escala 1-5 alemana. 1,0 optimo, 4,0 aprueba, 5,0 reprueba.",
     },
     "europe_10": {
-        "name": "Escala europea 0 – 10",
-        "country": "Europa (general)",
-        "type": "numeric",
-        "min": 0.0, "max": 10.0, "passing": 5.0,
-        "description": "Escala 0-10 usada en España, Alemania, Francia y otros."
-    },
-    "ib_7": {
-        "name": "Bachillerato Internacional 1 – 7",
-        "country": "Internacional IB",
-        "type": "numeric",
-        "min": 1.0, "max": 7.0, "passing": 4.0,
-        "description": "Escala IB. Aprobación desde 4."
-    },
-    "uk_honours": {
-        "name": "Clasificación Honours UK",
-        "country": "Reino Unido",
-        "type": "classification",
-        "description": "First / 2:1 / 2:2 / Third / Fail"
+        "name": "Escala europea 0 – 10", "country": "Europa (general)", "region": "EU",
+        "type": "numeric", "min": 0.0, "max": 10.0, "passing": 5.0,
+        "compute": {"kind": "linear", "better": "high", "points": (0.0, 5.0, 10.0), "decimals": 1},
+        "description": "Escala 0-10 generica europea. Aprobacion 5.0.",
     },
     "percentage": {
-        "name": "Porcentaje 0 – 100%",
-        "country": "Universal",
-        "type": "numeric",
-        "min": 0.0, "max": 100.0, "passing": 60.0,
-        "description": "Porcentaje directo sin conversión."
+        "name": "Porcentaje 0 – 100%", "country": "Universal", "region": "UN",
+        "type": "numeric", "min": 0.0, "max": 100.0, "passing": 60.0,
+        "compute": {"kind": "percentage"},
+        "description": "Porcentaje directo sin conversion.",
+    },
+    # ── Sistemas de letras: bandas nacionales fijas (referencia) ───────────────
+    "usa_letter": {
+        "name": "Escala estadounidense A–F", "country": "Estados Unidos", "region": "US",
+        "type": "letter",
+        "compute": {"kind": "band", "bands": [
+            (97, "A+"), (93, "A"), (90, "A-"), (87, "B+"), (83, "B"), (80, "B-"),
+            (77, "C+"), (73, "C"), (70, "C-"), (67, "D+"), (60, "D"), (0, "F")]},
+        "description": "A+ A A- B+ B B- C+ C C- D+ D F (bandas fijas).",
+    },
+    "uk_honours": {
+        "name": "Clasificación Honours UK", "country": "Reino Unido", "region": "GB",
+        "type": "classification",
+        "compute": {"kind": "band", "bands": [
+            (70, "First Class"), (60, "Upper Second (2:1)"), (50, "Lower Second (2:2)"),
+            (40, "Third Class"), (0, "Fail")]},
+        "description": "First / 2:1 / 2:2 / Third / Fail (bandas fijas).",
+    },
+    "ects": {
+        "name": "Escala europea ECTS A–F", "country": "Europa (ECTS)", "region": "EU",
+        "type": "letter",
+        "compute": {"kind": "band", "bands": [
+            (90, "A"), (80, "B"), (70, "C"), (60, "D"), (50, "E"), (0, "F")]},
+        "description": "A B C D E F (bandas de referencia ECTS).",
+    },
+    "ib_7": {
+        "name": "Bachillerato Internacional 1 – 7", "country": "Internacional IB", "region": "IB",
+        "type": "letter",
+        "compute": {"kind": "band", "bands": [
+            (97, "7"), (88, "6"), (78, "5"), (67, "4"), (56, "3"), (44, "2"), (0, "1")]},
+        "description": "Escala IB por bandas. Aprobacion desde 4.",
     },
 }
 
 
-def calculate_grade(percentage: float, scale: str, passing_threshold: float = 60.0):
-    """Calcula nota según escala seleccionada. Retorna (grade_value, grade_label, passed)."""
+def _clamp(v: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, v))
+
+
+def _redondear(v: float, dec: int = 1) -> float:
+    """Redondeo estandar medio-arriba (3,95 -> 4,0), no bancario. Predecible en el borde."""
+    cuant = Decimal(1).scaleb(-dec)                 # 10^-dec, p.ej. 0.1 con dec=1
+    return float(Decimal(str(v)).quantize(cuant, rounding=ROUND_HALF_UP))
+
+
+def grade_linear(percentage: float, spec: dict, passing_threshold: float):
+    """Nota lineal de dos tramos, generalizada desde la exigencia.
+
+    Con better='high' la nota interpola piso->aprueba->techo a medida que sube el
+    logro; con better='low' (Alemania) baja optimo<-aprueba<-reprueba. La misma
+    formula que usa Chile (piso=1, aprueba=4, techo=7): un unico motor para todas.
+
+    Gradiente continuo redondeado a 1 decimal (config. por escala). La aprobacion
+    sigue a la NOTA redondeada (un 4,0 aprueba), nunca al % crudo: asi jamas aparece
+    "nota 4,0 pero reprobado". Coincide con la semantica historica de Chile.
+    """
+    a, passing, b = spec["points"]                 # a=piso/optimo, passing=aprueba, b=techo/reprueba
+    dec = spec.get("decimals", 1)
     p = passing_threshold / 100.0
+    frac = percentage / 100.0
+    en_tramo_superior = percentage >= passing_threshold   # solo elige el tramo de la formula
+    top_denom = (1.0 - p) or 1e-9
+    bot_denom = p or 1e-9
+    if spec.get("better", "high") == "high":
+        grade = (passing + (frac - p) / top_denom * (b - passing)) if en_tramo_superior \
+            else (a + frac / bot_denom * (passing - a))
+        grade = _redondear(_clamp(grade, a, b), dec)
+        passed = grade >= passing
+    else:  # 'low' (invertida, Alemania): mejor logro -> nota mas baja
+        grade = (passing - (frac - p) / top_denom * (passing - a)) if en_tramo_superior \
+            else (passing + (1.0 - frac / bot_denom) * (b - passing))
+        grade = _redondear(_clamp(grade, a, b), dec)
+        passed = grade <= passing                  # invertida: mas bajo es mejor
+    return grade, f"{grade:.{dec}f}", passed
 
-    if scale == "chile_1_7":
-        if percentage / 100.0 >= p:
-            grade = 4.0 + 3.0 * (percentage / 100.0 - p) / (1.0 - p)
-        else:
-            grade = 1.0 + 3.0 * (percentage / 100.0) / p
-        grade = round(min(7.0, max(1.0, grade)), 1)
-        return grade, str(grade), grade >= 4.0
 
-    elif scale == "usa_letter":
-        if percentage >= 97: label = "A+"
-        elif percentage >= 93: label = "A"
-        elif percentage >= 90: label = "A-"
-        elif percentage >= 87: label = "B+"
-        elif percentage >= 83: label = "B"
-        elif percentage >= 80: label = "B-"
-        elif percentage >= 77: label = "C+"
-        elif percentage >= 73: label = "C"
-        elif percentage >= 70: label = "C-"
-        elif percentage >= 67: label = "D+"
-        elif percentage >= 60: label = "D"
-        else: label = "F"
-        passed = percentage >= passing_threshold
-        return percentage, label, passed
+def grade_band(percentage: float, spec: dict, passing_threshold: float):
+    """Letra por bandas nacionales fijas. La aprobacion se alinea a la exigencia."""
+    label = spec["bands"][-1][1]
+    for cut, lab in spec["bands"]:
+        if percentage >= cut:
+            label = lab
+            break
+    return percentage, label, percentage >= passing_threshold
 
-    elif scale == "europe_10":
-        grade = round(percentage / 10.0, 1)
-        return grade, str(grade), grade >= (passing_threshold / 10.0)
 
-    elif scale == "ib_7":
-        if percentage >= 97: grade = 7
-        elif percentage >= 88: grade = 6
-        elif percentage >= 78: grade = 5
-        elif percentage >= 67: grade = 4
-        elif percentage >= 56: grade = 3
-        elif percentage >= 44: grade = 2
-        else: grade = 1
-        return float(grade), str(grade), grade >= 4
+def listar_escalas() -> dict:
+    """Metadata publica de las escalas (para /assessments y el conversor)."""
+    return {k: {kk: vv for kk, vv in v.items() if kk != "compute"}
+            for k, v in GRADING_SCALES.items()}
 
-    elif scale == "uk_honours":
-        if percentage >= 70: label = "First Class"
-        elif percentage >= 60: label = "Upper Second (2:1)"
-        elif percentage >= 50: label = "Lower Second (2:2)"
-        elif percentage >= 40: label = "Third Class"
-        else: label = "Fail"
-        passed = percentage >= passing_threshold
-        return percentage, label, passed
 
-    elif scale == "percentage":
-        return percentage, f"{percentage}%", percentage >= passing_threshold
+def convertir_multiescala(percentage: float, passing_threshold: float = 60.0,
+                          escalas: list | None = None) -> dict:
+    """Traduce un MISMO % de logro a varias escalas a la vez (invariante -> renders)."""
+    claves = escalas or list(GRADING_SCALES.keys())
+    salida = {}
+    for k in claves:
+        g, label, passed = calculate_grade(percentage, k, passing_threshold)
+        salida[k] = {"grade": g, "label": label, "passed": passed}
+    return salida
 
-    else:  # fallback chile
-        return calculate_grade(percentage, "chile_1_7", passing_threshold)
+
+def calculate_grade(percentage: float, scale: str, passing_threshold: float = 60.0):
+    """Calcula nota segun la escala del registro. Retorna (grade_value, grade_label, passed).
+
+    Un solo motor: el % de logro es el invariante; la escala solo decide como se
+    renderiza y la exigencia (passing_threshold) donde cae la linea de aprobacion.
+    """
+    spec = GRADING_SCALES.get(scale)
+    if spec is None:                                   # fallback: escala chilena
+        spec = GRADING_SCALES["chile_1_7"]
+    compute = spec["compute"]
+    kind = compute["kind"]
+
+    if kind == "linear":
+        return grade_linear(percentage, compute, passing_threshold)
+    if kind == "band":
+        return grade_band(percentage, compute, passing_threshold)
+    # percentage
+    return percentage, f"{percentage}%", percentage >= passing_threshold
 
 
 # Mantener compatibilidad con código existente

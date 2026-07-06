@@ -156,7 +156,7 @@ def create_assessment(payload: AssessmentIn, db: Session = Depends(get_db)):
 @router.get("/{assessment_id}/config")
 def get_assessment_config(assessment_id: UUID, db: Session = Depends(get_db)):
     from app.models.assessment import Assessment
-    from app.services.result_service import GRADING_SCALES
+    from app.services.result_service import listar_escalas
     a = db.query(Assessment).filter(Assessment.id == assessment_id).first()
     if not a:
         raise HTTPException(status_code=404, detail="Evaluación no encontrada")
@@ -168,7 +168,7 @@ def get_assessment_config(assessment_id: UUID, db: Session = Depends(get_db)):
         "passing_threshold": a.passing_threshold or 60.0,
         "status": a.status,
         "course_id": str(a.course_id),
-        "available_scales": GRADING_SCALES,
+        "available_scales": listar_escalas(),
     }
 
 @router.patch("/{assessment_id}/config", dependencies=[Depends(req_profesor)])
@@ -193,8 +193,8 @@ def update_assessment_config(assessment_id: UUID, payload: dict, db: Session = D
 
 @router.get("/grading-scales/list")
 def list_grading_scales():
-    from app.services.result_service import GRADING_SCALES
-    return GRADING_SCALES
+    from app.services.result_service import listar_escalas
+    return listar_escalas()
 
 
 @router.get("/{assessment_id}/results")
