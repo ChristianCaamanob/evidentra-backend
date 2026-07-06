@@ -15,7 +15,7 @@ import logging
 import traceback
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, UploadFile, File
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, req_profesor, req_investigador
@@ -214,6 +214,35 @@ def activar_version(ak_id: UUID, payload: dict, db: Session = Depends(get_db)):
         raise conflict(str(e))
     except Exception:
         logger.error(f"Error en activar_version {ak_id}: {traceback.format_exc()}")
+        raise
+
+
+@router.post("/answer-key-items/{item_id}/rubrica/importar", dependencies=[Depends(req_profesor)])
+async def importar_rubrica(item_id: UUID, file: UploadFile = File(...), confirmar: bool = False,
+                           db: Session = Depends(get_db)):
+    """
+    Importa una rubrica desde .xlsx a un item. Sin `confirmar` devuelve solo el PREVIEW (no
+    escribe); con `confirmar=true` crea los criterios en el item. El parseo es heuristico: el
+    docente revisa y confirma (G1).
+    """
+    try:
+        from app.services import rubrica_import_service
+        from app.models.answer_key import AnswerKeyItem, RubricCriterion
+        preview = rubrica_import_service.parse_rubrica_xlsx(await file.read())
+        if not confirmar:
+            return {"guardado": False, **preview}
+        item = db.get(AnswerKeyItem, item_id)
+        if not item:
+            raise not_found("Item de pauta no encontrado.")
+        for i, c in enumerate(preview["criterios"]):
+            db.add(RubricCriterion(
+                answer_key_item_id=item_id, name=c["name"][:255], weight=c["weight"],
+                order=i, niveles_json=c["niveles"], ambito=c["ambito"],
+                seccion=(c["seccion"][:120] if c["seccion"] else None)))
+        db.commit()
+        return {"guardado": True, "criterios_creados": len(preview["criterios"]), **preview}
+    except Exception:
+        logger.error(f"Error en importar_rubrica {item_id}: {traceback.format_exc()}")
         raise
 
 
