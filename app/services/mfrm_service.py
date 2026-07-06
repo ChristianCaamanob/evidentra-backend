@@ -40,13 +40,15 @@ def observaciones_desde_registros(registros: list[dict]) -> list[dict]:
     for r in registros:
         persona = r.get("alumno") or r.get("persona") or r.get("respuesta_ref", "?").split("#")[0]
         item = r.get("criterio", "?")
-        if r.get("nivel_ia") in NIVEL_A_CAT:
+        # Nivel canonico (3) si el registro trae la normalizacion de N niveles; si no, el crudo.
+        niv_ia = r.get("nivel_ia_canon") or r.get("nivel_ia")
+        niv_doc = r.get("nivel_docente_canon") or r.get("nivel_docente")
+        if niv_ia in NIVEL_A_CAT:
             obs.append({"persona": persona, "item": item, "evaluador": "IA",
-                        "categoria": NIVEL_A_CAT[r["nivel_ia"]]})
-        nivel_doc = r.get("nivel_docente")
-        if nivel_doc in NIVEL_A_CAT:
+                        "categoria": NIVEL_A_CAT[niv_ia]})
+        if niv_doc in NIVEL_A_CAT:
             obs.append({"persona": persona, "item": item, "evaluador": "docente",
-                        "categoria": NIVEL_A_CAT[nivel_doc]})
+                        "categoria": NIVEL_A_CAT[niv_doc]})
     return obs
 
 

@@ -46,7 +46,7 @@ def matriz_desde_registros(registros: list[dict], usar: str = "nivel_docente") -
     for r in registros:
         al = r.get("alumno") or str(r.get("respuesta_ref", "?")).split("#")[0]
         cr = r.get("criterio", "?")
-        niv = r.get(usar)
+        niv = r.get(f"{usar}_canon") or r.get(usar)   # canonico (N niveles) si viene; si no, crudo
         if niv not in _NIVEL_COD:
             continue
         if al not in alumnos:

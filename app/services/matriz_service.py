@@ -208,6 +208,7 @@ def cargar_registros_validacion(db, assessment_id, min_registros: int = 3) -> li
     (formato 'e:<hash>#<criterio>'), nunca de un identificador real (G2).
     """
     from app.models.validacion import RegistroValidacion
+    from app.services.rubrica_escala_service import nivel_canonico
 
     filas = (db.query(RegistroValidacion)
              .filter(RegistroValidacion.assessment_id == str(assessment_id))
@@ -216,12 +217,26 @@ def cargar_registros_validacion(db, assessment_id, min_registros: int = 3) -> li
         raise conflict(
             f"Aun no hay suficientes validaciones docentes para esta evaluacion "
             f"(hay {len(filas)}; se requieren >= {min_registros}). Corre F3 primero.")
+
+    # Escala propia de cada criterio -> para normalizar niveles arbitrarios (p. ej.
+    # Excelente/Bueno/Regular/Deficiente) a la escala canonica de 3 que consumen R y MFRM.
+    niveles_por_crit = {}
+    ak = answer_key_repo.get_by_assessment_id(db, assessment_id)
+    if ak:
+        for it in ak.items:
+            for c in it.rubric_criteria:
+                niveles_por_crit.setdefault(c.name, c.niveles_json)
+
     out = []
     for r in filas:
         alumno = str(r.respuesta_ref).split("#")[0]
+        niv = niveles_por_crit.get(r.criterio)
         out.append({"alumno": alumno, "criterio": r.criterio,
                     "nivel_ia": r.nivel_ia, "confianza_ia": r.confianza_ia,
                     "nivel_docente": r.nivel_docente, "accion": r.accion,
+                    # canonicos (3 niveles) para la psicometria; los crudos quedan para F4.
+                    "nivel_ia_canon": nivel_canonico(niv, r.nivel_ia),
+                    "nivel_docente_canon": nivel_canonico(niv, r.nivel_docente),
                     "comentario": r.comentario, "respuesta_ref": r.respuesta_ref})
     return out
 
