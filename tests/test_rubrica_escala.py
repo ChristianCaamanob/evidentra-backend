@@ -85,7 +85,7 @@ def _sembrar(engine):
                                correct_answer="", question_type="open_response", weight=factor)
             s.add(it); s.commit(); s.refresh(it)
             s.add(RubricCriterion(answer_key_item_id=it.id, name=crit, weight=1.0, order=0,
-                                  niveles_json=NIVELES, seccion=seccion, ambito="grupal"))
+                                  niveles_json=NIVELES, seccion=seccion))   # ambito individual (default)
         s.commit()
         for nombre in ("Ana", "Beto"):
             st = Student(course_id=course.id, rut=f"rut-{nombre}", nombres=nombre)

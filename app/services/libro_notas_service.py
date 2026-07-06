@@ -43,7 +43,7 @@ def libro_notas(db, assessment_id, escala: str = "chile_1_7", exigencia: float =
         items_meta[it.question_number] = {"desarrollo": es_desarrollo, "weight": float(it.weight)}
         if es_desarrollo:
             dev_criterios[it.question_number] = [
-                (c.name, float(c.weight), c.niveles_json) for c in criterios]
+                (c.name, float(c.weight), c.niveles_json, c.ambito) for c in criterios]
 
     if not items_meta:
         raise conflict("La evaluacion no tiene items validos.")
@@ -60,28 +60,46 @@ def libro_notas(db, assessment_id, escala: str = "chile_1_7", exigencia: float =
     # hoja); en 'escrita' es cada escaneo. Ambos comparten el resto del calculo.
     from app.models.assessment import Assessment, MODALIDAD_ORAL
     from app.models.student import Student
+    from app.models.grupo import Grupo
 
     assessment = db.get(Assessment, assessment_id)
     oral = assessment is not None and assessment.modalidad == MODALIDAD_ORAL
+
+    # Grupo de cada estudiante -> seudonimo del grupo (fuente de los criterios grupales).
+    grupo_pseudo_por_est: dict[str, str] = {}
+    for g in db.query(Grupo).filter(Grupo.assessment_id == str(assessment_id)).all():
+        for integ in g.integrantes:
+            grupo_pseudo_por_est[integ.student_id] = _pseudo(g.id)
+
     if oral:
         estudiantes = db.query(Student).filter(Student.course_id == assessment.course_id).all()
-        sujetos = [(_pseudo(st.id), None) for st in estudiantes]
+        sujetos = [(_pseudo(st.id), None, str(st.id)) for st in estudiantes]
     else:
-        sujetos = [(_pseudo(sc.id), sc) for sc in scan_repo.list_by_assessment(db, assessment_id)
+        rut_a_id = ({st.rut: str(st.id) for st in
+                     db.query(Student).filter(Student.course_id == assessment.course_id).all()}
+                    if assessment else {})
+        sujetos = [(_pseudo(sc.id), sc, rut_a_id.get(sc.student_identifier))
+                   for sc in scan_repo.list_by_assessment(db, assessment_id)
                    if not getattr(sc, "requires_review", False)]
 
     filas = []
-    for pseudo, scan in sujetos:
+    for pseudo, scan, student_id in sujetos:
         clave = por_version.get((scan.detected_version or "A").upper()) if scan else None
         respuestas = (scan.raw_ocr_payload_json or {}).get("answers", []) if scan else []
-        sv = validado.get(pseudo, {})
+        sv = validado.get(pseudo, {})                            # registros propios (individual)
+        grupo_pseudo = grupo_pseudo_por_est.get(student_id)
+        sv_grupo = validado.get(grupo_pseudo, {}) if grupo_pseudo else {}   # registros del grupo
         contrib = 0.0
         pendiente = False
         for q, meta in items_meta.items():
             w = meta["weight"]
             if meta["desarrollo"]:
-                crits = dev_criterios.get(q, [])          # [(name, weight, niveles)]
-                obtenidos = [(cw, niv, sv[cn]) for cn, cw, niv in crits if cn in sv]
+                crits = dev_criterios.get(q, [])          # [(name, weight, niveles, ambito)]
+                obtenidos = []
+                for cn, cw, niv, amb in crits:
+                    fuente = sv_grupo if amb == "grupal" else sv   # grupal -> registro del grupo
+                    if cn in fuente:
+                        obtenidos.append((cw, niv, fuente[cn]))
                 if obtenidos:
                     tw = sum(cw for cw, _, _ in obtenidos) or 1.0
                     logro = sum(fraccion_logro(niv, lvl) * cw

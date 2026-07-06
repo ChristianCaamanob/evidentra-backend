@@ -34,29 +34,7 @@ router = APIRouter(tags=["desarrollo"])
 logger = logging.getLogger("evalys")
 
 
-def _persistir_validaciones(db, subject_pseudo: str, assessment_id, payload: dict):
-    """Persiste un RegistroValidacion por criterio (trazabilidad inmutable, G5). Comun a la
-    validacion por escaneo (escrita) y por estudiante (oral). Si no hay nivel_ia (correccion
-    directa sin IA), se toma el nivel del docente -> accion 'aprobado'."""
-    docente = payload.get("docente") or "docente"
-    version_hash = payload.get("rubrica_version_hash")
-    registros = []
-    for c in payload.get("criterios", []):
-        nivel_doc = c["nivel_docente"]
-        nivel_ia = c.get("nivel_ia", nivel_doc)
-        reg = validacion_service.registrar_validacion(
-            ref=f"{subject_pseudo}#{c['criterio']}", criterio=c["criterio"],
-            nivel_ia=nivel_ia, confianza=c.get("confianza_ia", 1.0),
-            nivel_docente=nivel_doc, docente=docente, comentario=c.get("comentario"))
-        db.add(RegistroValidacion(
-            respuesta_ref=reg["respuesta_ref"], criterio=reg["criterio"],
-            nivel_ia=reg["nivel_ia"], confianza_ia=reg["confianza_ia"],
-            nivel_docente=reg["nivel_docente"], accion=reg["accion"],
-            comentario=reg["comentario"], docente=reg["docente"],
-            assessment_id=str(assessment_id), rubrica_version_hash=version_hash))
-        registros.append(reg)
-    db.commit()
-    return registros, version_hash
+_persistir_validaciones = validacion_service.persistir_validaciones
 
 
 @router.post("/results/{scan_id}/validar", dependencies=[Depends(req_profesor)])

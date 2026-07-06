@@ -53,5 +53,7 @@ from app.routes.desarrollo import router as desarrollo_router
 api_router.include_router(desarrollo_router)
 from app.routes.profesor import router as profesor_router
 api_router.include_router(profesor_router)
+from app.routes.grupos import router as grupos_router
+api_router.include_router(grupos_router)
 from app.routes.auth import router as auth_router
 api_router.include_router(auth_router)
