@@ -23,20 +23,93 @@ engine = create_engine(_db_url, future=True, connect_args=connect_args, pool_pre
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
 
 
+def _seed_cohorte_psicometria(db) -> None:
+    """Cohorte demo para exhibir la psicometria (Rasch/DINA/DIF/dimensionalidad/invarianza)
+    con datos reales. Idempotente (marcada por Course.code == 'DEMO-PSICO'). ~40 estudiantes,
+    12 items etiquetados C3 (3 RA), respuestas generadas por un modelo IRT logistico con
+    semilla fija. Todos los estudiantes consienten el analisis de equidad (demo)."""
+    import math
+    import random
+    from app.models.answer_key import AnswerKey, AnswerKeyItem
+    from app.models.student import Student
+
+    if db.query(Course).filter(Course.code == "DEMO-PSICO").first():
+        return
+
+    course = Course(name="Demo · Psicometría", code="DEMO-PSICO", status="active",
+                    program_document_url=None, has_learning_structure=True,
+                    grading_scale="chile_1_7", passing_threshold=60.0,
+                    base_score_type="raw_points")
+    db.add(course); db.flush()
+
+    k, n = 12, 40
+    assessment = Assessment(course_id=course.id, name="Ensayo diagnóstico", status="active",
+                            assessment_document_url=None, has_versions=False, version_count=1,
+                            has_answer_key=True, briefing_level="initial",
+                            grading_scale="chile_1_7", passing_threshold=60.0)
+    db.add(assessment); db.flush()
+
+    ak = AnswerKey(assessment_id=assessment.id, status="valid", is_valid=True,
+                   version_coverage_ok=True, annulled_items_count=0,
+                   invalid_weight_count=0, invalid_partial_rule_count=0)
+    db.add(ak); db.flush()
+
+    letras = ["A", "B", "C", "D"]
+    correctas = {}
+    for q in range(1, k + 1):
+        c = letras[(q * 3) % 4]
+        correctas[q] = c
+        db.add(AnswerKeyItem(answer_key_id=ak.id, question_number=q, version="A",
+                             correct_answer=c, weight=1.0, is_annulled=False,
+                             partial_credit_rule_json=None,
+                             learning_outcome_id=f"RA{(q % 3) + 1}", bloom_level="aplicar"))
+    db.flush()
+
+    rng = random.Random(42)
+    b = [-1.5 + 3.0 * (j / (k - 1)) for j in range(k)]     # dificultad por item
+    for i in range(n):
+        theta = rng.gauss(0, 1)                            # habilidad del estudiante
+        rut = f"DEMO-{i+1:03d}"
+        db.add(Student(course_id=course.id, rut=rut, nombres=f"Estudiante {i+1}",
+                       apellido_paterno="Demo", sexo=("F" if i % 2 == 0 else "M"),
+                       dependencia=("municipal" if i % 3 == 0 else "particular"),
+                       consiente_equidad=True))
+        answers = []
+        for j in range(k):
+            p = 1.0 / (1.0 + math.exp(-(theta - b[j])))
+            if rng.random() < p:
+                answers.append(correctas[j + 1])
+            else:
+                answers.append(rng.choice([l for l in letras if l != correctas[j + 1]]))
+        db.add(Scan(assessment_id=assessment.id, student_identifier=rut, status="scored",
+                    detected_version="A", requires_review=False,
+                    raw_ocr_payload_json={"answers": answers}))
+    db.commit()
+
+
 def create_db_and_seed() -> None:
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
-        # Usuario demo para el login (idempotente): permite mostrar el producto
-        # funcionando sin datos reales. Rol 'profesor' (el auto-registro estandar).
+        # Usuarios demo para el login (idempotentes): permiten mostrar el producto
+        # funcionando. 'profesor' es el auto-registro estandar; 'investigador' accede al
+        # modulo de psicometria (RBAC).
         from app.services.auth_service import hash_password
         if not db.query(Teacher).filter(Teacher.email == "docente@evalys.demo").first():
             db.add(Teacher(email="docente@evalys.demo",
                            hashed_password=hash_password("evalys2026"),
                            name="Docente Demo", rol="profesor"))
             db.commit()
+        if not db.query(Teacher).filter(Teacher.email == "investigador@evalys.demo").first():
+            db.add(Teacher(email="investigador@evalys.demo",
+                           hashed_password=hash_password("evalys2026"),
+                           name="Investigadora Demo", rol="investigador"))
+            db.commit()
 
-        course = db.query(Course).first()
+        # Cohorte demo con psicometria real (idempotente por su propia marca).
+        _seed_cohorte_psicometria(db)
+
+        course = db.query(Course).filter(Course.code != "DEMO-PSICO").first()
         if course:
             return
 
