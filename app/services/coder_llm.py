@@ -126,7 +126,11 @@ def _llamar_anthropic(modelo: str = MODELO_DEFECTO):
         msg = cliente.messages.create(
             model=modelo, max_tokens=400, system=system,
             messages=[{"role": "user", "content": user}])
-        return msg.content[0].text
+        # Toma el primer bloque de texto (robusto: no asume que content[0] sea texto).
+        for bloque in msg.content:
+            if getattr(bloque, "type", None) == "text":
+                return bloque.text
+        return getattr(msg.content[0], "text", "") if msg.content else ""
     return _llamar
 
 
