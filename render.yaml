@@ -13,3 +13,7 @@ services:
         value: "3.11.9"
       - key: SECRET_KEY       # firma de los JWT — Render genera uno seguro
         generateValue: true
+      - key: ANTHROPIC_API_KEY   # activa el LLM real de F2 (pre-calificación). Pega tu clave
+        sync: false              # en el dashboard; si falta, F2 usa el grader determinista.
+      - key: EVALYS_CODER_MODEL  # (opcional) modelo del corrector; por defecto claude-sonnet-5
+        sync: false
