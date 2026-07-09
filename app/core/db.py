@@ -87,6 +87,54 @@ def _seed_cohorte_psicometria(db) -> None:
     db.commit()
 
 
+def _seed_desarrollo(db) -> None:
+    """Pregunta de desarrollo (open_response) con rúbrica de 2 criterios y anclas, para
+    exhibir la pre-calificación con IA (F2) y la validación docente (F3). Idempotente
+    (marcada por Course.code == 'DEMO-DESA'). En un curso aparte para no tocar la
+    psicometría de alternativas."""
+    from app.models.answer_key import (AnswerKey, AnswerKeyItem, RubricCriterion,
+                                       RubricAncla, QUESTION_TYPE_OPEN_RESPONSE)
+
+    if db.query(Course).filter(Course.code == "DEMO-DESA").first():
+        return
+
+    course = Course(name="Demo · Desarrollo", code="DEMO-DESA", status="active",
+                    program_document_url=None, has_learning_structure=True,
+                    grading_scale="chile_1_7", passing_threshold=60.0,
+                    base_score_type="raw_points")
+    db.add(course); db.flush()
+    a = Assessment(course_id=course.id, name="Ensayo · Sistema linfático", status="active",
+                   assessment_document_url=None, has_versions=False, version_count=1,
+                   has_answer_key=True, briefing_level="initial",
+                   grading_scale="chile_1_7", passing_threshold=60.0)
+    db.add(a); db.flush()
+    ak = AnswerKey(assessment_id=a.id, status="valid", is_valid=True, version_coverage_ok=True,
+                   annulled_items_count=0, invalid_weight_count=0, invalid_partial_rule_count=0)
+    db.add(ak); db.flush()
+    item = AnswerKeyItem(answer_key_id=ak.id, question_number=1, version="A", correct_answer="",
+                         weight=1.0, is_annulled=False, question_type=QUESTION_TYPE_OPEN_RESPONSE,
+                         learning_outcome_id="RA1", bloom_level="comprender")
+    db.add(item); db.flush()
+
+    c1 = RubricCriterion(answer_key_item_id=item.id, name="Función de drenaje y transporte de linfa",
+                         weight=1.0, order=0, nivel_exigencia="tolerante", umbral_confianza=0.7,
+                         sinonimos_json=["líquido intersticial", "drenaje", "transporte"])
+    db.add(c1); db.flush()
+    for t, n, o in [("El sistema linfático drena el líquido intersticial y lo devuelve a la sangre, transportando linfa.", "logrado", 0),
+                    ("Transporta líquido por el cuerpo.", "parcial", 1),
+                    ("Bombea sangre al corazón.", "no_logrado", 2)]:
+        db.add(RubricAncla(rubric_criterion_id=c1.id, texto=t, nivel=n, order=o))
+    c2 = RubricCriterion(answer_key_item_id=item.id, name="Relación con la respuesta inmune",
+                         weight=1.0, order=1, nivel_exigencia="estricto", umbral_confianza=0.7,
+                         sinonimos_json=["linfocitos", "ganglios linfáticos", "inmunidad"])
+    db.add(c2); db.flush()
+    for t, n, o in [("Los ganglios linfáticos filtran patógenos y activan linfocitos, participando en la respuesta inmune.", "logrado", 0),
+                    ("Ayuda a defender el cuerpo de enfermedades.", "parcial", 1),
+                    ("Solo transporta líquidos.", "no_logrado", 2)]:
+        db.add(RubricAncla(rubric_criterion_id=c2.id, texto=t, nivel=n, order=o))
+    db.commit()
+
+
 def create_db_and_seed() -> None:
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
@@ -106,10 +154,11 @@ def create_db_and_seed() -> None:
                            name="Investigadora Demo", rol="investigador"))
             db.commit()
 
-        # Cohorte demo con psicometria real (idempotente por su propia marca).
+        # Cohortes demo (idempotentes por su propia marca).
         _seed_cohorte_psicometria(db)
+        _seed_desarrollo(db)
 
-        course = db.query(Course).filter(Course.code != "DEMO-PSICO").first()
+        course = db.query(Course).filter(Course.code.notin_(["DEMO-PSICO", "DEMO-DESA"])).first()
         if course:
             return
 
