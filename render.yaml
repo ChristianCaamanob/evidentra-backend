@@ -1,0 +1,15 @@
+# Blueprint de Render — despliegue un-clic del backend de Evalys (demo/piloto).
+# En Render: New + → Blueprint → conecta el repo evidentra-backend → Apply.
+services:
+  - type: web
+    name: evidentra-backend
+    runtime: python
+    plan: free            # si la memoria queda corta (scipy/statsmodels), subir a 'starter'
+    branch: evalys-loop
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: SECRET_KEY       # firma de los JWT — Render genera uno seguro
+        generateValue: true
