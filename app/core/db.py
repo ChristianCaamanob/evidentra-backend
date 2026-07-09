@@ -11,6 +11,7 @@ from app.models.student import Student
 from app.models.teacher import Teacher
 from app.models.password_reset import PasswordResetToken
 from app.models.en_vivo import SesionEnVivo, ParticipanteVivo, RespuestaVivo  # noqa: F401
+from app.models.suscripcion import Suscripcion, EventoPago  # noqa: F401
 
 connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
 engine = create_engine(settings.database_url, future=True, connect_args=connect_args)
@@ -21,6 +22,15 @@ def create_db_and_seed() -> None:
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
+        # Usuario demo para el login (idempotente): permite mostrar el producto
+        # funcionando sin datos reales. Rol 'profesor' (el auto-registro estandar).
+        from app.services.auth_service import hash_password
+        if not db.query(Teacher).filter(Teacher.email == "docente@evalys.demo").first():
+            db.add(Teacher(email="docente@evalys.demo",
+                           hashed_password=hash_password("evalys2026"),
+                           name="Docente Demo", rol="profesor"))
+            db.commit()
+
         course = db.query(Course).first()
         if course:
             return
