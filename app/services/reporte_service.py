@@ -44,7 +44,8 @@ def _prompt(hechos: dict) -> str:
 
 
 def redactar(hechos: dict) -> dict:
-    """Redacta Metodos+Resultados con el LLM; cae a plantilla determinista si no hay clave."""
+    """Redacta Metodos+Resultados con el LLM; cae a plantilla determinista si no hay clave/falla."""
+    err = None
     if os.environ.get("ANTHROPIC_API_KEY"):
         try:
             import anthropic
@@ -63,8 +64,14 @@ def redactar(hechos: dict) -> dict:
                     "resultados": str(data.get("resultados", "")).strip(),
                     "motor": "IA (" + MODELO_REPORTE + ")"}
         except Exception as e:
-            logger.warning("Reporte IA cayo a plantilla: %s", str(e)[:160])
-    return {**_plantilla(hechos), "motor": "plantilla deterministica"}
+            err = f"{type(e).__name__}: {e}"[:200]
+            logger.warning("Reporte IA cayo a plantilla: %s", err)
+    else:
+        err = "sin ANTHROPIC_API_KEY en el entorno"
+    out = {**_plantilla(hechos), "motor": "plantilla deterministica"}
+    if err:
+        out["motor_detalle"] = err
+    return out
 
 
 def _plantilla(h: dict) -> dict:
