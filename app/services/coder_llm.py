@@ -24,7 +24,10 @@ solo propone un nivel + evidencia + justificacion que el docente validara (F3).
 from __future__ import annotations
 
 import json
+import logging
 import os
+
+logger = logging.getLogger("evalys")
 
 from app.models.answer_key import (
     EXIGENCIA_ESTRICTO, EXIGENCIA_TOLERANTE, EXIGENCIA_FLEXIBLE,
@@ -146,15 +149,24 @@ def coder_llm(llamar=None, modelo: str = MODELO_DEFECTO):
 
 
 def coder_llm_seguro(llamar=None, modelo: str = MODELO_DEFECTO):
-    """coder_llm con red de seguridad: ante cualquier error cae al grader por anclas (F2)."""
+    """coder_llm con red de seguridad: ante cualquier error cae al grader por anclas (F2).
+    Registra en `_coder.estado` cuántas veces usó el LLM vs el fallback y el último error,
+    para que la ruta reporte el motor REAL (no solo 'hay key => llm')."""
     base = coder_llm(llamar, modelo)
+    estado = {"llm_ok": 0, "fallback": 0, "ultimo_error": None}
 
     def _coder(respuesta: str, criterio: dict) -> dict:
         try:
-            return base(respuesta, criterio)
-        except Exception:
+            r = base(respuesta, criterio)
+            estado["llm_ok"] += 1
+            return r
+        except Exception as e:                     # sin key, sin saldo, timeout, JSON invalido…
+            estado["fallback"] += 1
+            estado["ultimo_error"] = f"{type(e).__name__}: {e}"[:200]
+            logger.warning("F2 seam LLM cayó al determinista: %s", estado["ultimo_error"])
             return precalificacion_service._grade_por_anclas(respuesta, criterio)
 
+    _coder.estado = estado
     return _coder
 
 

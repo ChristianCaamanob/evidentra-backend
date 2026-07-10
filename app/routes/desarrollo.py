@@ -130,7 +130,18 @@ def precalificar(item_id: UUID, payload: dict, db: Session = Depends(get_db)):
         coder = coder_llm.coder_por_defecto()      # LLM si hay API key; si no, grader determinista
         rep = precalificacion_service.precalificar_respuesta(
             payload.get("respuesta", ""), criterios, coder=coder, norma_terminologica=norma)
-        rep["motor"] = "llm" if coder else "deterministico"
+        # Motor REAL: 'llm' solo si el modelo respondió; si cayó al determinista lo decimos.
+        est = getattr(coder, "estado", None) if coder else None
+        if coder is None:
+            rep["motor"] = "deterministico"
+        elif est and est["llm_ok"] > 0 and est["fallback"] == 0:
+            rep["motor"] = "llm"
+        elif est and est["llm_ok"] > 0:
+            rep["motor"] = "mixto"
+        else:
+            rep["motor"] = "llm_fallback_deterministico"
+            if est and est.get("ultimo_error"):
+                rep["motor_detalle"] = est["ultimo_error"]
         rep["rubrica_version_hash"] = matriz_service.version_activa_hash(
             db, item.answer_key_id, criterios)
         return rep
