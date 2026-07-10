@@ -27,6 +27,7 @@ from app.services import dif_service
 from app.services import invarianza_service
 from app.services import estadistica_service
 from app.services import efectos_service
+from app.services import cfa_service
 
 # Todo el modulo Investigador exige rol investigador (o creador). El director NO accede a
 # este modulo de investigacion; su alcance es ver/exportar datos de estudiante y profesor.
@@ -116,6 +117,37 @@ def _meta_equidad(d: dict) -> dict:
             "gobernanza": "Solo estudiantes que CONSINTIERON el analisis de equidad (G4); "
                           "datos seudonimizados (G2); grupos con minimo para evitar "
                           "reidentificacion. No altera notas (G1)."}
+
+
+@router.get("/{assessment_id}/estructura/cfa")
+def estructura_cfa(assessment_id: UUID, db: Session = Depends(get_db)):
+    """Fase 4 - CFA de 1 factor: indices de ajuste (chi2/gl, CFI, TLI, RMSEA, SRMR),
+    cargas estandarizadas, AVE y fiabilidad compuesta."""
+    try:
+        datos = matriz_service.cargar_matriz_respuestas(db, assessment_id)
+        rep = cfa_service.ajuste_cfa(datos["X"])
+        for it, num in zip(rep["cargas"], datos["items"]):
+            it["pregunta"] = num
+        rep["_meta"] = _meta(datos)
+        return rep
+    except Exception:
+        logger.error(f"Error en estructura_cfa {assessment_id}: {traceback.format_exc()}")
+        raise
+
+
+@router.get("/{assessment_id}/estructura/invarianza-cfa")
+def estructura_invarianza_cfa(assessment_id: UUID, grupo: str = Query(..., pattern="^(sexo|dependencia)$"),
+                              db: Session = Depends(get_db)):
+    """Fase 5 - Invarianza configural entre 2 grupos consentidos: CFA por grupo + congruencia
+    de Tucker de las cargas."""
+    try:
+        d = matriz_service.cargar_matriz_con_grupo(db, assessment_id, grupo)
+        rep = cfa_service.invarianza_configural(np.asarray(d["X"], dtype=float), d["grupo"])
+        rep["_meta"] = _meta_equidad(d)
+        return rep
+    except Exception:
+        logger.error(f"Error en estructura_invarianza_cfa {assessment_id}: {traceback.format_exc()}")
+        raise
 
 
 @router.get("/{assessment_id}/efectos")
