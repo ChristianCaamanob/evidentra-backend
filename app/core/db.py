@@ -42,7 +42,7 @@ def _seed_cohorte_psicometria(db) -> None:
                     base_score_type="raw_points")
     db.add(course); db.flush()
 
-    k, n = 12, 40
+    k, n = 12, 250      # n adecuado para psicometria estable (CFA/DINA/DIF requieren muestra)
     assessment = Assessment(course_id=course.id, name="Ensayo diagnóstico", status="active",
                             assessment_document_url=None, has_versions=False, version_count=1,
                             has_answer_key=True, briefing_level="initial",

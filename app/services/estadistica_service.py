@@ -18,8 +18,49 @@ from __future__ import annotations
 
 import numpy as np
 from scipy import stats
+from scipy.stats import norm, multivariate_normal
+from scipy.optimize import brentq
 
 from app.core.errors import conflict
+
+
+# ─────────── Correlación tetracórica (rigor para ítems dicotómicos) ───────────
+
+def tetrachoric_corr(x, y) -> float:
+    """Correlación tetracorica EXACTA: r del modelo normal bivariado latente que reproduce
+    la tabla 2x2 observada (root-find sobre la CDF normal bivariada). Es el metodo correcto
+    para items dicotomicos; Pearson/phi subestima la asociacion latente."""
+    x = np.asarray(x, float); y = np.asarray(y, float)
+    m = ~(np.isnan(x) | np.isnan(y)); x = x[m]; y = y[m]
+    if x.size < 3:
+        return np.nan
+    p1 = np.mean(x > 0.5); p2 = np.mean(y > 0.5)
+    if p1 in (0.0, 1.0) or p2 in (0.0, 1.0):
+        return np.nan
+    p00 = np.mean((x < 0.5) & (y < 0.5))
+    tx = norm.ppf(1 - p1); ty = norm.ppf(1 - p2)
+
+    def cell00(r):
+        return multivariate_normal(mean=[0, 0], cov=[[1, r], [r, 1]]).cdf([tx, ty])
+
+    lo, hi = cell00(-0.999), cell00(0.999)
+    if not (min(lo, hi) <= p00 <= max(lo, hi)):
+        return float(np.clip(np.corrcoef(x, y)[0, 1], -0.99, 0.99))
+    try:
+        return float(brentq(lambda r: cell00(r) - p00, -0.999, 0.999, xtol=1e-6))
+    except Exception:
+        return float(np.clip(np.corrcoef(x, y)[0, 1], -0.99, 0.99))
+
+
+def tetrachoric_matrix(X) -> np.ndarray:
+    """Matriz de correlaciones tetracoricas (k x k) de una matriz 0/1."""
+    X = np.asarray(X, float); k = X.shape[1]
+    R = np.eye(k)
+    for i in range(k):
+        for j in range(i + 1, k):
+            r = tetrachoric_corr(X[:, i], X[:, j])
+            R[i, j] = R[j, i] = 0.0 if (r is None or np.isnan(r)) else r
+    return R
 
 
 def _limpia(X) -> np.ndarray:
@@ -163,31 +204,30 @@ def _veredicto_fiab(a):
     return "insuficiente"
 
 
-def _cargas_1factor(X):
-    """Cargas de un factor comun (primer factor principal sobre la correlacion)."""
-    R = np.ma.corrcoef(np.ma.masked_invalid(X), rowvar=False, allow_masked=True).filled(0.0)
-    R = np.nan_to_num(R, nan=0.0)
+def _cargas_1factor(R):
+    """Cargas del primer factor principal sobre una matriz de correlacion R (k x k)."""
+    R = np.nan_to_num(np.asarray(R, float), nan=0.0)
     np.fill_diagonal(R, 1.0)
     vals, vecs = np.linalg.eigh(R)
     lam1 = max(vals[-1], 0.0)
     v = vecs[:, -1]
     if np.sum(v) < 0:
         v = -v
-    cargas = np.sqrt(lam1) * v
-    return np.clip(cargas, -0.999, 0.999)
+    return np.clip(np.sqrt(lam1) * v, -0.999, 0.999)
 
 
 def omega_mcdonald(X) -> dict:
-    """Omega de McDonald desde un modelo de 1 factor (aprox. factorial)."""
+    """Omega de McDonald categorico: cargas de 1 factor sobre la correlacion TETRACORICA
+    (metodo correcto para items dicotomicos, no Pearson)."""
     X = _limpia(X)
-    lam = _cargas_1factor(X)
+    lam = _cargas_1factor(tetrachoric_matrix(X))
     sum_l = float(np.sum(lam))
     err = float(np.sum(1.0 - lam ** 2))
     if (sum_l ** 2 + err) <= 0:
         return {"omega": None}
     omega = sum_l ** 2 / (sum_l ** 2 + err)
     return {"omega": _r(omega), "veredicto": _veredicto_fiab(omega),
-            "nota": "Omega total (1 factor); en items dicotomicos es aproximacion via correlacion de Pearson."}
+            "nota": "Omega categorico (1 factor sobre correlacion tetracorica)."}
 
 
 def sem(X, fiab=None) -> dict:

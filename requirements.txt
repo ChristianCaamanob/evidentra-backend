@@ -19,4 +19,3 @@ psycopg2-binary==2.9.9
 qrcode==8.2
 pymupdf==1.24.5
 pillow-heif>=0.16,<1.0
-semopy>=2.3,<3.0
