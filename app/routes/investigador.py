@@ -124,8 +124,13 @@ def estructura_cfa(assessment_id: UUID, db: Session = Depends(get_db)):
     """Fase 4 - CFA de 1 factor: indices de ajuste (chi2/gl, CFI, TLI, RMSEA, SRMR),
     cargas estandarizadas, AVE y fiabilidad compuesta."""
     try:
+        from app.models.assessment import Assessment
+        from app.models.course import Course
         datos = matriz_service.cargar_matriz_respuestas(db, assessment_id)
-        rep = cfa_service.ajuste_cfa(datos["X"])
+        a = db.get(Assessment, assessment_id)
+        c = db.get(Course, a.course_id) if a else None
+        es_demo = bool(c and getattr(c, "code", None) == "DEMO-PSICO")
+        rep = cfa_service.ajuste_cfa(datos["X"], incluir_wlsmv_demo=es_demo)
         for it, num in zip(rep["cargas"], datos["items"]):
             it["pregunta"] = num
         rep["_meta"] = _meta(datos)
