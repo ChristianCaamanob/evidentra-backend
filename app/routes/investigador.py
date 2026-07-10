@@ -25,6 +25,7 @@ from app.services import dimensionalidad_service
 from app.services import dina_service
 from app.services import dif_service
 from app.services import invarianza_service
+from app.services import estadistica_service
 
 # Todo el modulo Investigador exige rol investigador (o creador). El director NO accede a
 # este modulo de investigacion; su alcance es ver/exportar datos de estudiante y profesor.
@@ -51,6 +52,26 @@ def psicometria_rasch(assessment_id: UUID, db: Session = Depends(get_db)):
         return rep
     except Exception:
         logger.error(f"Error en psicometria_rasch {assessment_id}: {traceback.format_exc()}")
+        raise
+
+
+@router.get("/{assessment_id}/estadistica/clasica")
+def estadistica_clasica(assessment_id: UUID, db: Session = Depends(get_db)):
+    """Fases 1-2 del pipeline: depuracion de datos (descriptivos, supuestos, perdidos) y
+    analisis de items en Teoria Clasica (dificultad, discriminacion, fiabilidad: alfa, omega,
+    SEM, Guttman). Numera los items con su pregunta real."""
+    try:
+        datos = matriz_service.cargar_matriz_respuestas(db, assessment_id)
+        rep = estadistica_service.reporte_completo(datos["X"])
+        nums = datos["items"]
+        for bloque in (rep["descriptivos"]["items"], rep["items_tct"]["items"],
+                       rep["datos_perdidos"]["por_item"]):
+            for it, num in zip(bloque, nums):
+                it["pregunta"] = num
+        rep["_meta"] = _meta(datos)
+        return rep
+    except Exception:
+        logger.error(f"Error en estadistica_clasica {assessment_id}: {traceback.format_exc()}")
         raise
 
 
