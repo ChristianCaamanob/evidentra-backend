@@ -235,6 +235,87 @@ async def importar_rubrica(item_id: UUID, file: UploadFile = File(...), confirma
         raise
 
 
+_NIVELES = ("logrado", "parcial", "no_logrado")
+
+
+def _serializa_criterio(c) -> dict:
+    """Criterio en forma editable para el editor del docente."""
+    anclas = sorted(c.anclas, key=lambda a: (a.nivel, a.order))
+    return {
+        "id": str(c.id), "name": c.name, "descriptor": c.descriptor,
+        "weight": float(c.weight), "order": c.order,
+        "nivel_exigencia": c.nivel_exigencia, "umbral_confianza": float(c.umbral_confianza),
+        "penaliza_forma": bool(c.penaliza_forma), "sinonimos": c.sinonimos_json or [],
+        "fuera_de_alcance": c.fuera_de_alcance, "seccion": c.seccion, "ambito": c.ambito,
+        "anclas": [{"texto": a.texto, "nivel": a.nivel} for a in anclas],
+    }
+
+
+@router.get("/answer-key-items/{item_id}/rubrica", dependencies=[Depends(req_profesor)])
+def obtener_rubrica(item_id: UUID, db: Session = Depends(get_db)):
+    """Devuelve la rúbrica editable de un ítem de desarrollo (criterios + anclas por nivel)."""
+    from app.models.answer_key import AnswerKeyItem
+    item = db.get(AnswerKeyItem, item_id)
+    if not item:
+        raise not_found("Ítem de pauta no encontrado.")
+    crit = sorted(item.rubric_criteria, key=lambda x: x.order)
+    return {"item_id": str(item_id), "criterios": [_serializa_criterio(c) for c in crit]}
+
+
+@router.put("/answer-key-items/{item_id}/rubrica", dependencies=[Depends(req_profesor)])
+def guardar_rubrica(item_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    """
+    Reemplaza la rúbrica del ítem con la que define el docente (autoría manual, G1).
+    payload = {criterios:[{name, weight, nivel_exigencia, umbral_confianza, seccion, ambito,
+               sinonimos:[...], descriptor, fuera_de_alcance, anclas:[{texto, nivel}]}]}
+    Valida: al menos 1 criterio con nombre; pesos > 0; niveles de ancla en {logrado,parcial,no_logrado}.
+    """
+    from app.models.answer_key import AnswerKeyItem, RubricCriterion, RubricAncla
+    item = db.get(AnswerKeyItem, item_id)
+    if not item:
+        raise not_found("Ítem de pauta no encontrado.")
+    criterios = payload.get("criterios", [])
+    limpios = [c for c in criterios if (c.get("name") or "").strip()]
+    if not limpios:
+        raise conflict("La rúbrica necesita al menos un criterio con nombre.")
+    for c in limpios:
+        for a in c.get("anclas", []):
+            if a.get("nivel") not in _NIVELES:
+                raise conflict(f"Nivel de ancla inválido: {a.get('nivel')} (usa logrado/parcial/no_logrado).")
+    # Reemplazo total (los criterios y sus anclas viejos se borran en cascada).
+    for old in list(item.rubric_criteria):
+        db.delete(old)
+    db.flush()
+    for i, c in enumerate(limpios):
+        try:
+            peso = float(c.get("weight", 1.0))
+        except (TypeError, ValueError):
+            peso = 1.0
+        if peso <= 0:
+            raise conflict(f"El peso del criterio '{c.get('name')}' debe ser > 0.")
+        crit = RubricCriterion(
+            answer_key_item_id=item_id, name=str(c["name"])[:255],
+            descriptor=(c.get("descriptor") or None), weight=peso, order=i,
+            nivel_exigencia=c.get("nivel_exigencia") or "tolerante",
+            penaliza_forma=bool(c.get("penaliza_forma", False)),
+            sinonimos_json=(c.get("sinonimos") or []),
+            umbral_confianza=float(c.get("umbral_confianza", 0.7)),
+            fuera_de_alcance=(c.get("fuera_de_alcance") or None),
+            seccion=((c.get("seccion") or None) and str(c["seccion"])[:120]),
+            ambito=c.get("ambito") or "individual")
+        db.add(crit)
+        db.flush()
+        for j, a in enumerate(c.get("anclas", [])):
+            if (a.get("texto") or "").strip():
+                db.add(RubricAncla(rubric_criterion_id=crit.id, texto=str(a["texto"]),
+                                   nivel=a["nivel"], order=j))
+    db.commit()
+    db.refresh(item)
+    crit = sorted(item.rubric_criteria, key=lambda x: x.order)
+    return {"guardado": True, "n_criterios": len(crit),
+            "criterios": [_serializa_criterio(c) for c in crit]}
+
+
 @router.get("/assessments/{assessment_id}/rubrica/mfrm", dependencies=[Depends(req_investigador)])
 def rubrica_mfrm(assessment_id: UUID, db: Session = Depends(get_db)):
     """I6 - Severidad del corrector IA vs docente (MFRM) sobre las validaciones persistidas."""
