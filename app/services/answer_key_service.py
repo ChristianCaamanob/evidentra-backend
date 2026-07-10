@@ -62,9 +62,11 @@ def get_items(db, assessment_id):
     versions = repo.get_versions(db, answer_key.id)
     n_questions = max((i.question_number for i in answer_key.items), default=0)
     return {
+        "answer_key_id": str(answer_key.id),   # necesario para F4 (activar versión de rúbrica)
         "items": [{"id": str(i.id), "question_number": i.question_number,
                    "version": i.version, "correct_answer": i.correct_answer,
-                   "weight": i.weight, "is_annulled": i.is_annulled}
+                   "weight": i.weight, "is_annulled": i.is_annulled,
+                   "answer_key_id": str(answer_key.id)}
                   for i in answer_key.items],
         "versions": versions,
         "n_questions": n_questions,
