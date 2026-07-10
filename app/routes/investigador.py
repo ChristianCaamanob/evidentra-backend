@@ -26,6 +26,7 @@ from app.services import dina_service
 from app.services import dif_service
 from app.services import invarianza_service
 from app.services import estadistica_service
+from app.services import efectos_service
 
 # Todo el modulo Investigador exige rol investigador (o creador). El director NO accede a
 # este modulo de investigacion; su alcance es ver/exportar datos de estudiante y profesor.
@@ -115,6 +116,25 @@ def _meta_equidad(d: dict) -> dict:
             "gobernanza": "Solo estudiantes que CONSINTIERON el analisis de equidad (G4); "
                           "datos seudonimizados (G2); grupos con minimo para evitar "
                           "reidentificacion. No altera notas (G1)."}
+
+
+@router.get("/{assessment_id}/efectos")
+def efectos_grupo(assessment_id: UUID, grupo: str = Query(..., pattern="^(sexo|dependencia)$"),
+                  db: Session = Depends(get_db)):
+    """Fase 7 - Comparacion del puntaje total entre 2 grupos consentidos: t de Welch,
+    Mann-Whitney, tamanos de efecto (d de Cohen, g de Hedges) con IC95%, y resumen de
+    correlaciones inter-item. Reusa las salvaguardas de equidad (consentimiento, minimo por grupo)."""
+    try:
+        d = matriz_service.cargar_matriz_con_grupo(db, assessment_id, grupo)
+        X = np.asarray(d["X"], dtype=float)
+        total = np.nansum(X, axis=1)
+        rep = efectos_service.comparar_grupos(total, d["grupo"], d.get("referencia"), d.get("focal"))
+        rep["correlaciones"] = efectos_service.correlaciones_resumen(X)
+        rep["_meta"] = _meta_equidad(d)
+        return rep
+    except Exception:
+        logger.error(f"Error en efectos_grupo {assessment_id}: {traceback.format_exc()}")
+        raise
 
 
 @router.get("/{assessment_id}/psicometria/dif")
