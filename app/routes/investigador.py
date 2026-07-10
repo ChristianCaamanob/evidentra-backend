@@ -28,6 +28,7 @@ from app.services import invarianza_service
 from app.services import estadistica_service
 from app.services import efectos_service
 from app.services import cfa_service
+from app.services import tri_service
 
 # Todo el modulo Investigador exige rol investigador (o creador). El director NO accede a
 # este modulo de investigacion; su alcance es ver/exportar datos de estudiante y profesor.
@@ -117,6 +118,22 @@ def _meta_equidad(d: dict) -> dict:
             "gobernanza": "Solo estudiantes que CONSINTIERON el analisis de equidad (G4); "
                           "datos seudonimizados (G2); grupos con minimo para evitar "
                           "reidentificacion. No altera notas (G1)."}
+
+
+@router.get("/{assessment_id}/psicometria/tri")
+def psicometria_tri(assessment_id: UUID, db: Session = Depends(get_db)):
+    """Fase 3 - TRI: compara 1PL vs 2PL (AIC/BIC), parametros 2PL (discriminacion/dificultad)
+    e independencia local (Q3 de Yen). Estimacion MML con girth."""
+    try:
+        datos = matriz_service.cargar_matriz_respuestas(db, assessment_id)
+        rep = tri_service.comparar_modelos(datos["X"])
+        for it, num in zip(rep["items_2PL"], datos["items"]):
+            it["pregunta"] = num
+        rep["_meta"] = _meta(datos)
+        return rep
+    except Exception:
+        logger.error(f"Error en psicometria_tri {assessment_id}: {traceback.format_exc()}")
+        raise
 
 
 @router.get("/{assessment_id}/estructura/cfa")
