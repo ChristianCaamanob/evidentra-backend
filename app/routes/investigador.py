@@ -29,6 +29,7 @@ from app.services import estadistica_service
 from app.services import efectos_service
 from app.services import cfa_service
 from app.services import tri_service
+from app.services import reporte_service
 
 # Todo el modulo Investigador exige rol investigador (o creador). El director NO accede a
 # este modulo de investigacion; su alcance es ver/exportar datos de estudiante y profesor.
@@ -118,6 +119,60 @@ def _meta_equidad(d: dict) -> dict:
             "gobernanza": "Solo estudiantes que CONSINTIERON el analisis de equidad (G4); "
                           "datos seudonimizados (G2); grupos con minimo para evitar "
                           "reidentificacion. No altera notas (G1)."}
+
+
+@router.get("/{assessment_id}/reporte")
+def reporte_reproducible(assessment_id: UUID, db: Session = Depends(get_db)):
+    """Fase 9 - Reporte reproducible: junta los estadisticos reales y redacta Metodos+Resultados
+    con IA (o plantilla si no hay clave), mas un checklist COSMIN."""
+    try:
+        from app.models.assessment import Assessment
+        from app.models.course import Course
+        datos = matriz_service.cargar_matriz_respuestas(db, assessment_id)
+        X = datos["X"]
+        alfa = estadistica_service.alfa_cronbach(X)
+        om = estadistica_service.omega_mcdonald(X)
+        sem = estadistica_service.sem(X, alfa.get("alfa"))
+        a = db.get(Assessment, assessment_id); c = db.get(Course, a.course_id) if a else None
+        cfa = cfa_service.ajuste_cfa(X, incluir_wlsmv_demo=bool(c and getattr(c, "code", None) == "DEMO-PSICO"))
+        w = cfa.get("wlsmv") or {}
+        hechos = {
+            "n": datos["n_personas"], "n_items": datos["n_items"],
+            "fiabilidad": {"alfa": alfa.get("alfa"), "omega": om.get("omega"), "sem": sem.get("sem")},
+            "estructura": {"SRMR": cfa["ajuste"]["SRMR"], "AVE": cfa["convergente"]["AVE"],
+                           "CR": cfa["convergente"]["CR"], "veredicto": cfa["veredicto"],
+                           "CFI": w.get("CFI"), "TLI": w.get("TLI"), "RMSEA": w.get("RMSEA"),
+                           "veredicto_wlsmv": w.get("veredicto"),
+                           "fuente_ajuste": w.get("software")},
+        }
+        try:
+            tri = tri_service.comparar_modelos(X)
+            hechos["tri"] = {"preferido": tri["comparacion"]["preferido_BIC"],
+                             "delta_BIC": tri["comparacion"]["delta_BIC"], "veredicto": tri["veredicto"]}
+        except Exception:
+            pass
+        try:
+            dg = matriz_service.cargar_matriz_con_grupo(db, assessment_id, "sexo")
+            Xg = np.asarray(dg["X"], dtype=float); total = np.nansum(Xg, axis=1)
+            ef = efectos_service.comparar_grupos(total, dg["grupo"], dg.get("referencia"), dg.get("focal"))
+            hechos["efectos"] = {"variable": "sexo", "comparados": ef["comparados"],
+                                 "cohen_d": ef["cohen_d"], "d_ic95": ef["d_ic95"], "magnitud": ef["magnitud"]}
+            dif = dif_service.analizar_dif(Xg, dg["grupo"], np.nansum(Xg, axis=1), etiqueta_focal=dg["focal"])
+            n_dif = int(dif.get("items_con_dif") if isinstance(dif.get("items_con_dif"), int)
+                        else len(dif.get("items_con_dif", [])))
+            hechos["dif_resumen"] = (f"Sin DIF relevante entre {' y '.join(ef['comparados'])}."
+                                     if n_dif == 0 else f"{n_dif} item(es) con DIF entre {' y '.join(ef['comparados'])}.")
+            inv = cfa_service.invarianza_configural(Xg, dg["grupo"])
+            hechos["invarianza"] = inv.get("veredicto")
+        except Exception:
+            pass
+        red = reporte_service.redactar(hechos)
+        return {"hechos": hechos, "metodos": red["metodos"], "resultados": red["resultados"],
+                "motor": red["motor"], "checklist": reporte_service.checklist_cosmin(hechos),
+                "_meta": _meta(datos)}
+    except Exception:
+        logger.error(f"Error en reporte {assessment_id}: {traceback.format_exc()}")
+        raise
 
 
 @router.get("/{assessment_id}/psicometria/tri")
