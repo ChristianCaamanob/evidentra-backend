@@ -69,6 +69,10 @@ class AnswerKeyItem(UUIDMixin, Base):
     bloom_level: Mapped[str | None] = mapped_column(String(50), nullable=True)
     unidad: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
+    # F1 (desarrollo multi-pregunta) - enunciado de la pregunta abierta. Aditivo/nullable:
+    # solo aplica a open_response; las de alternativas no lo usan. El peso (score) es 'weight'.
+    enunciado: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     answer_key = relationship("AnswerKey", back_populates="items")
     # F1 - criterios de rubrica (solo relevantes para preguntas open_response).
     rubric_criteria = relationship(

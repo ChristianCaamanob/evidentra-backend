@@ -118,8 +118,9 @@ def _seed_desarrollo(db) -> None:
                    annulled_items_count=0, invalid_weight_count=0, invalid_partial_rule_count=0)
     db.add(ak); db.flush()
     item = AnswerKeyItem(answer_key_id=ak.id, question_number=1, version="A", correct_answer="",
-                         weight=1.0, is_annulled=False, question_type=QUESTION_TYPE_OPEN_RESPONSE,
-                         learning_outcome_id="RA1", bloom_level="comprender")
+                         weight=20.0, is_annulled=False, question_type=QUESTION_TYPE_OPEN_RESPONSE,
+                         learning_outcome_id="RA1", bloom_level="comprender",
+                         enunciado="Explica la función del sistema linfático en la respuesta inmune.")
     db.add(item); db.flush()
 
     c1 = RubricCriterion(answer_key_item_id=item.id, name="Función de drenaje y transporte de linfa",
@@ -138,6 +139,22 @@ def _seed_desarrollo(db) -> None:
                     ("Ayuda a defender el cuerpo de enfermedades.", "parcial", 1),
                     ("Solo transporta líquidos.", "no_logrado", 2)]:
         db.add(RubricAncla(rubric_criterion_id=c2.id, texto=t, nivel=n, order=o))
+    db.flush()
+
+    # 2ª pregunta de desarrollo (peso 15 pts) — demuestra el instrumento multi-pregunta.
+    item2 = AnswerKeyItem(answer_key_id=ak.id, question_number=2, version="A", correct_answer="",
+                          weight=15.0, is_annulled=False, question_type=QUESTION_TYPE_OPEN_RESPONSE,
+                          learning_outcome_id="RA2", bloom_level="analizar",
+                          enunciado="Compara el sistema linfático con el circulatorio: una semejanza y una diferencia.")
+    db.add(item2); db.flush()
+    c3 = RubricCriterion(answer_key_item_id=item2.id, name="Semejanza y diferencia correctas",
+                         weight=1.0, order=0, nivel_exigencia="tolerante", umbral_confianza=0.7,
+                         sinonimos_json=["red de vasos", "transporte", "unidireccional"])
+    db.add(c3); db.flush()
+    for t, n, o in [("Ambos son redes de vasos; el linfático es unidireccional y drena hacia la sangre.", "logrado", 0),
+                    ("Los dos transportan líquidos por el cuerpo.", "parcial", 1),
+                    ("Son lo mismo.", "no_logrado", 2)]:
+        db.add(RubricAncla(rubric_criterion_id=c3.id, texto=t, nivel=n, order=o))
     db.flush()
 
     # ── Validaciones docentes (F3) simuladas: activan R (psicometría de rúbrica), MFRM

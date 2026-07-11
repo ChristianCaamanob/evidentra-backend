@@ -316,6 +316,142 @@ def guardar_rubrica(item_id: UUID, payload: dict, db: Session = Depends(get_db))
             "criterios": [_serializa_criterio(c) for c in crit]}
 
 
+# ───────────────────────────── Instrumento de desarrollo MULTI-PREGUNTA (peso por puntaje)
+def _pregunta_dict(it, total_peso) -> dict:
+    return {"id": str(it.id), "numero": it.question_number, "enunciado": it.enunciado or "",
+            "weight": float(it.weight or 1),
+            "pct": round(float(it.weight or 0) / total_peso * 100, 1) if total_peso else 0.0,
+            "n_criterios": len(it.rubric_criteria)}
+
+
+@router.get("/answer-keys/{ak_id}/desarrollo", dependencies=[Depends(req_profesor)])
+def listar_preguntas_desarrollo(ak_id: UUID, db: Session = Depends(get_db)):
+    """Preguntas de desarrollo (open_response) de la pauta, con enunciado, peso (puntaje) y % del total."""
+    from app.models.answer_key import AnswerKey, QUESTION_TYPE_OPEN_RESPONSE
+    ak = db.get(AnswerKey, ak_id)
+    if not ak:
+        raise not_found("Pauta no encontrada.")
+    items = [it for it in sorted(ak.items, key=lambda x: x.question_number)
+             if it.question_type == QUESTION_TYPE_OPEN_RESPONSE]
+    total = sum(float(it.weight or 0) for it in items) or 1.0
+    return {"answer_key_id": str(ak.id), "n_preguntas": len(items), "puntaje_total": round(total, 1),
+            "preguntas": [_pregunta_dict(it, total) for it in items]}
+
+
+@router.post("/answer-keys/{ak_id}/desarrollo", dependencies=[Depends(req_profesor)])
+def crear_pregunta_desarrollo(ak_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    """Crea una pregunta de desarrollo. payload = {enunciado, weight(puntaje)}."""
+    from app.models.answer_key import AnswerKey, AnswerKeyItem, QUESTION_TYPE_OPEN_RESPONSE
+    ak = db.get(AnswerKey, ak_id)
+    if not ak:
+        raise not_found("Pauta no encontrada.")
+    try:
+        w = float(payload.get("weight", 1) or 1)
+    except (TypeError, ValueError):
+        w = 1.0
+    nums = [it.question_number for it in ak.items] or [0]
+    it = AnswerKeyItem(answer_key_id=ak.id, question_number=max(nums) + 1, version="A",
+                       correct_answer="", weight=max(0.1, w), is_annulled=False,
+                       question_type=QUESTION_TYPE_OPEN_RESPONSE,
+                       enunciado=((payload.get("enunciado") or "").strip() or None))
+    db.add(it)
+    ak.is_valid = True
+    db.commit(); db.refresh(it)
+    return _pregunta_dict(it, float(it.weight or 1))
+
+
+@router.patch("/answer-key-items/{item_id}/desarrollo", dependencies=[Depends(req_profesor)])
+def editar_pregunta_desarrollo(item_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    """Edita enunciado, peso o número (reordenar) de una pregunta de desarrollo."""
+    from app.models.answer_key import AnswerKeyItem
+    it = db.get(AnswerKeyItem, item_id)
+    if not it:
+        raise not_found("Pregunta no encontrada.")
+    if "enunciado" in payload:
+        it.enunciado = (payload.get("enunciado") or "").strip() or None
+    if "weight" in payload:
+        try:
+            w = float(payload["weight"])
+            if w > 0:
+                it.weight = w
+        except (TypeError, ValueError):
+            pass
+    if "question_number" in payload:
+        try:
+            it.question_number = int(payload["question_number"])
+        except (TypeError, ValueError):
+            pass
+    db.commit()
+    return _pregunta_dict(it, float(it.weight or 1))
+
+
+@router.delete("/answer-key-items/{item_id}/desarrollo", dependencies=[Depends(req_profesor)])
+def borrar_pregunta_desarrollo(item_id: UUID, db: Session = Depends(get_db)):
+    """Elimina una pregunta de desarrollo (y su rúbrica en cascada)."""
+    from app.models.answer_key import AnswerKeyItem
+    it = db.get(AnswerKeyItem, item_id)
+    if not it:
+        raise not_found("Pregunta no encontrada.")
+    db.delete(it)
+    db.commit()
+    return {"borrado": True}
+
+
+@router.post("/answer-keys/{ak_id}/desarrollo/importar", dependencies=[Depends(req_profesor)])
+async def importar_prueba_desarrollo(ak_id: UUID, file: UploadFile = File(...),
+                                     confirmar: bool = False, db: Session = Depends(get_db)):
+    """
+    Importa la PRUEBA de desarrollo desde .xlsx: una fila por pregunta con columnas
+    'enunciado' (o 'pregunta') y 'peso' (o 'puntaje'). Sin `confirmar` devuelve preview;
+    con confirmar=true crea las preguntas (G1: el docente revisa antes).
+    """
+    from app.models.answer_key import AnswerKey, AnswerKeyItem, QUESTION_TYPE_OPEN_RESPONSE
+    from openpyxl import load_workbook
+    import io as _io
+    ak = db.get(AnswerKey, ak_id)
+    if not ak:
+        raise not_found("Pauta no encontrada.")
+    wb = load_workbook(_io.BytesIO(await file.read()), read_only=True, data_only=True)
+    ws = wb.active
+    filas = list(ws.iter_rows(values_only=True))
+    if not filas:
+        return {"guardado": False, "preguntas": [], "nota": "Planilla vacía."}
+    cab = [str(c).strip().lower() if c is not None else "" for c in filas[0]]
+    def col(*names):
+        for n in names:
+            if n in cab:
+                return cab.index(n)
+        return None
+    ci_en = col("enunciado", "pregunta", "enunciado de la pregunta")
+    ci_pe = col("peso", "puntaje", "puntos", "ponderacion", "ponderación")
+    if ci_en is None:
+        return {"guardado": False, "preguntas": [], "nota": "Falta la columna 'enunciado' (o 'pregunta')."}
+    prev = []
+    for row in filas[1:]:
+        en = row[ci_en] if ci_en < len(row) else None
+        if en is None or not str(en).strip():
+            continue
+        try:
+            pe = float(row[ci_pe]) if (ci_pe is not None and ci_pe < len(row) and row[ci_pe] is not None) else 1.0
+        except (TypeError, ValueError):
+            pe = 1.0
+        prev.append({"enunciado": str(en).strip(), "weight": max(0.1, pe)})
+    if not confirmar:
+        return {"guardado": False, "n": len(prev), "preguntas": prev,
+                "nota": "Vista previa. Confirma para crear las preguntas."}
+    nums = [it.question_number for it in ak.items] or [0]
+    n0 = max(nums)
+    creadas = []
+    for i, p in enumerate(prev, start=1):
+        it = AnswerKeyItem(answer_key_id=ak.id, question_number=n0 + i, version="A",
+                           correct_answer="", weight=p["weight"], is_annulled=False,
+                           question_type=QUESTION_TYPE_OPEN_RESPONSE, enunciado=p["enunciado"])
+        db.add(it); creadas.append(p)
+    ak.is_valid = True
+    db.commit()
+    return {"guardado": True, "creadas": len(creadas), "preguntas": creadas}
+
+
 @router.get("/assessments/{assessment_id}/rubrica/mfrm", dependencies=[Depends(req_investigador)])
 def rubrica_mfrm(assessment_id: UUID, db: Session = Depends(get_db)):
     """I6 - Severidad del corrector IA vs docente (MFRM) sobre las validaciones persistidas."""

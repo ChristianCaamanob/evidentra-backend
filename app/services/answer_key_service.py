@@ -67,6 +67,7 @@ def get_items(db, assessment_id):
                    "version": i.version, "correct_answer": i.correct_answer,
                    "weight": i.weight, "is_annulled": i.is_annulled,
                    "question_type": getattr(i, "question_type", None),
+                   "enunciado": getattr(i, "enunciado", None),
                    "answer_key_id": str(answer_key.id)}
                   for i in answer_key.items],
         "versions": versions,
