@@ -30,6 +30,8 @@ from app.services import efectos_service
 from app.services import cfa_service
 from app.services import tri_service
 from app.services import reporte_service
+from app.services import curso_stats_service
+from app.services import cualitativo_service
 
 # Todo el modulo Investigador exige rol investigador (o creador). El director NO accede a
 # este modulo de investigacion; su alcance es ver/exportar datos de estudiante y profesor.
@@ -76,6 +78,25 @@ def estadistica_clasica(assessment_id: UUID, db: Session = Depends(get_db)):
         return rep
     except Exception:
         logger.error(f"Error en estadistica_clasica {assessment_id}: {traceback.format_exc()}")
+        raise
+
+
+@router.get("/{assessment_id}/cualitativo")
+def analisis_cualitativo(assessment_id: UUID, db: Session = Depends(get_db),
+                         _: object = _Dep(req_investigador)):
+    """I4 - Análisis cualitativo: mapa de concepciones erróneas (puente cuanti->cuali).
+    Cada distractor con prevalencia >= umbral revela una concepción errónea específica,
+    con severidad y RA afectado. Trabaja sobre respuestas seudonimizadas (G2)."""
+    try:
+        datos = matriz_service.cargar_respuestas_letras(db, assessment_id)
+        resultado = curso_stats_service.analizar_evaluacion(
+            datos["respuestas_alumnos"], datos["pauta"], te_tags=datos["te_tags"])
+        mapa = cualitativo_service.mapa_concepciones(resultado.get("items", []), contenido={})
+        return {"mapa_concepciones": mapa,
+                "_meta": {"n_personas": resultado["instrumento"]["n_alumnos"],
+                          "n_items": resultado["instrumento"]["n_items"]}}
+    except Exception:
+        logger.error(f"Error en analisis_cualitativo {assessment_id}: {traceback.format_exc()}")
         raise
 
 

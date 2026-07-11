@@ -67,6 +67,9 @@ def _seed_cohorte_psicometria(db) -> None:
 
     rng = random.Random(42)
     b = [-1.5 + 3.0 * (j / (k - 1)) for j in range(k)]     # dificultad por item
+    # Distractor de "concepcion erronea" por item: quien falla lo elige con prob 0.6 (el resto,
+    # otro distractor al azar). Concentra un error sistematico -> el mapa cualitativo es real.
+    mis = [rng.choice([l for l in letras if l != correctas[j + 1]]) for j in range(k)]
     for i in range(n):
         theta = rng.gauss(0, 1)                            # habilidad del estudiante
         rut = f"DEMO-{i+1:03d}"
@@ -79,8 +82,11 @@ def _seed_cohorte_psicometria(db) -> None:
             p = 1.0 / (1.0 + math.exp(-(theta - b[j])))
             if rng.random() < p:
                 answers.append(correctas[j + 1])
+            elif rng.random() < 0.6:
+                answers.append(mis[j])                     # concepcion erronea sistematica
             else:
-                answers.append(rng.choice([l for l in letras if l != correctas[j + 1]]))
+                otras = [l for l in letras if l != correctas[j + 1] and l != mis[j]]
+                answers.append(rng.choice(otras) if otras else mis[j])
         db.add(Scan(assessment_id=assessment.id, student_identifier=rut, status="scored",
                     detected_version="A", requires_review=False,
                     raw_ocr_payload_json={"answers": answers}))

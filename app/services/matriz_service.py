@@ -78,6 +78,46 @@ def _matriz_cruda(db, assessment_id) -> dict:
     return {"items": items, "tags": tags, "filas_scan": filas_scan}
 
 
+def cargar_respuestas_letras(db, assessment_id) -> dict:
+    """
+    Respuestas a NIVEL DE LETRA (seudonimizadas) para el análisis de distractores / cualitativo.
+    Devuelve el insumo de curso_stats_service.analizar_evaluacion:
+      {respuestas_alumnos: [{student_id, respuestas:{q->letra|None}}], pauta:{q->letra}, te_tags}.
+    """
+    answer_key = answer_key_repo.get_by_assessment_id(db, assessment_id)
+    if not answer_key or not answer_key.is_valid:
+        raise conflict("La pauta no esta validada; no hay datos para el analisis.")
+    por_version, tags, pauta = {}, {}, {}
+    for it in answer_key.items:
+        por_version.setdefault(it.version.upper(), {})[it.question_number] = it
+    anulados = {it.question_number for it in answer_key.items if it.is_annulled}
+    items = sorted({it.question_number for it in answer_key.items} - anulados)
+    base_ver = "A" if "A" in por_version else (next(iter(por_version)) if por_version else "A")
+    clave_base = por_version.get(base_ver, {})
+    for q in items:
+        it = clave_base.get(q)
+        if it is not None:
+            pauta[q] = str(it.correct_answer).upper()
+            tags[q] = {"ra": it.learning_outcome_id, "bloom": it.bloom_level, "unidad": it.unidad}
+    respuestas_alumnos = []
+    for scan in scan_repo.list_by_assessment(db, assessment_id):
+        if getattr(scan, "requires_review", False):
+            continue
+        resp_raw = (scan.raw_ocr_payload_json or {}).get("answers", [])
+        clave = por_version.get((scan.detected_version or "A").upper())
+        if not clave:
+            continue
+        respuestas = {}
+        for q in items:
+            it = clave.get(q)
+            if it is None or it.is_annulled:
+                continue
+            elegida = resp_raw[q - 1] if (q - 1) < len(resp_raw) else None
+            respuestas[q] = str(elegida).upper() if elegida else None
+        respuestas_alumnos.append({"student_id": _pseudo(scan.id), "respuestas": respuestas})
+    return {"respuestas_alumnos": respuestas_alumnos, "pauta": pauta, "te_tags": tags}
+
+
 def cargar_matriz_respuestas(db, assessment_id, min_personas: int = 3,
                              min_items: int = 3) -> dict:
     """Matriz 0/1 (persona x item) SEUDONIMIZADA (G2) de una evaluacion, mas metadatos."""
