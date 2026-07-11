@@ -59,5 +59,9 @@ from app.routes.en_vivo import router as en_vivo_router
 api_router.include_router(en_vivo_router)
 from app.routes.banco import router as banco_router
 api_router.include_router(banco_router)
+from app.routes.pagos import router as pagos_router
+api_router.include_router(pagos_router)
 from app.routes.auth import router as auth_router
 api_router.include_router(auth_router)
+from app.routes.export import router as export_router
+api_router.include_router(export_router)
