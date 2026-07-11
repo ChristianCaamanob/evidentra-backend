@@ -32,6 +32,8 @@ from app.services import tri_service
 from app.services import reporte_service
 from app.services import curso_stats_service
 from app.services import cualitativo_service
+from app.services import rutas_service
+from app.services import literatura_service
 
 # Todo el modulo Investigador exige rol investigador (o creador). El director NO accede a
 # este modulo de investigacion; su alcance es ver/exportar datos de estudiante y profesor.
@@ -97,6 +99,56 @@ def analisis_cualitativo(assessment_id: UUID, db: Session = Depends(get_db),
                           "n_items": resultado["instrumento"]["n_items"]}}
     except Exception:
         logger.error(f"Error en analisis_cualitativo {assessment_id}: {traceback.format_exc()}")
+        raise
+
+
+@router.get("/{assessment_id}/rutas")
+def rutas_investigacion(assessment_id: UUID, db: Session = Depends(get_db),
+                        _: object = _Dep(req_investigador)):
+    """Rutas de investigación CONTEXTUALES: las ramas se desbloquean según los datos presentes
+    (n, grupos consentidos, etiquetado C3, nº de evaluaciones). Flujograma que crece con el trabajo."""
+    try:
+        from app.models.assessment import Assessment
+        from app.models.course import Course
+        from app.models.student import Student
+        n = k = 0; has_c3 = False
+        try:
+            datos = matriz_service.cargar_matriz_respuestas(db, assessment_id)
+            n, k = datos["n_personas"], datos["n_items"]
+            has_c3 = any(bool((v or {}).get("ra")) for v in (datos.get("tags") or {}).values())
+        except Exception:
+            pass
+        a = db.get(Assessment, assessment_id)
+        course_id = a.course_id if a else None
+        n_eval = (db.query(Assessment).filter(Assessment.course_id == course_id).count()
+                  if course_id else 1)
+        has_grupos = False; topic = "educational assessment"
+        if course_id:
+            has_grupos = db.query(Student).filter(
+                Student.course_id == course_id, Student.consiente_equidad.is_(True),
+                Student.sexo.isnot(None)).count() > 0
+            c = db.get(Course, course_id)
+            nm = (getattr(c, "name", "") or "").lower()
+            if "psico" in nm or "medi" in nm or "salud" in nm:
+                topic = "educational measurement"
+        ctx = {"n": n, "k": k, "has_grupos": has_grupos, "has_c3": has_c3,
+               "n_evaluaciones": n_eval, "topic": topic}
+        return rutas_service.construir(ctx)
+    except Exception:
+        logger.error(f"Error en rutas_investigacion {assessment_id}: {traceback.format_exc()}")
+        raise
+
+
+@router.get("/investigacion/literatura")
+def literatura(q: str = Query(..., min_length=2),
+               rows: int = Query(5, ge=1, le=10),
+               _: object = _Dep(req_investigador)):
+    """Literatura en vivo (Crossref): artículos reales verificados por DOI, con cita APA 7 y
+    Vancouver. Nunca inventa referencias. `q` es la línea de investigación (en inglés rinde mejor)."""
+    try:
+        return literatura_service.buscar(q, rows=rows)
+    except Exception:
+        logger.error(f"Error en literatura '{q}': {traceback.format_exc()}")
         raise
 
 
