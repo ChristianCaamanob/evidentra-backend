@@ -138,6 +138,41 @@ def _seed_desarrollo(db) -> None:
                     ("Ayuda a defender el cuerpo de enfermedades.", "parcial", 1),
                     ("Solo transporta líquidos.", "no_logrado", 2)]:
         db.add(RubricAncla(rubric_criterion_id=c2.id, texto=t, nivel=n, order=o))
+    db.flush()
+
+    # ── Validaciones docentes (F3) simuladas: activan R (psicometría de rúbrica), MFRM
+    # (severidad IA vs docente) y F4 (aprendizaje). Sin esto, esos análisis quedan inertes. ──
+    import hashlib, random, math
+    from app.models.validacion import RegistroValidacion
+    rngv = random.Random(7)
+    niveles = ["no_logrado", "parcial", "logrado"]
+    crits = [(c1.name, 0.0), (c2.name, 0.7)]           # (nombre, dificultad; c2 es más estricto)
+
+    def _nivel(theta, dif):
+        p = 1.0 / (1.0 + math.exp(-(theta - dif)))
+        return "logrado" if p > 0.66 else ("parcial" if p > 0.4 else "no_logrado")
+
+    regs = []
+    for s in range(18):
+        theta = rngv.gauss(0.3, 1.0)
+        href = "e:" + hashlib.sha256(("dev-stu-%d" % s).encode()).hexdigest()[:8]
+        for cname, cdif in crits:
+            niv_ia = _nivel(theta, cdif)
+            conf = round(rngv.uniform(0.55, 0.95), 2)
+            if rngv.random() < 0.6:                     # el docente aprueba la propuesta IA
+                niv_doc, accion, com = niv_ia, "aprobado", None
+            else:                                        # el docente ajusta (sesgo estricto en c2)
+                idx = niveles.index(niv_ia)
+                delta = -1 if (cdif > 0.3 and rngv.random() < 0.65) else rngv.choice([-1, 1])
+                idx2 = max(0, min(2, idx + delta))
+                niv_doc = niveles[idx2]
+                accion = "ajustado" if idx2 != idx else "aprobado"
+                com = ("Falta el término canónico exigido por la norma." if niv_doc != niv_ia else None)
+            regs.append(RegistroValidacion(
+                respuesta_ref=href + "#" + cname, criterio=cname, assessment_id=str(a.id),
+                rubrica_version_hash=None, nivel_ia=niv_ia, confianza_ia=conf,
+                nivel_docente=niv_doc, accion=accion, comentario=com, docente="docente@evalys.demo"))
+    db.add_all(regs)
     db.commit()
 
 
