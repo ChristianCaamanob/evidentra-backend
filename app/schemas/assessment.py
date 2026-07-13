@@ -16,6 +16,7 @@ class AssessmentOut(ORMBaseSchema):
     version_count: int
     has_answer_key: bool
     briefing_level: str
+    modalidad: str = "alternativas"
     created_at: datetime
     updated_at: datetime
 

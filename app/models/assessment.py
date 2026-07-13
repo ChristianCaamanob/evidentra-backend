@@ -6,13 +6,26 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDMixin
 
-# Modalidad de la evaluacion:
-#   escrita -> sobre hoja/escaneo (alternativas y/o desarrollo escrito). El sujeto es el Scan.
-#   oral    -> una rubrica parametrizada aplicada DIRECTAMENTE a cada estudiante (oral,
-#              presentacion, practica). No hay hoja: el sujeto es el estudiante de la nomina.
-MODALIDAD_ESCRITA = "escrita"
+# Modalidad de la evaluacion (Paso 0: el docente la elige al crear y define todo el flujo aguas abajo):
+#   alternativas -> seleccion multiple sobre hoja/escaneo. Pauta de grilla + OCR. question_type=multiple_choice.
+#   desarrollo   -> respuesta abierta corregida contra rubrica con IA (F2). question_type=open_response.
+#   mixta        -> ambas en un mismo instrumento (alternativas + desarrollo).
+#   oral         -> rubrica aplicada DIRECTAMENTE a cada estudiante (oral/presentacion/practica).
+#                   No hay hoja: el sujeto es el estudiante de la nomina.
+# 'escrita' queda como ALIAS LEGADO de 'alternativas' (filas creadas antes del Paso 0).
+MODALIDAD_ALTERNATIVAS = "alternativas"
+MODALIDAD_DESARROLLO = "desarrollo"
+MODALIDAD_MIXTA = "mixta"
 MODALIDAD_ORAL = "oral"
-MODALIDADES = (MODALIDAD_ESCRITA, MODALIDAD_ORAL)
+MODALIDAD_ESCRITA = "escrita"  # legado -> se interpreta como alternativas
+MODALIDADES = (MODALIDAD_ALTERNATIVAS, MODALIDAD_DESARROLLO, MODALIDAD_MIXTA, MODALIDAD_ORAL)
+
+
+def modalidad_norm(m: str | None) -> str:
+    """Normaliza la modalidad: el legado 'escrita' se lee como 'alternativas'."""
+    if not m or m == MODALIDAD_ESCRITA:
+        return MODALIDAD_ALTERNATIVAS
+    return m
 
 
 class Assessment(UUIDMixin, TimestampMixin, Base):

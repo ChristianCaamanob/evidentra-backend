@@ -98,10 +98,14 @@ class AssessmentIn(_BaseModel):
     versions: str = "A"
     grading_scale: str = "chile_1_7"
     passing_threshold: float = 60.0
+    # Paso 0: modalidad elegida al crear (alternativas | desarrollo | mixta | oral).
+    modalidad: str = "alternativas"
+    # Solo desarrollo/mixta: cuántas preguntas de desarrollo sembrar (peso por puntaje).
+    n_desarrollo: int = 0
 
 @router.get("/by-course/{course_id}")
 def list_assessments(course_id: UUID, db: Session = Depends(get_db)):
-    from app.models.assessment import Assessment
+    from app.models.assessment import Assessment, modalidad_norm
     from app.models.answer_key import AnswerKey
     assessments = db.query(Assessment).filter(Assessment.course_id == course_id).order_by(Assessment.created_at.desc()).all()
     result = []
@@ -114,6 +118,7 @@ def list_assessments(course_id: UUID, db: Session = Depends(get_db)):
             "n_questions": a.version_count or 40,
             "has_answer_key": ak is not None,
             "answer_key_valid": ak.is_valid if ak else False,
+            "modalidad": modalidad_norm(a.modalidad),
             "created_at": str(a.created_at)[:10] if a.created_at else None,
         })
     return result
@@ -121,12 +126,20 @@ def list_assessments(course_id: UUID, db: Session = Depends(get_db)):
 @router.post("/", dependencies=[Depends(req_profesor)])
 def create_assessment(payload: AssessmentIn, db: Session = Depends(get_db)):
     import uuid as _uuid
-    from app.models.assessment import Assessment
-    from app.models.answer_key import AnswerKey
+    from app.models.assessment import Assessment, MODALIDADES, MODALIDAD_ALTERNATIVAS, modalidad_norm
+    from app.models.answer_key import (
+        AnswerKey, AnswerKeyItem, QUESTION_TYPE_OPEN_RESPONSE,
+    )
+    modalidad = modalidad_norm(payload.modalidad)
+    if modalidad not in MODALIDADES:
+        modalidad = MODALIDAD_ALTERNATIVAS
+    es_desarrollo = modalidad in ("desarrollo", "mixta")
+    # En desarrollo puro, n_questions describe las preguntas de desarrollo (no la grilla OCR).
     a = Assessment(
         course_id=_uuid.UUID(payload.course_id),
         name=payload.name,
         status="draft",
+        modalidad=modalidad,
         has_versions=len(payload.versions) > 1,
         version_count=payload.n_questions,
         n_questions=payload.n_questions,
@@ -147,15 +160,30 @@ def create_assessment(payload: AssessmentIn, db: Session = Depends(get_db)):
         invalid_partial_rule_count=0,
     )
     db.add(ak)
+    db.flush()
+    # Desarrollo/mixta: sembrar preguntas abiertas iniciales para que el gestor no arranque vacío
+    # y para que el flujo (inferencia por question_type) reconozca la modalidad de inmediato.
+    n_seed = 0
+    if es_desarrollo:
+        n_seed = payload.n_desarrollo if payload.n_desarrollo > 0 else (
+            payload.n_questions if modalidad == "desarrollo" else 1)
+        n_seed = max(1, min(n_seed, 40))
+        for i in range(1, n_seed + 1):
+            db.add(AnswerKeyItem(
+                answer_key_id=ak.id, question_number=i, version="A",
+                correct_answer="", weight=10.0, is_annulled=False,
+                question_type=QUESTION_TYPE_OPEN_RESPONSE, enunciado=None,
+            ))
     db.commit()
     db.refresh(a)
     return {"id": str(a.id), "name": a.name, "course_id": str(a.course_id),
-            "status": a.status, "n_questions": payload.n_questions}
+            "status": a.status, "n_questions": payload.n_questions,
+            "modalidad": a.modalidad, "n_desarrollo": n_seed}
 
 
 @router.get("/{assessment_id}/config")
 def get_assessment_config(assessment_id: UUID, db: Session = Depends(get_db)):
-    from app.models.assessment import Assessment
+    from app.models.assessment import Assessment, modalidad_norm
     from app.services.result_service import listar_escalas
     a = db.query(Assessment).filter(Assessment.id == assessment_id).first()
     if not a:
@@ -167,6 +195,7 @@ def get_assessment_config(assessment_id: UUID, db: Session = Depends(get_db)):
         "grading_scale": a.grading_scale or "chile_1_7",
         "passing_threshold": a.passing_threshold or 60.0,
         "status": a.status,
+        "modalidad": modalidad_norm(a.modalidad),
         "course_id": str(a.course_id),
         "available_scales": listar_escalas(),
     }
