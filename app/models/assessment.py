@@ -46,6 +46,10 @@ class Assessment(UUIDMixin, TimestampMixin, Base):
     # Aditivo: las evaluaciones existentes quedan 'escrita' (server_default), sin cambios.
     modalidad: Mapped[str] = mapped_column(String(20), default=MODALIDAD_ESCRITA,
                                            server_default=MODALIDAD_ESCRITA, nullable=False)
+    # Opt-in del docente: en escalas de BANDAS (EEUU/UK/IB/ECTS), mover los cortes con la
+    # exigencia en vez de dejarlos fijos. Solo aplica a esas escalas; el resto lo ignora.
+    bandas_moviles: Mapped[bool] = mapped_column(Boolean, default=False,
+                                                 server_default="0", nullable=False)
 
     course = relationship("Course", back_populates="assessments")
     answer_key = relationship("AnswerKey", back_populates="assessment", uselist=False, cascade="all, delete-orphan")

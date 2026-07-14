@@ -102,6 +102,8 @@ class AssessmentIn(_BaseModel):
     modalidad: str = "alternativas"
     # Solo desarrollo/mixta: cuántas preguntas de desarrollo sembrar (peso por puntaje).
     n_desarrollo: int = 0
+    # Opt-in: en escalas de bandas, mover los cortes con la exigencia (curva la evaluación).
+    bandas_moviles: bool = False
 
 @router.get("/by-course/{course_id}")
 def list_assessments(course_id: UUID, db: Session = Depends(get_db)):
@@ -141,6 +143,7 @@ def create_assessment(payload: AssessmentIn, db: Session = Depends(get_db)):
         name=payload.name,
         status="draft",
         modalidad=modalidad,
+        bandas_moviles=bool(payload.bandas_moviles),
         has_versions=len(payload.versions) > 1,
         version_count=payload.n_questions,
         n_questions=payload.n_questions,
@@ -261,7 +264,8 @@ def oral_estudiantes(assessment_id: UUID, db: Session = Depends(get_db)):
         if sv:
             acc = sum(fraccion_logro(niv, sv[cn]) * w for cn, w, niv in criterios if cn in sv)
             logro_pct = round(acc / peso_total * 100, 1)
-            nota, _et, _ap = calculate_grade(logro_pct, escala, exigencia)
+            nota, _et, _ap = calculate_grade(logro_pct, escala, exigencia,
+                                             banda_movil=bool(getattr(a, "bandas_moviles", False)))
             nota = round(nota, 1)
         filas.append({
             "student_id": str(st.id), "nombre": nombre, "rut": st.rut,
@@ -286,6 +290,7 @@ def get_assessment_config(assessment_id: UUID, db: Session = Depends(get_db)):
         "passing_threshold": a.passing_threshold or 60.0,
         "status": a.status,
         "modalidad": modalidad_norm(a.modalidad),
+        "bandas_moviles": bool(getattr(a, "bandas_moviles", False)),
         "course_id": str(a.course_id),
         "available_scales": listar_escalas(),
     }
@@ -305,9 +310,13 @@ def update_assessment_config(assessment_id: UUID, payload: dict, db: Session = D
     if "n_questions" in payload:
         a.n_questions = int(payload["n_questions"])
         a.version_count = int(payload["n_questions"])
+    if "bandas_moviles" in payload:
+        a.bandas_moviles = bool(payload["bandas_moviles"])
     db.commit()
     db.refresh(a)
-    return {"id": str(a.id), "name": a.name, "grading_scale": a.grading_scale, "passing_threshold": a.passing_threshold}
+    return {"id": str(a.id), "name": a.name, "grading_scale": a.grading_scale,
+            "passing_threshold": a.passing_threshold,
+            "bandas_moviles": bool(getattr(a, "bandas_moviles", False))}
 
 
 @router.get("/grading-scales/list")

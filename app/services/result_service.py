@@ -84,7 +84,8 @@ GRADING_SCALES = {
         "type": "letter",
         "compute": {"kind": "band", "bands": [
             (97, "A+"), (93, "A"), (90, "A-"), (87, "B+"), (83, "B"), (80, "B-"),
-            (77, "C+"), (73, "C"), (70, "C-"), (67, "D+"), (60, "D"), (0, "F")]},
+            (77, "C+"), (73, "C"), (70, "C-"), (67, "D+"), (60, "D"), (0, "F")],
+            "passing_cut": 60},
         "description": "A+ A A- B+ B B- C+ C C- D+ D F (bandas fijas).",
     },
     "uk_honours": {
@@ -92,21 +93,24 @@ GRADING_SCALES = {
         "type": "classification",
         "compute": {"kind": "band", "bands": [
             (70, "First Class"), (60, "Upper Second (2:1)"), (50, "Lower Second (2:2)"),
-            (40, "Third Class"), (0, "Fail")]},
+            (40, "Third Class"), (0, "Fail")],
+            "passing_cut": 40},
         "description": "First / 2:1 / 2:2 / Third / Fail (bandas fijas).",
     },
     "ects": {
         "name": "Escala europea ECTS A–F", "country": "Europa (ECTS)", "region": "EU",
         "type": "letter",
         "compute": {"kind": "band", "bands": [
-            (90, "A"), (80, "B"), (70, "C"), (60, "D"), (50, "E"), (0, "F")]},
+            (90, "A"), (80, "B"), (70, "C"), (60, "D"), (50, "E"), (0, "F")],
+            "passing_cut": 50},
         "description": "A B C D E F (bandas de referencia ECTS).",
     },
     "ib_7": {
         "name": "Bachillerato Internacional 1 – 7", "country": "Internacional IB", "region": "IB",
         "type": "letter",
         "compute": {"kind": "band", "bands": [
-            (97, "7"), (88, "6"), (78, "5"), (67, "4"), (56, "3"), (44, "2"), (0, "1")]},
+            (97, "7"), (88, "6"), (78, "5"), (67, "4"), (56, "3"), (44, "2"), (0, "1")],
+            "passing_cut": 67},
         "description": "Escala IB por bandas. Aprobacion desde 4.",
     },
 }
@@ -153,14 +157,34 @@ def grade_linear(percentage: float, spec: dict, passing_threshold: float):
     return grade, f"{grade:.{dec}f}", passed
 
 
-def grade_band(percentage: float, spec: dict, passing_threshold: float):
-    """Letra por bandas nacionales fijas. La aprobacion se alinea a la exigencia."""
+def grade_band(percentage: float, spec: dict, passing_threshold: float, movil: bool = False):
+    """Letra por bandas nacionales.
+
+    Por defecto las bandas son FIJAS (estandar: una 'A' de EEUU es >=90% siempre) y la
+    aprobacion es alcanzar la banda que aprueba (passing_cut). Con `movil=True` (opt-in del
+    docente) se aplica la exigencia como en las escalas numericas: el % del alumno se
+    re-escala en dos tramos anclados en passing_cut, de modo que la exigencia elegida cae
+    justo en la banda de aprobacion y el resto se estira/comprime. Curva la evaluacion.
+    """
+    p = percentage
+    cut = spec.get("passing_cut")
+    if movil and cut is not None:
+        E = passing_threshold
+        if p >= E:
+            top = (100.0 - E) or 1e-9
+            p = cut + (p - E) / top * (100.0 - cut)
+        else:
+            bot = E or 1e-9
+            p = p / bot * cut
+        p = max(0.0, min(100.0, p))
     label = spec["bands"][-1][1]
-    for cut, lab in spec["bands"]:
-        if percentage >= cut:
+    for c, lab in spec["bands"]:
+        if p >= c:
             label = lab
             break
-    return percentage, label, percentage >= passing_threshold
+    # Aprueba si alcanza la banda de aprobacion (passing_cut sobre el % efectivo).
+    aprob = (p >= cut) if cut is not None else (percentage >= passing_threshold)
+    return percentage, label, aprob
 
 
 # Exigencia (%) por defecto por escala: el % de logro que cae en la nota de aprobacion,
@@ -177,7 +201,7 @@ EXIGENCIA_DEFAULT = {
     "ects": 50,         # bandas de referencia ECTS
     "usa_letter": 60,   # D a 60%
     "uk_honours": 40,   # pass a 40%
-    "ib_7": 57,         # nivel 4 IB ~57%
+    "ib_7": 67,         # nivel 4 IB (banda de aprobación real)
     "percentage": 60,   # directo (elige el docente)
 }
 
@@ -211,11 +235,14 @@ def convertir_multiescala(percentage: float, passing_threshold: float = 60.0,
     return salida
 
 
-def calculate_grade(percentage: float, scale: str, passing_threshold: float = 60.0):
+def calculate_grade(percentage: float, scale: str, passing_threshold: float = 60.0,
+                    banda_movil: bool = False):
     """Calcula nota segun la escala del registro. Retorna (grade_value, grade_label, passed).
 
     Un solo motor: el % de logro es el invariante; la escala solo decide como se
     renderiza y la exigencia (passing_threshold) donde cae la linea de aprobacion.
+    `banda_movil` (opt-in por evaluacion) solo afecta a las escalas de bandas: mueve los
+    cortes con la exigencia en vez de dejarlos fijos.
     """
     spec = GRADING_SCALES.get(scale)
     if spec is None:                                   # fallback: escala chilena
@@ -226,7 +253,7 @@ def calculate_grade(percentage: float, scale: str, passing_threshold: float = 60
     if kind == "linear":
         return grade_linear(percentage, compute, passing_threshold)
     if kind == "band":
-        return grade_band(percentage, compute, passing_threshold)
+        return grade_band(percentage, compute, passing_threshold, movil=banda_movil)
     # percentage
     return percentage, f"{percentage}%", percentage >= passing_threshold
 
@@ -303,7 +330,9 @@ def get_result(db: Session, scan_id):
     grading_scale = getattr(assessment, 'grading_scale', None) or (course.grading_scale if course else None) or 'chile_1_7'
     passing_threshold = getattr(assessment, 'passing_threshold', None) or (course.passing_threshold if course else None) or 60.0
 
-    grade_value, grade_label, passed = calculate_grade(percentage, grading_scale, passing_threshold)
+    grade_value, grade_label, passed = calculate_grade(
+        percentage, grading_scale, passing_threshold,
+        banda_movil=bool(getattr(assessment, "bandas_moviles", False)))
     final_grade = grade_value
     pass_status = "approved" if passed else "failed"
 

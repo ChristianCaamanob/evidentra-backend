@@ -17,6 +17,7 @@ class AssessmentOut(ORMBaseSchema):
     has_answer_key: bool
     briefing_level: str
     modalidad: str = "alternativas"
+    bandas_moviles: bool = False
     created_at: datetime
     updated_at: datetime
 

@@ -117,7 +117,8 @@ def libro_notas(db, assessment_id, escala: str = "chile_1_7", exigencia: float =
                              str(elegida).upper() == str(item.correct_answer).upper()) else 0.0
                 contrib += ok * w
         pct = round(contrib / total_weight * 100, 1)
-        nota, etiqueta, aprob = calculate_grade(pct, escala, exigencia)
+        nota, etiqueta, aprob = calculate_grade(
+            pct, escala, exigencia, banda_movil=bool(getattr(assessment, "bandas_moviles", False)))
         filas.append({"estudiante": pseudo, "logro_pct": pct, "nota": round(nota, 1),
                       "etiqueta": etiqueta, "aprobado": bool(aprob),
                       "desarrollo_pendiente": pendiente})
