@@ -221,35 +221,51 @@ def delete_assessment(assessment_id: UUID, db: Session = Depends(get_db)):
 @router.get("/{assessment_id}/oral/estudiantes")
 def oral_estudiantes(assessment_id: UUID, db: Session = Depends(get_db)):
     """Progreso de una evaluación ORAL: cada estudiante de la nómina con su estado
-    (calificado o no) y su nota, reutilizando el libro de notas (que ya trata 'oral')."""
+    (calificado o no) y su nota, calculada directo desde sus registros de validación
+    y la rúbrica (independiente del libro de notas, robusto sobre nóminas grandes)."""
     from app.models.assessment import Assessment, modalidad_norm
     from app.models.student import Student
     from app.models.validacion import RegistroValidacion
+    from app.models.answer_key import AnswerKey, AnswerKeyItem, RubricCriterion, QUESTION_TYPE_OPEN_RESPONSE
     from app.services import matriz_service
-    from app.services.libro_notas_service import libro_notas
+    from app.services.rubrica_escala_service import fraccion_logro
+    from app.services.result_service import calculate_grade
     a = db.get(Assessment, assessment_id)
     if not a:
         raise HTTPException(status_code=404, detail="Evaluación no encontrada")
+    escala = a.grading_scale or "chile_1_7"
+    exigencia = a.passing_threshold if a.passing_threshold is not None else 60.0
+    # Criterios de la rúbrica oral (nombre -> peso, niveles_json) desde los ítems open_response.
+    criterios = []  # (nombre, peso, niveles_json)
+    ak = db.query(AnswerKey).filter(AnswerKey.assessment_id == assessment_id).first()
+    if ak:
+        for it in db.query(AnswerKeyItem).filter(
+                AnswerKeyItem.answer_key_id == ak.id,
+                AnswerKeyItem.question_type == QUESTION_TYPE_OPEN_RESPONSE).all():
+            for c in db.query(RubricCriterion).filter(RubricCriterion.answer_key_item_id == it.id).all():
+                criterios.append((c.name, c.weight or 1.0, c.niveles_json))
+    peso_total = sum(w for _, w, _ in criterios) or 1.0
+    # Registros por seudónimo: {pseudo: {criterio: nivel_docente}}
+    por_pseudo: dict[str, dict] = {}
+    for r in db.query(RegistroValidacion).filter(
+            RegistroValidacion.assessment_id == str(assessment_id)).all():
+        pseudo = str(r.respuesta_ref).split("#")[0]
+        por_pseudo.setdefault(pseudo, {})[r.criterio] = r.nivel_docente
     students = db.query(Student).filter(Student.course_id == a.course_id).all()
-    try:
-        libro = libro_notas(db, assessment_id, a.grading_scale or "chile_1_7",
-                            a.passing_threshold if a.passing_threshold is not None else 60.0)
-        by_pseudo = {f["estudiante"]: f for f in libro.get("estudiantes", [])}
-    except Exception:
-        by_pseudo = {}
-    graded = {str(r.respuesta_ref).split("#")[0]
-              for r in db.query(RegistroValidacion).filter(
-                  RegistroValidacion.assessment_id == str(assessment_id)).all()}
     filas = []
     for st in students:
         p = matriz_service._pseudo(st.id)
-        fila = by_pseudo.get(p)
+        sv = por_pseudo.get(p)
         nombre = (" ".join(x for x in [st.nombres, st.apellido_paterno, st.apellido_materno] if x)).strip() or st.rut
+        nota = logro_pct = None
+        if sv:
+            acc = sum(fraccion_logro(niv, sv[cn]) * w for cn, w, niv in criterios if cn in sv)
+            logro_pct = round(acc / peso_total * 100, 1)
+            nota, _et, _ap = calculate_grade(logro_pct, escala, exigencia)
+            nota = round(nota, 1)
         filas.append({
             "student_id": str(st.id), "nombre": nombre, "rut": st.rut,
-            "calificado": p in graded,
-            "nota": (fila or {}).get("nota"),
-            "logro_pct": (fila or {}).get("logro_pct"),
+            "calificado": sv is not None, "nota": nota, "logro_pct": logro_pct,
         })
     return {"modalidad": modalidad_norm(a.modalidad), "n": len(filas),
             "n_calificados": sum(1 for f in filas if f["calificado"]), "estudiantes": filas}
