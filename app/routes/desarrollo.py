@@ -247,6 +247,7 @@ def _serializa_criterio(c) -> dict:
         "nivel_exigencia": c.nivel_exigencia, "umbral_confianza": float(c.umbral_confianza),
         "penaliza_forma": bool(c.penaliza_forma), "sinonimos": c.sinonimos_json or [],
         "fuera_de_alcance": c.fuera_de_alcance, "seccion": c.seccion, "ambito": c.ambito,
+        "niveles": c.niveles_json or None,   # escala propia N-niveles (Excelente=3/…); None = 3 niveles por defecto
         "anclas": [{"texto": a.texto, "nivel": a.nivel} for a in anclas],
     }
 
@@ -302,7 +303,8 @@ def guardar_rubrica(item_id: UUID, payload: dict, db: Session = Depends(get_db))
             umbral_confianza=float(c.get("umbral_confianza", 0.7)),
             fuera_de_alcance=(c.get("fuera_de_alcance") or None),
             seccion=((c.get("seccion") or None) and str(c["seccion"])[:120]),
-            ambito=c.get("ambito") or "individual")
+            ambito=c.get("ambito") or "individual",
+            niveles_json=(c.get("niveles") or None))   # preserva la escala N-niveles importada
         db.add(crit)
         db.flush()
         for j, a in enumerate(c.get("anclas", [])):
