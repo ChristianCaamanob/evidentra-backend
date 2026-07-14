@@ -230,6 +230,7 @@ def oral_estudiantes(assessment_id: UUID, db: Session = Depends(get_db)):
     from app.models.student import Student
     from app.models.validacion import RegistroValidacion
     from app.models.answer_key import AnswerKey, AnswerKeyItem, RubricCriterion, QUESTION_TYPE_OPEN_RESPONSE
+    from app.models.grupo import Grupo
     from app.services import matriz_service
     from app.services.rubrica_escala_service import fraccion_logro
     from app.services.result_service import calculate_grade
@@ -238,43 +239,64 @@ def oral_estudiantes(assessment_id: UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Evaluación no encontrada")
     escala = a.grading_scale or "chile_1_7"
     exigencia = a.passing_threshold if a.passing_threshold is not None else 60.0
-    # Criterios de la rúbrica oral (nombre -> peso, niveles_json) desde los ítems open_response.
-    criterios = []  # (nombre, peso, niveles_json)
+    # Criterios de la rúbrica oral (nombre, peso, niveles_json, ámbito) desde los ítems abiertos.
+    criterios = []
     ak = db.query(AnswerKey).filter(AnswerKey.assessment_id == assessment_id).first()
     if ak:
         for it in db.query(AnswerKeyItem).filter(
                 AnswerKeyItem.answer_key_id == ak.id,
                 AnswerKeyItem.question_type == QUESTION_TYPE_OPEN_RESPONSE).all():
             for c in db.query(RubricCriterion).filter(RubricCriterion.answer_key_item_id == it.id).all():
-                criterios.append((c.name, c.weight or 1.0, c.niveles_json))
-    peso_total = sum(w for _, w, _ in criterios) or 1.0
-    # Registros por seudónimo: {pseudo: {criterio: nivel_docente}}
+                criterios.append((c.name, c.weight or 1.0, c.niveles_json, c.ambito or "individual"))
+    peso_total = sum(w for _, w, _, _ in criterios) or 1.0
+    hay_grupal = any(amb == "grupal" for _, _, _, amb in criterios)
+    # Registros por seudónimo (incluye seudónimos de estudiante Y de grupo).
     por_pseudo: dict[str, dict] = {}
     for r in db.query(RegistroValidacion).filter(
             RegistroValidacion.assessment_id == str(assessment_id)).all():
         pseudo = str(r.respuesta_ref).split("#")[0]
         por_pseudo.setdefault(pseudo, {})[r.criterio] = r.nivel_docente
+    # Grupo de cada estudiante -> seudónimo del grupo (fuente de los criterios grupales).
+    grupo_por_est: dict[str, tuple] = {}   # student_id -> (grupo_pseudo, grupo_nombre)
+    for g in db.query(Grupo).filter(Grupo.assessment_id == str(assessment_id)).all():
+        gp = matriz_service._pseudo(g.id)
+        for integ in g.integrantes:
+            grupo_por_est[integ.student_id] = (gp, g.nombre)
     students = db.query(Student).filter(Student.course_id == a.course_id).all()
     filas = []
     for st in students:
         p = matriz_service._pseudo(st.id)
-        sv = por_pseudo.get(p)
+        sv_ind = por_pseudo.get(p, {})
+        gp_info = grupo_por_est.get(str(st.id))
+        sv_grp = por_pseudo.get(gp_info[0], {}) if gp_info else {}
         nombre = (" ".join(x for x in [st.nombres, st.apellido_paterno, st.apellido_materno] if x)).strip() or st.rut
-        nota = logro_pct = etiqueta = None
-        aprobado = None
-        if sv:
-            acc = sum(fraccion_logro(niv, sv[cn]) * w for cn, w, niv in criterios if cn in sv)
-            logro_pct = round(acc / peso_total * 100, 1)
+        acc = 0.0
+        resueltos = 0
+        for cn, w, niv, amb in criterios:
+            fuente = sv_grp if amb == "grupal" else sv_ind
+            if cn in fuente:
+                acc += fraccion_logro(niv, fuente[cn]) * w
+                resueltos += 1
+        completo = (len(criterios) > 0 and resueltos == len(criterios))
+        nota = logro_pct = etiqueta = aprobado = None
+        if resueltos > 0:
+            logro_pct = round(acc / peso_total * 100, 1)   # criterios sin resolver cuentan 0
             nota, etiqueta, aprobado = calculate_grade(
                 logro_pct, escala, exigencia, banda_movil=bool(getattr(a, "bandas_moviles", False)))
             nota = round(nota, 1)
         filas.append({
             "student_id": str(st.id), "nombre": nombre, "rut": st.rut,
-            "calificado": sv is not None, "nota": nota, "etiqueta": etiqueta,
-            "aprobado": aprobado, "logro_pct": logro_pct,
+            "calificado": completo, "parcial": (resueltos > 0 and not completo),
+            "grupo": gp_info[1] if gp_info else None,
+            "nota": nota if completo else None, "etiqueta": etiqueta if completo else None,
+            "aprobado": aprobado if completo else None,
+            "logro_pct": logro_pct if completo else None,
         })
     return {"modalidad": modalidad_norm(a.modalidad), "n": len(filas),
-            "n_calificados": sum(1 for f in filas if f["calificado"]), "estudiantes": filas}
+            "n_calificados": sum(1 for f in filas if f["calificado"]),
+            "hay_grupal": hay_grupal,
+            "criterios": [{"name": cn, "weight": w, "ambito": amb} for cn, w, niv, amb in criterios],
+            "estudiantes": filas}
 
 
 @router.get("/{assessment_id}/config")
