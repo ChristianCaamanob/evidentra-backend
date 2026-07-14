@@ -163,10 +163,41 @@ def grade_band(percentage: float, spec: dict, passing_threshold: float):
     return percentage, label, percentage >= passing_threshold
 
 
+# Exigencia (%) por defecto por escala: el % de logro que cae en la nota de aprobacion,
+# segun la convencion mas habitual de cada pais. El docente puede ajustarla por evaluacion.
+EXIGENCIA_DEFAULT = {
+    "chile_1_7": 60,    # convencion chilena (50-70; 60 lo mas comun)
+    "mexico_10": 60,    # aprueba 6/10
+    "colombia_5": 60,   # aprueba 3.0/5
+    "brasil_10": 60,    # aprueba 6/10 (habitual)
+    "espana_10": 50,    # aprobado 5/10
+    "francia_20": 50,   # moyenne 10/20
+    "alemania_5": 50,   # 4,0 aprueba (escala invertida)
+    "europe_10": 50,    # generica europea 5/10
+    "ects": 50,         # bandas de referencia ECTS
+    "usa_letter": 60,   # D a 60%
+    "uk_honours": 40,   # pass a 40%
+    "ib_7": 57,         # nivel 4 IB ~57%
+    "percentage": 60,   # directo (elige el docente)
+}
+
+# Orden de presentacion (los mas representativos primero) para selectores multinacionales.
+ESCALAS_ORDEN = [
+    "chile_1_7", "mexico_10", "colombia_5", "brasil_10", "espana_10",
+    "francia_20", "alemania_5", "europe_10", "ects", "usa_letter",
+    "uk_honours", "ib_7", "percentage",
+]
+
+
 def listar_escalas() -> dict:
-    """Metadata publica de las escalas (para /assessments y el conversor)."""
-    return {k: {kk: vv for kk, vv in v.items() if kk != "compute"}
-            for k, v in GRADING_SCALES.items()}
+    """Metadata publica de las escalas (para /assessments y el conversor), con la
+    exigencia (%) por defecto de cada pais y un orden de presentacion sugerido."""
+    def _meta(k, v):
+        d = {kk: vv for kk, vv in v.items() if kk != "compute"}
+        d["exigencia_default"] = EXIGENCIA_DEFAULT.get(k, 60)
+        d["orden"] = ESCALAS_ORDEN.index(k) if k in ESCALAS_ORDEN else 99
+        return d
+    return {k: _meta(k, v) for k, v in GRADING_SCALES.items()}
 
 
 def convertir_multiescala(percentage: float, passing_threshold: float = 60.0,
