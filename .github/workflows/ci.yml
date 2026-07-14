@@ -1,0 +1,39 @@
+name: CI
+
+# Gate de integración: cada push/PR corre el boot-check + la suite de tests.
+# El boot-check atrapa la clase de bug que tumbó Render (import no versionado de 'pagos').
+on:
+  push:
+    branches: [evalys-loop, main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # BD efímera de CI (SQLite en el runner); Alembic crea el esquema.
+      DATABASE_URL: "sqlite:///./ci.db"
+      SEED_DEMO: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Boot check (atrapa imports rotos / arranque)
+        run: python -c "import app.main; print('boot import OK')"
+
+      - name: Alembic upgrade head (verifica que las migraciones aplican)
+        run: alembic upgrade head
+
+      - name: Run tests
+        run: python -m pytest -q --no-header

@@ -193,8 +193,33 @@ def _seed_desarrollo(db) -> None:
     db.commit()
 
 
-def create_db_and_seed() -> None:
+def _init_schema() -> None:
+    """Crea/actualiza el esquema. Fuente de verdad = Alembic (upgrade head). Si Alembic no
+    está disponible o falla, cae a create_all (idempotente) para no bloquear el arranque."""
+    import logging
+    log = logging.getLogger("evalys")
+    if settings.run_migrations:
+        try:
+            import os
+            from alembic.config import Config
+            from alembic import command
+            root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))  # repo root
+            cfg = Config(os.path.join(root, "alembic.ini"))
+            cfg.set_main_option("script_location", os.path.join(root, "alembic"))  # robusto ante cwd
+            command.upgrade(cfg, "head")
+            log.info("Esquema al día vía Alembic (upgrade head).")
+            return
+        except Exception as e:  # noqa: BLE001
+            log.warning("Alembic upgrade falló, se usa create_all: %s", e)
     Base.metadata.create_all(bind=engine)
+
+
+def create_db_and_seed() -> None:
+    _init_schema()
+    # En producción real (SEED_DEMO=false) el sistema arranca vacío: los usuarios se
+    # auto-registran y crean sus cursos. Los datos demo solo para exhibición.
+    if not settings.seed_demo:
+        return
     db = SessionLocal()
     try:
         # Usuarios demo para el login (idempotentes): permiten mostrar el producto

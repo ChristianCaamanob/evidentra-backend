@@ -100,10 +100,19 @@ def test_bandas_letras_estandar():
 
 
 @pytest.mark.parametrize("ex", EXIGENCIAS)
-def test_bandas_aprobacion_sigue_la_exigencia(ex):
-    # La letra es por banda nacional fija, pero passed se alinea a la exigencia.
-    _, _, passed_justo = calculate_grade(ex, "usa_letter", ex)
-    _, _, passed_bajo = calculate_grade(ex - 1, "usa_letter", ex)
+def test_bandas_fijas_aprueban_en_su_corte(ex):
+    # Diseño: por defecto las bandas son FIJAS (estándar). La aprobación sigue el corte de la
+    # banda que aprueba (USA D=60%), NO la exigencia elegida.
+    _, _, passed_60 = calculate_grade(60.0, "usa_letter", ex)   # D -> aprueba
+    _, _, passed_59 = calculate_grade(59.0, "usa_letter", ex)   # F -> reprueba
+    assert passed_60 is True and passed_59 is False
+
+
+@pytest.mark.parametrize("ex", EXIGENCIAS)
+def test_bandas_moviles_siguen_la_exigencia(ex):
+    # Opt-in (banda_movil=True): la línea de aprobación se mueve a la exigencia elegida.
+    _, _, passed_justo = calculate_grade(ex, "usa_letter", ex, banda_movil=True)
+    _, _, passed_bajo = calculate_grade(ex - 1, "usa_letter", ex, banda_movil=True)
     assert passed_justo is True and passed_bajo is False
 
 
@@ -111,8 +120,13 @@ def test_bandas_aprobacion_sigue_la_exigencia(ex):
 @pytest.mark.parametrize("ex", EXIGENCIAS)
 @pytest.mark.parametrize("logro", [35.0, 55.0, 65.0, 88.0])
 def test_aprobacion_consistente_entre_escalas(logro, ex):
+    # El invariante "mismo logro -> mismo veredicto" vale para escalas NUMÉRICAS (siguen la
+    # exigencia). Las de BANDAS son de corte fijo por estándar (no siguen la exigencia por
+    # defecto), así que se excluyen de este invariante intencionalmente.
+    from app.services.result_service import GRADING_SCALES
+    numericas = {k for k, v in GRADING_SCALES.items() if v["compute"]["kind"] != "band"}
     conv = convertir_multiescala(logro, ex)
-    veredictos = {k: v["passed"] for k, v in conv.items()}
+    veredictos = {k: v["passed"] for k, v in conv.items() if k in numericas}
     esperado = logro >= ex
     assert all(v is esperado for v in veredictos.values()), veredictos
 
