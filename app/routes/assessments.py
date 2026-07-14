@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import io
@@ -133,7 +133,8 @@ def create_assessment(payload: AssessmentIn, db: Session = Depends(get_db)):
     modalidad = modalidad_norm(payload.modalidad)
     if modalidad not in MODALIDADES:
         modalidad = MODALIDAD_ALTERNATIVAS
-    es_desarrollo = modalidad in ("desarrollo", "mixta")
+    # Modalidades que corrigen por RÚBRICA (ítems open_response): desarrollo, mixta y oral.
+    es_desarrollo = modalidad in ("desarrollo", "mixta", "oral")
     # En desarrollo puro, n_questions describe las preguntas de desarrollo (no la grilla OCR).
     a = Assessment(
         course_id=_uuid.UUID(payload.course_id),
@@ -165,8 +166,12 @@ def create_assessment(payload: AssessmentIn, db: Session = Depends(get_db)):
     # y para que el flujo (inferencia por question_type) reconozca la modalidad de inmediato.
     n_seed = 0
     if es_desarrollo:
-        n_seed = payload.n_desarrollo if payload.n_desarrollo > 0 else (
-            payload.n_questions if modalidad == "desarrollo" else 1)
+        if modalidad == "oral":
+            n_seed = 1                       # una tarea oral; sus criterios se definen en la rúbrica
+        elif payload.n_desarrollo > 0:
+            n_seed = payload.n_desarrollo
+        else:
+            n_seed = payload.n_questions if modalidad == "desarrollo" else 1
         n_seed = max(1, min(n_seed, 40))
         for i in range(1, n_seed + 1):
             db.add(AnswerKeyItem(
@@ -179,6 +184,75 @@ def create_assessment(payload: AssessmentIn, db: Session = Depends(get_db)):
     return {"id": str(a.id), "name": a.name, "course_id": str(a.course_id),
             "status": a.status, "n_questions": payload.n_questions,
             "modalidad": a.modalidad, "n_desarrollo": n_seed}
+
+
+@router.delete("/{assessment_id}", dependencies=[Depends(req_profesor)])
+def delete_assessment(assessment_id: UUID, db: Session = Depends(get_db)):
+    """Elimina una evaluación y todo lo que cuelga de ella (pauta, ítems, escaneos,
+    grupos, sesiones en vivo, registros de validación). Acción del docente (G1)."""
+    from app.models.assessment import Assessment
+    a = db.get(Assessment, assessment_id)
+    if not a:
+        raise HTTPException(status_code=404, detail="Evaluación no encontrada")
+    aid_str = str(assessment_id)
+    # Dependencias que no están en una cascada ORM: se borran defensivamente por si el
+    # modelo no existe en algún entorno (additivo/tolerante).
+    def _wipe(import_path, model_name, *filters):
+        try:
+            mod = __import__(import_path, fromlist=[model_name])
+            Model = getattr(mod, model_name)
+            q = db.query(Model)
+            for f in filters:
+                q = q.filter(f(Model))
+            q.delete(synchronize_session=False)
+        except Exception as _e:  # noqa: BLE001
+            import logging
+            logging.getLogger("evalys").warning("delete_assessment: no se pudo limpiar %s: %s", model_name, _e)
+    _wipe("app.models.validacion", "RegistroValidacion", lambda M: M.assessment_id == aid_str)
+    _wipe("app.models.scan", "Scan", lambda M: M.assessment_id == assessment_id)
+    _wipe("app.models.en_vivo", "SesionEnVivo", lambda M: M.assessment_id == aid_str)
+    _wipe("app.models.grupo", "Grupo", lambda M: M.assessment_id == aid_str)
+    # answer_key + items + criterios + anclas caen por cascada ORM al borrar el assessment
+    db.delete(a)
+    db.commit()
+    return {"deleted": True, "id": aid_str}
+
+
+@router.get("/{assessment_id}/oral/estudiantes")
+def oral_estudiantes(assessment_id: UUID, db: Session = Depends(get_db)):
+    """Progreso de una evaluación ORAL: cada estudiante de la nómina con su estado
+    (calificado o no) y su nota, reutilizando el libro de notas (que ya trata 'oral')."""
+    from app.models.assessment import Assessment, modalidad_norm
+    from app.models.student import Student
+    from app.models.validacion import RegistroValidacion
+    from app.services import matriz_service
+    from app.services.libro_notas_service import libro_notas
+    a = db.get(Assessment, assessment_id)
+    if not a:
+        raise HTTPException(status_code=404, detail="Evaluación no encontrada")
+    students = db.query(Student).filter(Student.course_id == a.course_id).all()
+    try:
+        libro = libro_notas(db, assessment_id, a.grading_scale or "chile_1_7",
+                            a.passing_threshold if a.passing_threshold is not None else 60.0)
+        by_pseudo = {f["estudiante"]: f for f in libro.get("estudiantes", [])}
+    except Exception:
+        by_pseudo = {}
+    graded = {str(r.respuesta_ref).split("#")[0]
+              for r in db.query(RegistroValidacion).filter(
+                  RegistroValidacion.assessment_id == str(assessment_id)).all()}
+    filas = []
+    for st in students:
+        p = matriz_service._pseudo(st.id)
+        fila = by_pseudo.get(p)
+        nombre = (" ".join(x for x in [st.nombres, st.apellido_paterno, st.apellido_materno] if x)).strip() or st.rut
+        filas.append({
+            "student_id": str(st.id), "nombre": nombre, "rut": st.rut,
+            "calificado": p in graded,
+            "nota": (fila or {}).get("nota"),
+            "logro_pct": (fila or {}).get("logro_pct"),
+        })
+    return {"modalidad": modalidad_norm(a.modalidad), "n": len(filas),
+            "n_calificados": sum(1 for f in filas if f["calificado"]), "estudiantes": filas}
 
 
 @router.get("/{assessment_id}/config")
