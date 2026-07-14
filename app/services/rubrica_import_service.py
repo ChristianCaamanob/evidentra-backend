@@ -31,6 +31,54 @@ def _norm(s) -> str:
 _NIVEL_RE = re.compile(r"(.+?)\(\s*(\d+)\s*puntos?\s*\)", re.I)
 
 
+def _num_a_la_derecha(ws, r, c, maxc):
+    """Primer valor numérico en las celdas a la derecha de (r,c)."""
+    for cc in range(c + 1, min(maxc, c + 5) + 1):
+        v = ws.cell(r, cc).value
+        if isinstance(v, (int, float)):
+            return float(v)
+        if v is not None:
+            try:
+                return float(str(v).replace("%", "").replace(",", ".").strip())
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _detectar_config(ws, maxr, maxc):
+    """Detecta los parámetros de calificación de la planilla (exigencia, nota mín/máx,
+    puntaje máx) para configurar la evaluación sin re-tipear. Heurístico y tolerante."""
+    cfg = {}
+    for r in range(1, maxr + 1):
+        for c in range(1, maxc + 1):
+            v = ws.cell(r, c).value
+            if v is None or isinstance(v, (int, float)):
+                continue
+            t = _norm(v)
+            val = _num_a_la_derecha(ws, r, c, maxc)
+            if val is None:
+                continue
+            if ("para 4" in t or "exigencia" in t) and 0 < val <= 100 and "exigencia" not in cfg:
+                cfg["exigencia"] = round(val, 1)
+            elif ("nota minima" in t or "nota min" in t) and val <= 10 and "nota_min" not in cfg:
+                cfg["nota_min"] = val
+            elif ("nota maxima" in t or "nota max" in t) and val <= 10 and "nota_max" not in cfg:
+                cfg["nota_max"] = val
+            elif ("puntaje max" in t or "ptje max" in t) and "puntaje_max" not in cfg:
+                cfg["puntaje_max"] = val
+    # Escala sugerida por la nota máxima (o chilena por defecto si el piso es ~1).
+    nm = cfg.get("nota_max")
+    if nm and abs(nm - 7) < 0.6:
+        cfg["escala"] = "chile_1_7"
+    elif nm and abs(nm - 10) < 0.6:
+        cfg["escala"] = "europe_10"
+    elif nm and abs(nm - 20) < 0.9:
+        cfg["escala"] = "francia_20"
+    elif "escala" not in cfg and cfg.get("nota_min", 1) <= 1.5:
+        cfg["escala"] = "chile_1_7"     # piso 1.0 -> escala chilena
+    return cfg or None
+
+
 def parse_rubrica_xlsx(data: bytes) -> dict:
     import openpyxl
 
@@ -121,6 +169,7 @@ def parse_rubrica_xlsx(data: bytes) -> dict:
         "n_criterios": len(criterios),
         "escala": [{"nivel": n, "puntos": p} for _, n, p in nivel_cols],
         "secciones": sorted({c["seccion"] for c in criterios if c["seccion"]}),
+        "config": _detectar_config(ws, maxr, maxc),   # exigencia/escala detectadas de la planilla
         "advertencias": advertencias,
         "nota": "Preview heuristico: revisa y confirma antes de guardar (el docente decide, G1).",
     }

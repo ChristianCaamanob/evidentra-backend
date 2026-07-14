@@ -208,15 +208,18 @@ def activar_version(ak_id: UUID, payload: dict, db: Session = Depends(get_db)):
 
 @router.post("/answer-key-items/{item_id}/rubrica/importar", dependencies=[Depends(req_profesor)])
 async def importar_rubrica(item_id: UUID, file: UploadFile = File(...), confirmar: bool = False,
-                           db: Session = Depends(get_db)):
+                           aplicar_config: bool = True, db: Session = Depends(get_db)):
     """
     Importa una rubrica desde .xlsx a un item. Sin `confirmar` devuelve solo el PREVIEW (no
-    escribe); con `confirmar=true` crea los criterios en el item. El parseo es heuristico: el
-    docente revisa y confirma (G1).
+    escribe); con `confirmar=true` crea los criterios en el item. Si la planilla trae parametros
+    de calificacion (exigencia, escala) y `aplicar_config`, tambien CONFIGURA la evaluacion
+    (escala + exigencia) para que la nota salga identica a la planilla. Heuristico: el docente
+    revisa y confirma (G1).
     """
     try:
         from app.services import rubrica_import_service
-        from app.models.answer_key import AnswerKeyItem, RubricCriterion
+        from app.models.answer_key import AnswerKeyItem, AnswerKey, RubricCriterion
+        from app.models.assessment import Assessment
         preview = rubrica_import_service.parse_rubrica_xlsx(await file.read())
         if not confirmar:
             return {"guardado": False, **preview}
@@ -228,8 +231,23 @@ async def importar_rubrica(item_id: UUID, file: UploadFile = File(...), confirma
                 answer_key_item_id=item_id, name=c["name"][:255], weight=c["weight"],
                 order=i, niveles_json=c["niveles"], ambito=c["ambito"],
                 seccion=(c["seccion"][:120] if c["seccion"] else None)))
+        # Configurar la evaluacion desde la planilla (escala + exigencia).
+        config_aplicada = None
+        cfg = preview.get("config") or {}
+        if aplicar_config and cfg:
+            ak = db.get(AnswerKey, item.answer_key_id)
+            a = db.get(Assessment, ak.assessment_id) if ak else None
+            if a:
+                aplicada = {}
+                if cfg.get("escala"):
+                    a.grading_scale = cfg["escala"]; aplicada["escala"] = cfg["escala"]
+                if cfg.get("exigencia") is not None:
+                    a.passing_threshold = float(cfg["exigencia"]); aplicada["exigencia"] = cfg["exigencia"]
+                if aplicada:
+                    db.add(a); config_aplicada = aplicada
         db.commit()
-        return {"guardado": True, "criterios_creados": len(preview["criterios"]), **preview}
+        return {"guardado": True, "criterios_creados": len(preview["criterios"]),
+                "config_aplicada": config_aplicada, **preview}
     except Exception:
         logger.error(f"Error en importar_rubrica {item_id}: {traceback.format_exc()}")
         raise
