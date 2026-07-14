@@ -260,16 +260,18 @@ def oral_estudiantes(assessment_id: UUID, db: Session = Depends(get_db)):
         p = matriz_service._pseudo(st.id)
         sv = por_pseudo.get(p)
         nombre = (" ".join(x for x in [st.nombres, st.apellido_paterno, st.apellido_materno] if x)).strip() or st.rut
-        nota = logro_pct = None
+        nota = logro_pct = etiqueta = None
+        aprobado = None
         if sv:
             acc = sum(fraccion_logro(niv, sv[cn]) * w for cn, w, niv in criterios if cn in sv)
             logro_pct = round(acc / peso_total * 100, 1)
-            nota, _et, _ap = calculate_grade(logro_pct, escala, exigencia,
-                                             banda_movil=bool(getattr(a, "bandas_moviles", False)))
+            nota, etiqueta, aprobado = calculate_grade(
+                logro_pct, escala, exigencia, banda_movil=bool(getattr(a, "bandas_moviles", False)))
             nota = round(nota, 1)
         filas.append({
             "student_id": str(st.id), "nombre": nombre, "rut": st.rut,
-            "calificado": sv is not None, "nota": nota, "logro_pct": logro_pct,
+            "calificado": sv is not None, "nota": nota, "etiqueta": etiqueta,
+            "aprobado": aprobado, "logro_pct": logro_pct,
         })
     return {"modalidad": modalidad_norm(a.modalidad), "n": len(filas),
             "n_calificados": sum(1 for f in filas if f["calificado"]), "estudiantes": filas}
