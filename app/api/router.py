@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from app.api.deps import req_lectura_datos
-from app.core.db import SessionLocal
+from app.core.db import SessionLocal, engine
 from app.models.assessment import Assessment
 from app.models.course import Course
 from app.models.scan import Scan
@@ -18,7 +18,8 @@ api_router = APIRouter()
 
 @api_router.get("/health", tags=["health"])
 def healthcheck():
-    return {"status": "ok", "service": "evidentra-backend-mvp"}
+    # Motor de BD activo (sin credenciales): 'postgresql' = persistente; 'sqlite' = efímero.
+    return {"status": "ok", "service": "evidentra-backend-mvp", "db": engine.dialect.name}
 
 
 @api_router.get("/bootstrap", response_model=BootstrapOut, tags=["health"])
