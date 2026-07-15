@@ -37,6 +37,7 @@ from app.services import cualitativo_service
 from app.services import rutas_service
 from app.services import literatura_service
 from app.services import meta_analisis_service
+from app.services import manuscrito_service
 
 # Todo el modulo Investigador exige rol investigador (o creador). El director NO accede a
 # este modulo de investigacion; su alcance es ver/exportar datos de estudiante y profesor.
@@ -196,6 +197,23 @@ def meta_analisis(body: MetaPeticion, _: object = _Dep(req_investigador)):
         return meta_analisis_service.sintetizar(estudios, body.medida)
     except Exception:
         logger.error(f"Error en meta_analisis: {traceback.format_exc()}")
+        raise
+
+
+class ManuscritoPeticion(BaseModel):
+    tipo: str = Field("revision", pattern="^(revision|datos)$")
+    hechos: dict = Field(default_factory=dict)
+
+
+@router.post("/investigacion/manuscrito")
+def manuscrito(body: ManuscritoPeticion, _: object = _Dep(req_investigador)):
+    """Genera un manuscrito IMRaD completo (Título, Abstract, Introducción, Métodos, Resultados,
+    Discusión, Limitaciones) anclado a las cifras REALES entregadas — no inventa números. Sigue
+    PRISMA 2020 (revisión) o COSMIN (validación). LLM con respaldo de plantilla determinista."""
+    try:
+        return manuscrito_service.redactar_imrad(body.hechos, body.tipo)
+    except Exception:
+        logger.error(f"Error en manuscrito: {traceback.format_exc()}")
         raise
 
 
