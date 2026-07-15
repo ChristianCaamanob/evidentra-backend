@@ -33,6 +33,7 @@ import app.models.en_vivo  # noqa: E402,F401
 import app.models.aprendizaje  # noqa: E402,F401
 import app.models.password_reset  # noqa: E402,F401
 import app.models.suscripcion  # noqa: E402,F401
+import app.models.proyecto  # noqa: E402,F401
 
 config = context.config
 

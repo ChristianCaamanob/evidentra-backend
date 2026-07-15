@@ -50,6 +50,8 @@ api_router.include_router(results_router, **_legado)
 api_router.include_router(feedback_router, **_legado)
 from app.routes.investigador import router as investigador_router
 api_router.include_router(investigador_router)
+from app.routes.proyectos import router as proyectos_router
+api_router.include_router(proyectos_router)
 from app.routes.desarrollo import router as desarrollo_router
 api_router.include_router(desarrollo_router)
 from app.routes.profesor import router as profesor_router
