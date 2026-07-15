@@ -200,6 +200,73 @@ def meta_analisis(body: MetaPeticion, _: object = _Dep(req_investigador)):
         raise
 
 
+class AnalizarDatosPeticion(BaseModel):
+    matriz: list[list[float]] | None = None          # 0/1 persona×ítem (dataset importado)
+    assessment_ids: list[UUID] | None = None         # pooling de evaluaciones del MISMO instrumento
+    grupo: list[str] | None = None                   # opcional, para efectos/DIF (solo con matriz)
+
+
+@router.post("/investigacion/analizar-datos")
+def analizar_datos(body: AnalizarDatosPeticion, db: Session = Depends(get_db),
+                   _: object = _Dep(req_investigador)):
+    """Corre las técnicas psicométricas sobre una matriz de respuestas 0/1, provista de dos
+    formas: `assessment_ids` (POOLING de evaluaciones del mismo instrumento — se concatenan las
+    filas si el nº de ítems coincide) o `matriz` (dataset EXTERNO importado). Devuelve TCT +
+    fiabilidad, dimensionalidad, Rasch, poder muestral, y efectos/DIF si se da `grupo`."""
+    from app.core.errors import conflict, unprocessable
+    grupo = None
+    if body.assessment_ids:
+        mats, ncols = [], set()
+        for aid in body.assessment_ids:
+            d = matriz_service.cargar_matriz_respuestas(db, aid)
+            mats.append(d["X"]); ncols.add(int(d["X"].shape[1]))
+        if len(ncols) != 1:
+            raise conflict(f"No combinables: distinto nº de ítems {sorted(ncols)}. El pooling "
+                           "solo agrupa evaluaciones del MISMO instrumento.")
+        X = np.vstack(mats)
+        fuente = f"pooling de {len(mats)} evaluación(es)"
+    elif body.matriz:
+        try:
+            X = np.array(body.matriz, dtype=float)
+        except Exception:
+            raise unprocessable("La matriz debe ser numérica (0/1).")
+        if X.ndim != 2:
+            raise unprocessable("La matriz debe ser 2D (personas × ítems).")
+        if X.shape[0] > 5000 or X.shape[1] > 300:
+            raise unprocessable("Máximo 5000 personas × 300 ítems.")
+        vals = set(np.unique(X[~np.isnan(X)]).tolist())
+        if not vals.issubset({0.0, 1.0}):
+            raise unprocessable("Solo se admiten valores 0/1 (dicotómicos) o vacíos.")
+        grupo = body.grupo if (body.grupo and len(body.grupo) == X.shape[0]) else None
+        fuente = "dataset importado"
+    else:
+        raise unprocessable("Proporciona 'matriz' o 'assessment_ids'.")
+
+    if X.shape[0] < 3 or X.shape[1] < 3:
+        raise conflict("Se requieren ≥ 3 personas y ≥ 3 ítems.")
+    n, k = int(X.shape[0]), int(X.shape[1])
+    out = {
+        "fuente": fuente, "n": n, "n_items": k,
+        "fiabilidad": {"alfa": estadistica_service.alfa_cronbach(X).get("alfa"),
+                       "omega": estadistica_service.omega_mcdonald(X).get("omega"),
+                       "sem": estadistica_service.sem(X).get("sem")},
+        "dimensionalidad": dimensionalidad_service.analizar_dimensionalidad(X, dicotomico=True),
+        "rasch": irt_service.estimar_rasch(X),
+        "poder_muestral": {
+            "rasch": poder_muestral_service.evaluar("rasch", n, k),
+            "dimensionalidad": poder_muestral_service.evaluar("dimensionalidad", n, k),
+        },
+    }
+    if grupo is not None:
+        try:
+            total = np.nansum(X, axis=1)
+            out["efectos"] = efectos_service.comparar_grupos(total, grupo)
+            out["dif"] = dif_service.analizar_dif(X, grupo, total)
+        except Exception:
+            out["efectos_error"] = "No se pudo analizar el grupo (revisa el vector 'grupo')."
+    return out
+
+
 class ManuscritoPeticion(BaseModel):
     tipo: str = Field("revision", pattern="^(revision|datos)$")
     hechos: dict = Field(default_factory=dict)
