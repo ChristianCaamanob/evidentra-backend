@@ -15,6 +15,7 @@ from uuid import UUID
 
 import numpy as np
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from fastapi import Depends as _Dep
@@ -35,6 +36,7 @@ from app.services import curso_stats_service
 from app.services import cualitativo_service
 from app.services import rutas_service
 from app.services import literatura_service
+from app.services import meta_analisis_service
 
 # Todo el modulo Investigador exige rol investigador (o creador). El director NO accede a
 # este modulo de investigacion; su alcance es ver/exportar datos de estudiante y profesor.
@@ -161,6 +163,37 @@ def literatura(q: str = Query(..., min_length=2),
         return literatura_service.buscar(q, rows=rows, anios=(anios or None))
     except Exception:
         logger.error(f"Error en literatura '{q}': {traceback.format_exc()}")
+        raise
+
+
+class MetaEstudio(BaseModel):
+    label: str | None = None
+    # efecto ya calculado (opcional):
+    y: float | None = None
+    v: float | None = None
+    # o datos crudos según la medida:
+    m1: float | None = None; sd1: float | None = None; n1: float | None = None
+    m2: float | None = None; sd2: float | None = None; n2: float | None = None
+    e1: float | None = None; e2: float | None = None
+    r: float | None = None; n: float | None = None
+
+
+class MetaPeticion(BaseModel):
+    medida: str = Field("smd", pattern="^(smd|or|z)$")
+    estudios: list[MetaEstudio] = Field(min_length=2, max_length=500)
+
+
+@router.post("/investigacion/meta-analisis")
+def meta_analisis(body: MetaPeticion, _: object = _Dep(req_investigador)):
+    """Metaanálisis de efectos aleatorios (DerSimonian-Laird + Hartung-Knapp): efecto combinado,
+    heterogeneidad (Q, I², τ², intervalo de predicción), Egger (sesgo de publicación), datos de
+    forest/funnel y señales GRADE. `medida`: smd (Hedges g) | or (ln OR) | z (Fisher). Cómputo
+    nativo Python; metafor como referencia de contraste. Independiente de los datos del docente."""
+    try:
+        estudios = [e.model_dump(exclude_none=True) for e in body.estudios]
+        return meta_analisis_service.sintetizar(estudios, body.medida)
+    except Exception:
+        logger.error(f"Error en meta_analisis: {traceback.format_exc()}")
         raise
 
 
