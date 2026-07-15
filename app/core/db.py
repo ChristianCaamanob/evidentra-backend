@@ -23,6 +23,74 @@ engine = create_engine(_db_url, future=True, connect_args=connect_args, pool_pre
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
 
 
+def _seed_cohorte_showcase(db) -> None:
+    """Cohorte SHOWCASE Q1 (DEMO-Q1): grande y bien diseñada para exhibir el módulo Investigador
+    a máxima potencia. n=600, 24 ítems, 4 RA, respuestas 2PL (discriminación variable → TRI real),
+    DIF UNIFORME plantado en 2 ítems (detectable; el resto limpio), grupos consentidos y
+    balanceados (ambos ≥200). Enciende Rasch / TRI-2PL / CFA / DINA / DIF / dimensionalidad /
+    efectos / cualitativo en verde y con potencia de publicación. Semilla fija (reproducible)."""
+    import math
+    import random
+    from app.models.answer_key import AnswerKey, AnswerKeyItem
+    from app.models.student import Student
+
+    if db.query(Course).filter(Course.code == "DEMO-Q1").first():
+        return
+
+    course = Course(name="Demo · Showcase Q1", code="DEMO-Q1", status="active",
+                    program_document_url=None, has_learning_structure=True,
+                    grading_scale="chile_1_7", passing_threshold=60.0, base_score_type="raw_points")
+    db.add(course); db.flush()
+
+    k, n, n_ra = 24, 600, 4
+    assessment = Assessment(course_id=course.id, name="Evaluación integradora (showcase)",
+                            status="active", has_versions=False, version_count=1, has_answer_key=True,
+                            briefing_level="initial", grading_scale="chile_1_7", passing_threshold=60.0)
+    db.add(assessment); db.flush()
+    ak = AnswerKey(assessment_id=assessment.id, status="valid", is_valid=True, version_coverage_ok=True,
+                   annulled_items_count=0, invalid_weight_count=0, invalid_partial_rule_count=0)
+    db.add(ak); db.flush()
+
+    letras = ["A", "B", "C", "D"]
+    blooms = ["recordar", "comprender", "aplicar", "analizar"]
+    correctas = {}
+    for q in range(1, k + 1):
+        c = letras[(q * 3) % 4]; correctas[q] = c
+        db.add(AnswerKeyItem(answer_key_id=ak.id, question_number=q, version="A",
+                             correct_answer=c, weight=1.0, is_annulled=False,
+                             learning_outcome_id=f"RA{((q - 1) % n_ra) + 1}",
+                             bloom_level=blooms[(q - 1) % len(blooms)]))
+    db.flush()
+
+    rng = random.Random(2026)
+    a = [round(rng.uniform(0.9, 2.0), 2) for _ in range(k)]           # discriminacion 2PL variable
+    b = [round(-2.0 + 4.0 * (j / (k - 1)), 2) for j in range(k)]      # dificultad bien esparcida
+    dif_items = {4, 17}                                               # items 5 y 18: DIF uniforme
+    mis = [rng.choice([l for l in letras if l != correctas[j + 1]]) for j in range(k)]
+    for i in range(n):
+        theta = rng.gauss(0, 1)
+        sexo = "F" if i % 2 == 0 else "M"
+        dep = "municipal" if (i % 5) < 2 else "particular"           # ~40% municipal (~240), resto ~360
+        rut = f"Q1-{i+1:04d}"
+        db.add(Student(course_id=course.id, rut=rut, nombres=f"Estudiante {i+1}",
+                       apellido_paterno="Demo", sexo=sexo, dependencia=dep, consiente_equidad=True))
+        answers = []
+        for j in range(k):
+            b_eff = b[j] + (0.8 if (j in dif_items and dep == "municipal") else 0.0)  # DIF uniforme
+            p = 1.0 / (1.0 + math.exp(-a[j] * (theta - b_eff)))
+            if rng.random() < p:
+                answers.append(correctas[j + 1])
+            elif rng.random() < 0.6:
+                answers.append(mis[j])                               # concepcion erronea sistematica
+            else:
+                otras = [l for l in letras if l != correctas[j + 1] and l != mis[j]]
+                answers.append(rng.choice(otras) if otras else mis[j])
+        db.add(Scan(assessment_id=assessment.id, student_identifier=rut, status="scored",
+                    detected_version="A", requires_review=False,
+                    raw_ocr_payload_json={"answers": answers}))
+    db.commit()
+
+
 def _seed_cohorte_psicometria(db) -> None:
     """Cohorte demo para exhibir la psicometria (Rasch/DINA/DIF/dimensionalidad/invarianza)
     con datos reales. Idempotente (marcada por Course.code == 'DEMO-PSICO'). ~40 estudiantes,
@@ -239,6 +307,7 @@ def create_db_and_seed() -> None:
 
         # Cohortes demo (idempotentes por su propia marca).
         _seed_cohorte_psicometria(db)
+        _seed_cohorte_showcase(db)        # DEMO-Q1: showcase grande (n=600) del módulo Investigador
         _seed_desarrollo(db)
 
         course = db.query(Course).filter(Course.code.notin_(["DEMO-PSICO", "DEMO-DESA"])).first()
