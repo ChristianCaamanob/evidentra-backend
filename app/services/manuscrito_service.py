@@ -74,15 +74,23 @@ def redactar_imrad(hechos: dict, tipo: str = "revision") -> dict:
         try:
             import anthropic
             cliente = anthropic.Anthropic()
-            msg = cliente.messages.create(
-                model=MODELO, max_tokens=4096, system=_SYSTEM,
-                messages=[{"role": "user", "content": _prompt(hechos, tipo)}])
+            with cliente.messages.stream(               # streaming: evita timeout con salida larga
+                    model=MODELO, max_tokens=8000, system=_SYSTEM,
+                    messages=[{"role": "user", "content": _prompt(hechos, tipo)}]) as stream:
+                final = stream.get_final_message()
             texto = ""
-            for b in msg.content:
+            for b in final.content:
                 if getattr(b, "type", None) == "text":
                     texto = b.text
                     break
+            texto = texto.strip()
+            if texto.startswith("```"):                 # quita fences ```json … ```
+                texto = texto.split("```", 2)[1]
+                if texto.lstrip().startswith("json"):
+                    texto = texto.lstrip()[4:]
             i, j = texto.find("{"), texto.rfind("}")
+            if i < 0 or j <= i:
+                raise ValueError(f"sin JSON en la respuesta ({len(texto)} chars)")
             data = json.loads(texto[i:j + 1])
             out = {k: str(data.get(k, "")).strip() for k in SECC_TEXTO}
             for k in SECC_LISTA:
