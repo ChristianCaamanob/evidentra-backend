@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     # Aplicar migraciones Alembic al arranque (upgrade head). Si false o Alembic no está
     # disponible, cae a create_all (idempotente). Fuente de verdad del esquema = Alembic.
     run_migrations: bool = True
+    # Rate limiting anti fuerza-bruta en login/registro/reset. Se apaga en CI (logins repetidos).
+    ratelimit_enabled: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

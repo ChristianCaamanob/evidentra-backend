@@ -21,3 +21,4 @@ pymupdf==1.24.5
 pillow-heif>=0.16,<1.0
 girth>=0.8,<1.0
 alembic>=1.13,<2.0
+slowapi>=0.1.9,<1.0

@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.api.deps import get_db
+from app.core.ratelimit import limit
 from app.services.auth_service import register_teacher, login_teacher
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -16,7 +17,8 @@ class LoginIn(BaseModel):
     password: str
 
 @router.post("/register")
-def register(payload: RegisterIn, db: Session = Depends(get_db)):
+@limit("4/minute")
+def register(request: Request, payload: RegisterIn, db: Session = Depends(get_db)):
     if len(payload.password) < 6:
         raise HTTPException(status_code=400, detail="Contraseña debe tener al menos 6 caracteres")
     result = register_teacher(db, payload.email, payload.password, payload.name)
@@ -25,7 +27,8 @@ def register(payload: RegisterIn, db: Session = Depends(get_db)):
     return result
 
 @router.post("/login")
-def login(payload: LoginIn, db: Session = Depends(get_db)):
+@limit("8/minute")
+def login(request: Request, payload: LoginIn, db: Session = Depends(get_db)):
     result = login_teacher(db, payload.email, payload.password)
     if "error" in result:
         raise HTTPException(status_code=401, detail=result["error"])
@@ -41,11 +44,13 @@ class ResetIn(BaseModel):
     password: str
 
 @router.post("/forgot-password")
-def forgot_password(payload: ForgotIn, db: Session = Depends(get_db)):
+@limit("4/minute")
+def forgot_password(request: Request, payload: ForgotIn, db: Session = Depends(get_db)):
     return create_reset_token(db, payload.email.lower().strip())
 
 @router.post("/reset-password")
-def reset_pwd(payload: ResetIn, db: Session = Depends(get_db)):
+@limit("6/minute")
+def reset_pwd(request: Request, payload: ResetIn, db: Session = Depends(get_db)):
     if len(payload.password) < 6:
         raise HTTPException(status_code=400, detail="Contraseña debe tener al menos 6 caracteres")
     result = reset_password(db, payload.token, payload.password)

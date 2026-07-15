@@ -14,6 +14,7 @@ jobs:
       # BD efímera de CI (SQLite en el runner); Alembic crea el esquema.
       DATABASE_URL: "sqlite:///./ci.db"
       SEED_DEMO: "true"
+      RATELIMIT_ENABLED: "false"   # los tests loguean repetido; el limiter se prueba aparte
     steps:
       - uses: actions/checkout@v4
 
