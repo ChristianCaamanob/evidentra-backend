@@ -29,6 +29,7 @@ from app.services import estadistica_service
 from app.services import efectos_service
 from app.services import cfa_service
 from app.services import tri_service
+from app.services import poder_muestral_service
 from app.services import reporte_service
 from app.services import curso_stats_service
 from app.services import cualitativo_service
@@ -42,10 +43,14 @@ router = APIRouter(prefix="/assessments", tags=["investigador"],
 logger = logging.getLogger("evalys")
 
 
-def _meta(datos: dict) -> dict:
-    return {"n_personas": datos["n_personas"], "n_items": datos["n_items"],
-            "omitidas_pct": datos["omitidas_pct"],
-            "gobernanza": "Analisis agregado y seudonimizado (G2); no altera notas (G1)."}
+def _meta(datos: dict, tecnica: str | None = None) -> dict:
+    m = {"n_personas": datos["n_personas"], "n_items": datos["n_items"],
+         "omitidas_pct": datos["omitidas_pct"],
+         "gobernanza": "Analisis agregado y seudonimizado (G2); no altera notas (G1)."}
+    if tecnica:
+        m["poder_muestral"] = poder_muestral_service.evaluar(
+            tecnica, datos["n_personas"], datos["n_items"])
+    return m
 
 
 @router.get("/{assessment_id}/psicometria/rasch")
@@ -56,7 +61,7 @@ def psicometria_rasch(assessment_id: UUID, db: Session = Depends(get_db)):
         rep = irt_service.estimar_rasch(datos["X"])
         for it, num in zip(rep["items"], datos["items"]):
             it["pregunta"] = num                       # numero real de pregunta (no indice)
-        rep["_meta"] = _meta(datos)
+        rep["_meta"] = _meta(datos, "rasch")
         return rep
     except Exception:
         logger.error(f"Error en psicometria_rasch {assessment_id}: {traceback.format_exc()}")
@@ -76,7 +81,7 @@ def estadistica_clasica(assessment_id: UUID, db: Session = Depends(get_db)):
                        rep["datos_perdidos"]["por_item"]):
             for it, num in zip(bloque, nums):
                 it["pregunta"] = num
-        rep["_meta"] = _meta(datos)
+        rep["_meta"] = _meta(datos, "clasica")
         return rep
     except Exception:
         logger.error(f"Error en estadistica_clasica {assessment_id}: {traceback.format_exc()}")
@@ -158,7 +163,7 @@ def psicometria_dimensionalidad(assessment_id: UUID, db: Session = Depends(get_d
     try:
         datos = matriz_service.cargar_matriz_respuestas(db, assessment_id)
         rep = dimensionalidad_service.analizar_dimensionalidad(datos["X"], dicotomico=True)
-        rep["_meta"] = _meta(datos)
+        rep["_meta"] = _meta(datos, "dimensionalidad")
         return rep
     except Exception:
         logger.error(f"Error en psicometria_dimensionalidad {assessment_id}: {traceback.format_exc()}")
@@ -177,6 +182,8 @@ def psicometria_dina(assessment_id: UUID, base: str = Query("ra", pattern="^(ra|
             it["pregunta"] = num                       # numero real de pregunta
         rep["_meta"] = {"n_personas": d["n_personas"], "n_items": len(d["items"]),
                         "base_atributos": base,
+                        "poder_muestral": poder_muestral_service.evaluar(
+                            "dina", d["n_personas"], len(d["items"])),
                         "gobernanza": "Diagnostico agregado y seudonimizado (G2); orienta "
                                       "remediacion, no altera notas (G1). Q-matrix derivada de C3."}
         return rep
@@ -186,9 +193,22 @@ def psicometria_dina(assessment_id: UUID, base: str = Query("ra", pattern="^(ra|
 
 
 def _meta_equidad(d: dict) -> dict:
+    # En análisis por grupo, la potencia la limita el grupo MÁS PEQUEÑO.
+    n_grupo_min = None
+    grupos = d.get("grupo")
+    if grupos is not None:
+        try:
+            from collections import Counter
+            counts = Counter(str(g) for g in grupos if g is not None and str(g) != "")
+            if counts:
+                n_grupo_min = min(counts.values())
+        except Exception:
+            pass
     return {"variable": d["variable"], "comparados": d["categorias_comparadas"],
             "categorias_omitidas": d["categorias_omitidas"], "n": d["n"],
             "excluidos_sin_consentimiento": d["excluidos_sin_consentimiento"],
+            "poder_muestral": poder_muestral_service.evaluar(
+                "dif", d["n"], n_grupo_min=n_grupo_min),
             "gobernanza": "Solo estudiantes que CONSINTIERON el analisis de equidad (G4); "
                           "datos seudonimizados (G2); grupos con minimo para evitar "
                           "reidentificacion. No altera notas (G1)."}
@@ -242,7 +262,7 @@ def reporte_reproducible(assessment_id: UUID, db: Session = Depends(get_db)):
         red = reporte_service.redactar(hechos)
         return {"hechos": hechos, "metodos": red["metodos"], "resultados": red["resultados"],
                 "motor": red["motor"], "checklist": reporte_service.checklist_cosmin(hechos),
-                "_meta": _meta(datos)}
+                "_meta": _meta(datos, "cfa")}
     except Exception:
         logger.error(f"Error en reporte {assessment_id}: {traceback.format_exc()}")
         raise
@@ -257,7 +277,7 @@ def psicometria_tri(assessment_id: UUID, db: Session = Depends(get_db)):
         rep = tri_service.comparar_modelos(datos["X"])
         for it, num in zip(rep["items_2PL"], datos["items"]):
             it["pregunta"] = num
-        rep["_meta"] = _meta(datos)
+        rep["_meta"] = _meta(datos, "tri")
         return rep
     except Exception:
         logger.error(f"Error en psicometria_tri {assessment_id}: {traceback.format_exc()}")
@@ -278,7 +298,7 @@ def estructura_cfa(assessment_id: UUID, db: Session = Depends(get_db)):
         rep = cfa_service.ajuste_cfa(datos["X"], incluir_wlsmv_demo=es_demo)
         for it, num in zip(rep["cargas"], datos["items"]):
             it["pregunta"] = num
-        rep["_meta"] = _meta(datos)
+        rep["_meta"] = _meta(datos, "cfa")
         return rep
     except Exception:
         logger.error(f"Error en estructura_cfa {assessment_id}: {traceback.format_exc()}")
