@@ -42,7 +42,7 @@ def _seed_cohorte_showcase(db) -> None:
                     grading_scale="chile_1_7", passing_threshold=60.0, base_score_type="raw_points")
     db.add(course); db.flush()
 
-    k, n, n_ra = 24, 600, 4
+    k, n, n_ra = 16, 540, 4    # n≥500 potencia DINA/TRI; k=16 mantiene CFA rápida (120 pares)
     assessment = Assessment(course_id=course.id, name="Evaluación integradora (showcase)",
                             status="active", has_versions=False, version_count=1, has_answer_key=True,
                             briefing_level="initial", grading_scale="chile_1_7", passing_threshold=60.0)
@@ -65,7 +65,7 @@ def _seed_cohorte_showcase(db) -> None:
     rng = random.Random(2026)
     a = [round(rng.uniform(0.9, 2.0), 2) for _ in range(k)]           # discriminacion 2PL variable
     b = [round(-2.0 + 4.0 * (j / (k - 1)), 2) for j in range(k)]      # dificultad bien esparcida
-    dif_items = {4, 17}                                               # items 5 y 18: DIF uniforme
+    dif_items = {4, 11}                                               # items 5 y 12: DIF uniforme
     mis = [rng.choice([l for l in letras if l != correctas[j + 1]]) for j in range(k)]
     for i in range(n):
         theta = rng.gauss(0, 1)
