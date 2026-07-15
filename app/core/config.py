@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     run_migrations: bool = True
     # Rate limiting anti fuerza-bruta en login/registro/reset. Se apaga en CI (logins repetidos).
     ratelimit_enabled: bool = True
+    # Observabilidad: DSN de Sentry. Vacío = Sentry apagado (no-op). Se pega en Render.
+    sentry_dsn: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

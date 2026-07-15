@@ -31,3 +31,5 @@ services:
         sync: false              # en el dashboard; si falta, F2 usa el grader determinista.
       - key: EVALYS_CODER_MODEL  # (opcional) modelo del corrector; por defecto claude-sonnet-5
         sync: false
+      - key: SENTRY_DSN          # (opcional) observabilidad: pega el DSN de tu proyecto Sentry
+        sync: false              # en el dashboard. Sin él, Sentry queda apagado (no-op).

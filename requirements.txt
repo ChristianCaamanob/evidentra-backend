@@ -22,3 +22,4 @@ pillow-heif>=0.16,<1.0
 girth>=0.8,<1.0
 alembic>=1.13,<2.0
 slowapi>=0.1.9,<1.0
+sentry-sdk[fastapi]>=2.0,<3.0

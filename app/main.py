@@ -12,6 +12,16 @@ from app.core.config import settings
 from app.core.db import create_db_and_seed
 from app.core.ratelimit import limiter
 
+# Observabilidad: si hay SENTRY_DSN, captura excepciones no manejadas + trazas. Sin DSN, no-op.
+if settings.sentry_dsn:
+    import sentry_sdk
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.environment,
+        traces_sample_rate=0.1,          # 10% de las requests para performance
+        send_default_pii=False,          # no enviar datos personales (G2/Ley 21.719)
+    )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
