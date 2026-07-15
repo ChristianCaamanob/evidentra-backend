@@ -98,9 +98,13 @@ def analisis_cualitativo(assessment_id: UUID, db: Session = Depends(get_db),
         datos = matriz_service.cargar_respuestas_letras(db, assessment_id)
         resultado = curso_stats_service.analizar_evaluacion(
             datos["respuestas_alumnos"], datos["pauta"], te_tags=datos["te_tags"])
-        mapa = cualitativo_service.mapa_concepciones(resultado.get("items", []), contenido={})
+        items_ctt = resultado.get("items", [])
+        n_personas = resultado["instrumento"]["n_alumnos"]
+        mapa = cualitativo_service.mapa_concepciones(items_ctt, contenido={})
+        jd = cualitativo_service.joint_display(mapa.get("concepciones", []), items_ctt, n_personas)
         return {"mapa_concepciones": mapa,
-                "_meta": {"n_personas": resultado["instrumento"]["n_alumnos"],
+                "joint_display": jd,
+                "_meta": {"n_personas": n_personas,
                           "n_items": resultado["instrumento"]["n_items"]}}
     except Exception:
         logger.error(f"Error en analisis_cualitativo {assessment_id}: {traceback.format_exc()}")

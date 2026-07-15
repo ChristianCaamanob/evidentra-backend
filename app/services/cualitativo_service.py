@@ -23,6 +23,62 @@ from __future__ import annotations
 
 from collections import Counter
 
+from app.services import consistencia_service
+
+
+# ───────────────────────────────────────────── mixed-methods: joint display (CUALI ↔ CUANTI)
+def _meta_inferencia(prev: float, p, pbis) -> str:
+    """Integración: qué significa cruzar la prevalencia de la concepción (cuali) con la
+    dificultad y la discriminación del ítem (cuanti)."""
+    if p is None or pbis is None:
+        return "Sin métricas del ítem para integrar; interpretar solo por prevalencia."
+    disc_ok = pbis >= 0.20
+    if prev >= 30 and disc_ok:
+        return ("Concepción robusta y extendida sobre un ítem que discrimina: separa niveles de "
+                "logro — foco prioritario de reenseñanza y buena candidata a variable de estudio.")
+    if prev >= 30 and not disc_ok:
+        return ("Muy prevalente pero el ítem discrimina poco: la alternativa puede ser ambigua o "
+                "el ítem defectuoso — revisar el ítem antes de concluir que es una concepción real.")
+    if prev < 30 and disc_ok:
+        return ("Prevalencia moderada sobre un ítem que discrimina: concepción localizada pero "
+                "informativa del nivel de logro.")
+    return ("Prevalencia moderada y baja discriminación: señal débil; confirmar con más evidencia "
+            "antes de accionar.")
+
+
+def joint_display(concepciones: list[dict], items_ctt: list[dict], n_personas: int) -> dict:
+    """Tabla de integración mixed-methods (Creswell & Plano Clark, 2018; Fetters et al., 2013):
+    cada concepción (CUALI) junto a la dificultad y discriminación del ítem (CUANTI), con IC de
+    estabilidad de la prevalencia y una meta-inferencia."""
+    idx = {str(it.get("item")): it for it in items_ctt}
+    filas = []
+    for e in concepciones:
+        it = idx.get(str(e.get("item")), {})
+        p = it.get("dificultad_p")
+        pbis = it.get("discriminacion_pbis")
+        prev = e.get("prevalencia_pct", 0.0)
+        k = round(prev / 100 * n_personas) if n_personas else 0
+        est = consistencia_service.prevalencia_estable(k, n_personas)
+        filas.append({
+            "item": e.get("item"), "ra": e.get("ra"), "alternativa": e.get("alternativa"),
+            "concepcion": e.get("concepcion"),
+            "prevalencia_pct": prev, "prevalencia_ic95": est["ic95"],
+            "prevalencia_estable": est["estable"],
+            "dificultad_p": p, "nivel_dificultad": it.get("nivel_dificultad"),
+            "discriminacion_pbis": pbis, "calidad_discriminacion": it.get("calidad_discriminacion"),
+            "meta_inferencia": _meta_inferencia(prev, p, pbis),
+        })
+    n_estables = sum(1 for f in filas if f["prevalencia_estable"])
+    return {
+        "marco": "Joint display (integración mixed-methods)",
+        "filas": filas,
+        "n_estables": n_estables, "n_total": len(filas),
+        "nota": ("Integra cada concepción (CUALI) con la dificultad y discriminación del ítem "
+                 "(CUANTI). El IC95 (Wilson) indica si la prevalencia es estable o ruido muestral."),
+        "referencias": ["Creswell & Plano Clark (2018)", "Fetters, Curry & Creswell (2013)",
+                        "Guetterman, Fetters & Creswell (2015)"],
+    }
+
 
 # ───────────────────────────────────────────── 1) concepciones desde distractores
 def mapa_concepciones(items_ctt: list[dict], contenido: dict, umbral_pct: float = 15.0) -> dict:
