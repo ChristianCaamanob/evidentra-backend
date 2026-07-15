@@ -161,21 +161,51 @@ def egger(ys: list[float], vs: list[float]) -> dict | None:
 
 
 # ───────────────────────────── síntesis de efectos aleatorios
-def sintetizar(estudios: list[dict], medida: str = "smd") -> dict:
-    """estudios: lista con y,v ya calculados o datos crudos (según `medida`)."""
-    prep, labels = [], []
+def _prep_effects(estudios: list[dict], medida: str) -> list[dict]:
+    """Calcula y,v por estudio (o los toma si vienen), conservando label/grupo/moderador."""
+    out = []
     for i, e in enumerate(estudios):
-        labels.append(e.get("label") or f"Estudio {i + 1}")
         if "y" in e and "v" in e:
-            prep.append({"y": float(e["y"]), "v": float(e["v"])})
+            d = {"y": float(e["y"]), "v": float(e["v"])}
         elif medida == "smd":
-            prep.append(hedges_g(e["m1"], e["sd1"], e["n1"], e["m2"], e["sd2"], e["n2"]))
+            d = hedges_g(e["m1"], e["sd1"], e["n1"], e["m2"], e["sd2"], e["n2"])
         elif medida == "or":
-            prep.append(ln_or(e["e1"], e["n1"], e["e2"], e["n2"]))
+            d = ln_or(e["e1"], e["n1"], e["e2"], e["n2"])
         elif medida == "z":
-            prep.append(fisher_z(e["r"], e["n"]))
+            d = fisher_z(e["r"], e["n"])
         else:
             raise ValueError("medida no soportada")
+        d["label"] = e.get("label") or f"Estudio {i + 1}"
+        if e.get("grupo"):
+            d["grupo"] = str(e["grupo"])
+        if e.get("moderador") is not None:
+            try:
+                d["x"] = float(e["moderador"])
+            except (TypeError, ValueError):
+                pass
+        out.append(d)
+    return out
+
+
+def _re_estimate(ys: list[float], vs: list[float]):
+    """Efecto aleatorio (DL): devuelve (M, se, tau2)."""
+    w = [1.0 / v for v in vs]
+    sw = sum(w)
+    mf = sum(wi * yi for wi, yi in zip(w, ys)) / sw
+    Q = sum(wi * (yi - mf) ** 2 for wi, yi in zip(w, ys))
+    df = len(ys) - 1
+    C = sw - sum(wi * wi for wi in w) / sw
+    tau2 = max(0.0, (Q - df) / C) if C > 0 else 0.0
+    wr = [1.0 / (v + tau2) for v in vs]
+    swr = sum(wr)
+    M = sum(wi * yi for wi, yi in zip(wr, ys)) / swr
+    return M, math.sqrt(1.0 / swr), tau2
+
+
+def sintetizar(estudios: list[dict], medida: str = "smd") -> dict:
+    """estudios: lista con y,v ya calculados o datos crudos (según `medida`)."""
+    prep = _prep_effects(estudios, medida)
+    labels = [p["label"] for p in prep]
     ys = [p["y"] for p in prep]
     vs = [p["v"] for p in prep]
     k = len(ys)
@@ -246,10 +276,129 @@ def sintetizar(estudios: list[dict], medida: str = "smd") -> dict:
         "efecto_escala": ("ln(OR)" if medida == "or" else "z de Fisher" if medida == "z" else "Hedges g"),
     }
     out["grade"] = _grade(out)
+    out["trim_fill"] = trim_and_fill(ys, vs) if k >= 3 else None
+    out["subgrupos"] = subgrupos(prep, medida) if any("grupo" in p for p in prep) else None
+    out["metarregresion"] = metarregresion(prep) if sum(1 for p in prep if "x" in p) >= 3 else None
     out["interpretacion"] = _interpretar(out)
     out["referencia"] = ("DerSimonian & Laird (1986); Higgins & Thompson (2002); IntHout et al. "
-                         "(2014, HKSJ); Egger et al. (1997). Cómputo nativo; metafor como contraste.")
+                         "(2014, HKSJ); Egger et al. (1997); Duval & Tweedie (2000, trim-and-fill). "
+                         "Cómputo nativo; metafor como contraste.")
     return out
+
+
+# ───────────────────────────── trim-and-fill (Duval & Tweedie, 2000): control del sesgo de publicación
+def trim_and_fill(ys: list[float], vs: list[float]) -> dict | None:
+    """Estimador L0: imputa los estudios 'faltantes' por asimetría del funnel y reestima el efecto.
+    Es un ANÁLISIS DE SENSIBILIDAD (no reemplaza el resultado): muestra cuánto se movería el efecto
+    si el sesgo de publicación fuese la causa de la asimetría."""
+    n = len(ys)
+    if n < 3:
+        return None
+    orden = sorted(range(n), key=lambda i: ys[i])   # índices por efecto ascendente
+    k0, lado = 0, "right"
+    y, v = list(ys), list(vs)
+    for _ in range(30):
+        M, _, _ = _re_estimate(y, v)
+        cen = [yi - M for yi in y]
+        m = len(y)
+        rk = [0] * m
+        for r, i in enumerate(sorted(range(m), key=lambda i: abs(cen[i]))):
+            rk[i] = r + 1
+        Tpos = sum(rk[i] for i in range(m) if cen[i] > 0)
+        Tneg = sum(rk[i] for i in range(m) if cen[i] < 0)
+        if Tpos >= Tneg:
+            lado, Tn = "right", Tpos
+        else:
+            lado, Tn = "left", Tneg
+        L0 = (4.0 * Tn - m * (m + 1)) / (2.0 * m - 1)
+        nk = max(0, int(math.floor(L0 + 0.5)))
+        if nk == k0:
+            break
+        k0 = nk
+        keep = orden[:n - k0] if lado == "right" else orden[k0:]
+        y = [ys[i] for i in keep]
+        v = [vs[i] for i in keep]
+    Mf, _, _ = _re_estimate(y, v) if len(y) >= 2 else _re_estimate(ys, vs)
+    extremos = (orden[n - k0:] if lado == "right" else orden[:k0]) if k0 > 0 else []
+    imp_y = [2 * Mf - ys[i] for i in extremos]
+    imp_v = [vs[i] for i in extremos]
+    Madj, seadj, _ = _re_estimate(ys + imp_y, vs + imp_v)
+    return {
+        "k0": k0,
+        "lado_imputado": "izquierda" if lado == "right" else "derecha",
+        "estimador_ajustado": round(Madj, 4),
+        "ic95_ajustado": [round(Madj - Z975 * seadj, 4), round(Madj + Z975 * seadj, 4)],
+        "imputados": [{"y": round(imp_y[j], 4), "se": round(math.sqrt(imp_v[j]), 4)} for j in range(len(imp_y))],
+        "nota": ("Sin estudios faltantes por asimetría (funnel simétrico)." if k0 == 0
+                 else f"Se imputan {k0} estudio(s) a la {('izquierda' if lado == 'right' else 'derecha')}; "
+                      "el efecto ajustado es un análisis de sensibilidad, no el resultado principal."),
+        "referencia": "Duval & Tweedie (2000), estimador L0.",
+    }
+
+
+# ───────────────────────────── subgrupos + metarregresión (exploración de heterogeneidad)
+def subgrupos(prep: list[dict], medida: str) -> dict | None:
+    grupos: dict[str, list] = {}
+    for p in prep:
+        grupos.setdefault(p["grupo"], []).append(p)
+    if len(grupos) < 2 or any(len(v) < 2 for v in grupos.values()):
+        return None
+    per, Q_within = [], 0.0
+    for g, items in grupos.items():
+        r = sintetizar(items, medida)
+        ys = [i["y"] for i in items]
+        vs = [i["v"] for i in items]
+        w = [1.0 / v for v in vs]
+        sw = sum(w)
+        mf = sum(wi * yi for wi, yi in zip(w, ys)) / sw
+        Q_within += sum(wi * (yi - mf) ** 2 for wi, yi in zip(w, ys))
+        per.append({"grupo": g, "k": len(items), "estimador": r["combinado"]["estimador"],
+                    "ic95": r["combinado"]["ic95_hksj"], "I2": r["heterogeneidad"]["I2"]})
+    ys = [p["y"] for p in prep]
+    vs = [p["v"] for p in prep]
+    w = [1.0 / v for v in vs]
+    sw = sum(w)
+    mf = sum(wi * yi for wi, yi in zip(w, ys)) / sw
+    Qtot = sum(wi * (yi - mf) ** 2 for wi, yi in zip(w, ys))
+    Qbet = max(0.0, Qtot - Q_within)
+    dfb = len(grupos) - 1
+    p = 1.0 - _chi2_cdf(Qbet, dfb) if dfb > 0 else None
+    return {"subgrupos": per, "Q_between": round(Qbet, 3), "df": dfb,
+            "p": round(p, 4) if p is not None else None,
+            "diferencia_significativa": bool(p is not None and p < 0.05),
+            "interpretacion": ("Diferencia significativa entre subgrupos: el moderador explica parte "
+                               "de la heterogeneidad." if (p is not None and p < 0.05)
+                               else "Sin diferencia significativa entre subgrupos."),
+            "referencia": "Test Q entre subgrupos (Borenstein et al., 2009)."}
+
+
+def metarregresion(prep: list[dict]) -> dict | None:
+    pts = [(p["x"], p["y"], p["v"]) for p in prep if "x" in p]
+    if len(pts) < 3:
+        return None
+    _, _, tau2 = _re_estimate([p[1] for p in pts], [p[2] for p in pts])
+    w = [1.0 / (p[2] + tau2) for p in pts]
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    sw = sum(w)
+    swx = sum(wi * xi for wi, xi in zip(w, xs))
+    swy = sum(wi * yi for wi, yi in zip(w, ys))
+    swxx = sum(wi * xi * xi for wi, xi in zip(w, xs))
+    swxy = sum(wi * xi * yi for wi, xi, yi in zip(w, xs, ys))
+    denom = sw * swxx - swx * swx
+    if abs(denom) < 1e-12:
+        return None
+    slope = (sw * swxy - swx * swy) / denom
+    intercept = (swy - slope * swx) / sw
+    se_slope = math.sqrt(sw / denom)
+    z = slope / se_slope
+    p = 2.0 * (1.0 - _norm_cdf(abs(z)))
+    return {"pendiente": round(slope, 4), "se": round(se_slope, 4), "z": round(z, 3),
+            "p": round(p, 4), "intercepto": round(intercept, 4), "n": len(pts),
+            "significativo": bool(p < 0.05),
+            "interpretacion": (f"El moderador predice el efecto (pendiente {round(slope, 3)}, p = {round(p, 4)})."
+                               if p < 0.05 else "El moderador no explica significativamente el efecto."),
+            "referencia": "Metarregresión de efectos mixtos (momentos); Thompson & Higgins (2002)."}
 
 
 def _chi2_cdf(x: float, k: int) -> float:

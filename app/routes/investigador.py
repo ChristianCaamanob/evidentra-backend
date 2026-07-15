@@ -176,6 +176,8 @@ class MetaEstudio(BaseModel):
     m2: float | None = None; sd2: float | None = None; n2: float | None = None
     e1: float | None = None; e2: float | None = None
     r: float | None = None; n: float | None = None
+    grupo: str | None = None          # para análisis por subgrupos
+    moderador: float | None = None    # para metarregresión
 
 
 class MetaPeticion(BaseModel):

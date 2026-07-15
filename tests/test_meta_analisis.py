@@ -48,6 +48,34 @@ def test_t_y_p_valores():
     assert abs(M._t_quantile(0.975, 10) - 2.228) < 0.01
 
 
+def test_trim_fill_simetrico_no_imputa():
+    sym = [{"y": -0.4, "v": 0.1}, {"y": -0.2, "v": 0.1}, {"y": 0.0, "v": 0.1},
+           {"y": 0.2, "v": 0.1}, {"y": 0.4, "v": 0.1}]
+    tf = M.sintetizar(sym, "smd")["trim_fill"]
+    assert tf["k0"] == 0 and abs(tf["estimador_ajustado"]) < 1e-6
+
+
+def test_trim_fill_detecta_y_ajusta():
+    asym = [{"y": 0.20, "v": 0.05}, {"y": 0.35, "v": 0.03}, {"y": 0.55, "v": 0.02},
+            {"y": 0.60, "v": 0.015}, {"y": 0.65, "v": 0.01}, {"y": 0.70, "v": 0.008}]
+    tf = M.sintetizar(asym, "smd")["trim_fill"]
+    assert tf["k0"] >= 1 and len(tf["imputados"]) == tf["k0"]
+
+
+def test_subgrupos_q_between():
+    sg = [{"y": 0.2, "v": 0.02, "grupo": "A"}, {"y": 0.25, "v": 0.02, "grupo": "A"},
+          {"y": 0.7, "v": 0.02, "grupo": "B"}, {"y": 0.75, "v": 0.02, "grupo": "B"}]
+    s = M.sintetizar(sg, "smd")["subgrupos"]
+    assert s["diferencia_significativa"] is True and s["p"] < 0.05 and len(s["subgrupos"]) == 2
+
+
+def test_metarregresion_pendiente():
+    mr = [{"y": 0.1, "v": 0.02, "moderador": 1}, {"y": 0.3, "v": 0.02, "moderador": 2},
+          {"y": 0.5, "v": 0.02, "moderador": 3}, {"y": 0.7, "v": 0.02, "moderador": 4}]
+    m = M.sintetizar(mr, "smd")["metarregresion"]
+    assert abs(m["pendiente"] - 0.2) < 0.01 and m["n"] == 4
+
+
 def test_egger_detecta_simetria():
     # Efectos simétricos -> sin sesgo evidente
     est = [{"y": 0.30, "v": 0.01}, {"y": 0.32, "v": 0.02}, {"y": 0.28, "v": 0.04},
