@@ -91,55 +91,53 @@ _OA_SELECT = ("id,doi,title,display_name,publication_year,authorships,primary_lo
               "open_access,cited_by_count,type,biblio,abstract_inverted_index,language")
 
 
-def _openalex(query: str, rows: int, desde_anio: int | None) -> list[dict]:
+def _oa_item(it: dict) -> dict | None:
+    """Parsea un trabajo de OpenAlex a nuestra ref. Devuelve None si no es verificable (sin DOI)."""
+    doi = _norm_doi(it.get("doi"))
+    titulo = it.get("title") or it.get("display_name")
+    if not doi or not titulo:
+        return None
+    loc = (it.get("primary_location") or {})
+    fuente = (loc.get("source") or {})
+    biblio = (it.get("biblio") or {})
+    oa = (it.get("open_access") or {})
+    autores = []
+    for a in (it.get("authorships") or []):
+        nom = (a.get("author") or {}).get("display_name")
+        if nom:
+            autores.append(_split_nombre(nom))
+    pag = None
+    fp, lp = biblio.get("first_page"), biblio.get("last_page")
+    if fp:
+        pag = (f"{fp}-{lp}" if lp and lp != fp else str(fp))
+    return {
+        "id_tipo": "DOI", "id": doi, "url": "https://doi.org/" + doi,
+        "titulo": titulo.strip(), "autores": autores,
+        "revista": fuente.get("display_name"), "issn": fuente.get("issn_l"),
+        "anio": it.get("publication_year"),
+        "volumen": biblio.get("volume"), "numero": biblio.get("issue"), "paginas": pag,
+        "tipo": it.get("type"),
+        "abstract": _abstract_desde_invertido(it.get("abstract_inverted_index")),
+        "citas": it.get("cited_by_count"),
+        "oa": bool(oa.get("is_oa")), "oa_estado": oa.get("oa_status"), "oa_url": oa.get("oa_url"),
+        "idioma": it.get("language"), "_fuente": "OpenAlex",
+    }
+
+
+def _oa_url(query: str, per_page: int, desde_anio: int | None, cursor: str | None = None) -> str:
     filtros = ["type:article|review|book-chapter"]
     if desde_anio:
         filtros.append(f"from_publication_date:{desde_anio}-01-01")
-    params = {
-        "search": query,
-        "per_page": str(min(rows, 25)),
-        "select": _OA_SELECT,
-        "filter": ",".join(filtros),
-        "mailto": _MAILTO,
-    }
-    url = "https://api.openalex.org/works?" + urllib.parse.urlencode(params)
-    data = _get(url)
-    refs = []
-    for it in data.get("results", []) or []:
-        doi = _norm_doi(it.get("doi"))
-        titulo = it.get("title") or it.get("display_name")
-        if not doi or not titulo:
-            continue  # sin DOI verificable -> se descarta
-        loc = (it.get("primary_location") or {})
-        fuente = (loc.get("source") or {})
-        biblio = (it.get("biblio") or {})
-        oa = (it.get("open_access") or {})
-        autores = []
-        for a in (it.get("authorships") or []):
-            nom = (a.get("author") or {}).get("display_name")
-            if nom:
-                autores.append(_split_nombre(nom))
-        pag = None
-        fp, lp = biblio.get("first_page"), biblio.get("last_page")
-        if fp:
-            pag = (f"{fp}-{lp}" if lp and lp != fp else str(fp))
-        refs.append({
-            "id_tipo": "DOI", "id": doi, "url": "https://doi.org/" + doi,
-            "titulo": titulo.strip(), "autores": autores,
-            "revista": fuente.get("display_name"),
-            "issn": fuente.get("issn_l"),
-            "anio": it.get("publication_year"),
-            "volumen": biblio.get("volume"), "numero": biblio.get("issue"), "paginas": pag,
-            "tipo": it.get("type"),
-            "abstract": _abstract_desde_invertido(it.get("abstract_inverted_index")),
-            "citas": it.get("cited_by_count"),
-            "oa": bool(oa.get("is_oa")),
-            "oa_estado": oa.get("oa_status"),
-            "oa_url": oa.get("oa_url"),
-            "idioma": it.get("language"),
-            "_fuente": "OpenAlex",
-        })
-    return refs
+    params = {"search": query, "per_page": str(per_page), "select": _OA_SELECT,
+              "filter": ",".join(filtros), "mailto": _MAILTO}
+    if cursor:
+        params["cursor"] = cursor
+    return "https://api.openalex.org/works?" + urllib.parse.urlencode(params)
+
+
+def _openalex(query: str, rows: int, desde_anio: int | None) -> list[dict]:
+    data = _get(_oa_url(query, min(rows, 25), desde_anio))
+    return [r for r in (_oa_item(it) for it in (data.get("results") or [])) if r]
 
 
 # ───────────────────────────────────────────── Crossref (enriquece autores/metadatos)
@@ -347,4 +345,76 @@ def buscar(query: str, rows: int = 8, anios: int | None = None) -> dict:
         nota += f" Ventana: {desde_anio}–{datetime.date.today().year} (últimos {anios} años)."
     return {"query": query, "n": len(arts), "articulos": arts,
             "fuente": " + ".join(fuentes) or "OpenAlex",
+            "ventana_anios": anios or None, "desde_anio": desde_anio, "nota": nota}
+
+
+def buscar_corpus(query: str, anios: int | None = None, limite: int = 150) -> dict:
+    """Corpus de candidatos para el tablero de cribado de una revisión sistemática.
+
+    Pagina OpenAlex por cursor (per_page 100) hasta `limite`. Devuelve el conjunto completo,
+    deduplicado por DOI, con los campos que necesita el cribado (abstract, citas, OA, cita APA).
+    Solo OpenAlex (sin enriquecer con Crossref: a esta escala la latencia no lo permite; la cita
+    limpia se enriquece al seleccionar el estudio). Nunca incluye ítems sin DOI verificable."""
+    query = (query or "").strip()
+    limite = max(10, min(int(limite or 150), 300))
+    if not query:
+        return {"query": query, "n": 0, "articulos": [], "fuente": "OpenAlex",
+                "limite": limite, "truncado": False, "nota": "Escribe una línea de investigación."}
+
+    desde_anio = None
+    if anios and anios > 0:
+        desde_anio = datetime.date.today().year - int(anios) + 1
+
+    per_page = 100
+    vistos_doi, vistos_tit, refs = set(), set(), []
+    cursor = "*"
+    total_disponible = None
+    try:
+        while cursor and len(refs) < limite:
+            data = _get(_oa_url(query, per_page, desde_anio, cursor), timeout=20)
+            if total_disponible is None:
+                total_disponible = (data.get("meta") or {}).get("count")
+            resultados = data.get("results") or []
+            if not resultados:
+                break
+            for it in resultados:
+                r = _oa_item(it)
+                if not r:
+                    continue
+                d = _norm_doi(r["id"])
+                t = _norm_titulo(r["titulo"])
+                if d in vistos_doi or t in vistos_tit:
+                    continue
+                vistos_doi.add(d)
+                vistos_tit.add(t)
+                refs.append(r)
+                if len(refs) >= limite:
+                    break
+            cursor = (data.get("meta") or {}).get("next_cursor")
+    except Exception:
+        if not refs:
+            return {"query": query, "n": 0, "articulos": [], "fuente": "OpenAlex",
+                    "limite": limite, "truncado": False, "error": "sin_conexion",
+                    "nota": "No se pudo consultar OpenAlex en este momento."}
+
+    arts = []
+    for r in refs:
+        arts.append({
+            "titulo": r["titulo"], "anio": r.get("anio"), "revista": r.get("revista"),
+            "id_tipo": r["id_tipo"], "id": r["id"], "url": r["url"], "tipo": r.get("tipo"),
+            "abstract": r.get("abstract"), "citas": r.get("citas"),
+            "oa": r.get("oa"), "oa_estado": r.get("oa_estado"), "oa_url": r.get("oa_url"),
+            "issn": r.get("issn"), "idioma": r.get("idioma"),
+            "autores_str": _apa_autores(r.get("autores", [])),
+            "apa": formatear(r, "apa"), "vancouver": formatear(r, "vancouver"),
+            "bibtex": _bibtex(r), "ris": _ris(r),
+        })
+    truncado = bool(total_disponible and total_disponible > len(arts))
+    nota = f"{len(arts)} candidatos verificados por DOI (OpenAlex)."
+    if desde_anio:
+        nota += f" Ventana {desde_anio}–{datetime.date.today().year}."
+    if truncado:
+        nota += f" Hay ~{total_disponible} en total; se trajeron los {len(arts)} más relevantes."
+    return {"query": query, "n": len(arts), "articulos": arts, "fuente": "OpenAlex",
+            "limite": limite, "total_disponible": total_disponible, "truncado": truncado,
             "ventana_anios": anios or None, "desde_anio": desde_anio, "nota": nota}

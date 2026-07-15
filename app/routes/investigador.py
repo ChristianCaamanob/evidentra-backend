@@ -160,6 +160,21 @@ def literatura(q: str = Query(..., min_length=2),
         raise
 
 
+@router.get("/investigacion/corpus")
+def corpus(q: str = Query(..., min_length=2),
+           anios: int = Query(0, ge=0, le=50),
+           limite: int = Query(150, ge=10, le=300),
+           _: object = _Dep(req_investigador)):
+    """Corpus de candidatos para el tablero de cribado (revisión sistemática): pagina OpenAlex
+    por cursor hasta `limite` (≤300), deduplica por DOI, con abstract/citas/OA para cribar.
+    Base del diagrama PRISMA 2020. `anios`=ventana temporal (0=sin límite)."""
+    try:
+        return literatura_service.buscar_corpus(q, anios=(anios or None), limite=limite)
+    except Exception:
+        logger.error(f"Error en corpus '{q}': {traceback.format_exc()}")
+        raise
+
+
 @router.get("/{assessment_id}/psicometria/dimensionalidad")
 def psicometria_dimensionalidad(assessment_id: UUID, db: Session = Depends(get_db)):
     """I7 - Dimensionalidad (KMO, Bartlett, analisis paralelo, EFA) + fiabilidad ampliada."""

@@ -78,3 +78,42 @@ def test_split_nombre_particulas():
     assert L._split_nombre("Jörg Henseler")["family"] == "Henseler"
     r = L._split_nombre("Jan van der Berg")
     assert r["family"] == "van der Berg" and r["given"] == "Jan"
+
+
+def _oa_work(doi, titulo, anio=2022):
+    return {"doi": "https://doi.org/" + doi, "title": titulo, "publication_year": anio,
+            "authorships": [{"author": {"display_name": "Ana Perez"}}],
+            "primary_location": {"source": {"display_name": "Rev X", "issn_l": "1-2"}},
+            "open_access": {"is_oa": True, "oa_status": "gold"},
+            "cited_by_count": 5, "type": "article", "biblio": {"volume": "1"},
+            "abstract_inverted_index": {"Hola": [0]}}
+
+
+def test_corpus_pagina_dedup_y_trunca(monkeypatch):
+    # Dos páginas; la 2ª repite un DOI (dedup) y trae uno nuevo. total_disponible>n -> truncado.
+    paginas = [
+        {"results": [_oa_work("10.1/a", "Uno"), _oa_work("10.1/b", "Dos")],
+         "meta": {"count": 50, "next_cursor": "c2"}},
+        {"results": [_oa_work("10.1/B", "Dos"), _oa_work("10.1/c", "Tres")],
+         "meta": {"count": 50, "next_cursor": None}},
+    ]
+    llamadas = {"i": 0}
+
+    def fake_get(url, timeout=12):
+        p = paginas[llamadas["i"]]; llamadas["i"] += 1
+        return p
+    monkeypatch.setattr(L, "_get", fake_get)
+    r = L.buscar_corpus("algo", limite=150)
+    dois = [a["id"] for a in r["articulos"]]
+    assert r["n"] == 3 and len(set(dois)) == 3           # a, b, c (B duplicado eliminado)
+    assert r["total_disponible"] == 50 and r["truncado"] is True
+    assert all(a.get("autores_str") and a.get("bibtex") for a in r["articulos"])
+
+
+def test_corpus_respeta_limite(monkeypatch):
+    def fake_get(url, timeout=12):
+        return {"results": [_oa_work(f"10.1/{i}", f"T{i}") for i in range(100)],
+                "meta": {"count": 999, "next_cursor": "x"}}
+    monkeypatch.setattr(L, "_get", fake_get)
+    r = L.buscar_corpus("algo", limite=30)
+    assert r["n"] == 30 and r["truncado"] is True
