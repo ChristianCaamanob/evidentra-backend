@@ -1,5 +1,14 @@
 # Blueprint de Render — despliegue un-clic del backend de Evalys (demo/piloto).
 # En Render: New + → Blueprint → conecta el repo evidentra-backend → Apply.
+
+# Base de datos PERSISTENTE (Fase 0). Al aplicar el blueprint, Render la crea y engancha
+# su connectionString a DATABASE_URL del servicio automáticamente (sin copiar/pegar).
+databases:
+  - name: evalys-db
+    plan: free
+    databaseName: evalys
+    postgresMajorVersion: "16"
+
 services:
   - type: web
     name: evidentra-backend
@@ -9,6 +18,11 @@ services:
     buildCommand: "pip install -r requirements.txt"
     startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
     envVars:
+      # PERSISTENCIA: inyecta la URL de la Postgres de arriba. Sin dashboard, sin pegar nada.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: evalys-db
+          property: connectionString
       - key: PYTHON_VERSION
         value: "3.11.9"
       - key: SECRET_KEY       # firma de los JWT — Render genera uno seguro
