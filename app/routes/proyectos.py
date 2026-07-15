@@ -45,6 +45,27 @@ def _dto(p: Proyecto) -> dict:
             "updated_at": p.updated_at.isoformat() if p.updated_at else None}
 
 
+def _resumen(p: Proyecto) -> dict:
+    """Resumen liviano para la lista (evita devolver el corpus completo de cada proyecto)."""
+    d = p.datos or {}
+    if p.tipo == "revision":
+        crib = d.get("cribado") or {}
+        return {"corpus_n": len(d.get("corpus") or []),
+                "incluidos": sum(1 for v in crib.values() if v == "incluir"),
+                "cribados": len(crib)}
+    if p.tipo == "datos":
+        return {"cursos": len(d.get("course_ids") or []),
+                "grupos": len(d.get("grupos") or [])}
+    return {}
+
+
+def _dto_light(p: Proyecto) -> dict:
+    base = _dto(p)
+    base.pop("datos", None)
+    base["resumen"] = _resumen(p)
+    return base
+
+
 def _mio(db: Session, pid: UUID, usuario: Teacher) -> Proyecto:
     p = db.get(Proyecto, pid)
     if not p:
@@ -62,7 +83,7 @@ def listar(db: Session = Depends(get_db), usuario: Teacher = Depends(req_investi
     if usuario.rol != ROL_CREADOR:
         q = q.filter(Proyecto.investigador_id == usuario.id)
     proyectos = q.order_by(Proyecto.updated_at.desc()).all()
-    return {"n": len(proyectos), "proyectos": [_dto(p) for p in proyectos]}
+    return {"n": len(proyectos), "proyectos": [_dto_light(p) for p in proyectos]}
 
 
 @router.post("", status_code=201)
