@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, req_investigador
+from app.api.deps import get_db, req_lectura_datos
 from app.models.assessment import Assessment
 from app.services import matriz_service
 
@@ -35,7 +35,7 @@ def _csv(text: str, filename: str) -> StreamingResponse:
 
 
 @router.get("/assessments/{assessment_id}/export/matriz.csv",
-            dependencies=[Depends(req_investigador)])
+            dependencies=[Depends(req_lectura_datos)])
 def export_matriz(assessment_id: UUID, db: Session = Depends(get_db)):
     """Matriz 0/1 (persona × ítem), seudonimizada — el respuestas.csv para el WLSMV en R."""
     try:
@@ -54,7 +54,7 @@ def export_matriz(assessment_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.get("/courses/{course_id}/export/consolidado.csv",
-            dependencies=[Depends(req_investigador)])
+            dependencies=[Depends(req_lectura_datos)])
 def export_consolidado(course_id: UUID, hasta: int = Query(0, ge=0),
                        db: Session = Depends(get_db)):
     """
