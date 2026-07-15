@@ -146,12 +146,15 @@ def rutas_investigacion(assessment_id: UUID, db: Session = Depends(get_db),
 
 @router.get("/investigacion/literatura")
 def literatura(q: str = Query(..., min_length=2),
-               rows: int = Query(5, ge=1, le=10),
+               rows: int = Query(8, ge=1, le=25),
+               anios: int = Query(0, ge=0, le=50),
                _: object = _Dep(req_investigador)):
-    """Literatura en vivo (Crossref): artículos reales verificados por DOI, con cita APA 7 y
-    Vancouver. Nunca inventa referencias. `q` es la línea de investigación (en inglés rinde mejor)."""
+    """Literatura en vivo (OpenAlex + Crossref): artículos reales verificados por DOI, con
+    abstract, citas, estado open-access, cita APA 7/Vancouver y export BibTeX/RIS. Nunca inventa
+    referencias; deduplica por DOI. `anios`=ventana temporal (5/10/15…; 0=sin límite).
+    `q` es la línea de investigación (en inglés rinde mejor)."""
     try:
-        return literatura_service.buscar(q, rows=rows)
+        return literatura_service.buscar(q, rows=rows, anios=(anios or None))
     except Exception:
         logger.error(f"Error en literatura '{q}': {traceback.format_exc()}")
         raise

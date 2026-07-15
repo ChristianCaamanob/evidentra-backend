@@ -1,22 +1,37 @@
 """
-Búsqueda de literatura en vivo para el módulo Investigador (rutas de investigación).
+Motor de referencias del módulo Investigador (rutas de investigación · revisión de literatura).
 
-Consulta Crossref (DOI) y PubMed (PMID) por un tema (la "línea de investigación" que el
-investigador va desarrollando) y devuelve artículos REALES con su identificador verificado y
-la cita formateada en APA 7 o Vancouver. NUNCA inventa referencias: si un ítem no trae DOI/PMID
-verificable, se descarta.
+Fuente primaria: OpenAlex (250M+ trabajos, gratis, sin clave) — aporta ABSTRACT (índice
+invertido), conteo de citas, estado open-access, tipo y puntaje de relevancia. Se enriquece
+con Crossref (metadatos DOI canónicos: autores limpios, volumen/número/páginas).
 
-Sin claves: Crossref y PubMed E-utilities son APIs públicas.
+Principios metodológicos (líneas rojas):
+  · NUNCA inventa referencias: si un ítem no trae DOI/PMID verificable, se descarta.
+  · Deduplica por DOI (y por título normalizado como respaldo) para no doblar el conteo.
+  · Ventana temporal explícita (5 / 10 / 15 / +) — clave para una búsqueda defendible.
+  · No fabrica cuartiles: expone ISSN y citas (señales abiertas); el SJR se mapea aparte.
+
+Sin claves: OpenAlex y Crossref son APIs públicas (usan el "polite pool" con mailto).
 """
 from __future__ import annotations
 
+import datetime
 import json
+import re
 import ssl
 import urllib.parse
 import urllib.request
 
-_CTX = ssl.create_default_context()
-_UA = "Evalys/1.0 (https://evalys.app; mailto:soporte@evalys.app)"
+try:  # CA bundle explícito: evita fallos de verificación TLS en contenedores mínimos
+    import certifi
+    _CTX = ssl.create_default_context(cafile=certifi.where())
+except Exception:
+    _CTX = ssl.create_default_context()
+_MAILTO = "soporte@evalys.app"
+_UA = f"Evalys/1.0 (https://evalys.app; mailto:{_MAILTO})"
+
+_PARTICULAS = {"de", "del", "la", "las", "los", "van", "von", "der", "den", "da", "di",
+               "dos", "das", "du", "el", "al", "bin", "ibn", "san", "santa", "st", "le"}
 
 
 def _get(url: str, timeout: int = 12):
@@ -25,19 +40,123 @@ def _get(url: str, timeout: int = 12):
         return json.loads(r.read())
 
 
-# ───────────────────────────────────────────── Crossref (DOI)
-def _crossref(query: str, rows: int = 6) -> list[dict]:
+# ───────────────────────────────────────────── utilidades de identidad
+def _norm_doi(doi: str | None) -> str:
+    if not doi:
+        return ""
+    d = doi.strip().lower()
+    d = re.sub(r"^https?://(dx\.)?doi\.org/", "", d)
+    return d
+
+
+def _norm_titulo(t: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (t or "").lower()).strip()
+
+
+def _split_nombre(display: str) -> dict:
+    """OpenAlex entrega el nombre completo sin separar. Heurística: el apellido es la última
+    palabra, absorbiendo partículas previas (de, van, del…). Compuestos españoles con dos
+    apellidos quedan con el último; Crossref, cuando hay DOI, corrige esto con datos limpios."""
+    partes = [p for p in (display or "").replace(",", " ").split() if p]
+    if not partes:
+        return {"family": "", "given": ""}
+    if len(partes) == 1:
+        return {"family": partes[0], "given": ""}
+    i = len(partes) - 1
+    family = [partes[i]]
+    j = i - 1
+    while j >= 1 and partes[j].lower().strip(".") in _PARTICULAS:
+        family.insert(0, partes[j])
+        j -= 1
+    return {"family": " ".join(family), "given": " ".join(partes[:j + 1])}
+
+
+def _abstract_desde_invertido(idx: dict | None, limite: int = 1500) -> str | None:
+    """OpenAlex da el abstract como {palabra: [posiciones]}. Se reconstruye en orden."""
+    if not idx:
+        return None
+    pares = []
+    for palabra, posiciones in idx.items():
+        for p in posiciones:
+            pares.append((p, palabra))
+    if not pares:
+        return None
+    pares.sort()
+    texto = " ".join(w for _, w in pares).strip()
+    return (texto[:limite] + "…") if len(texto) > limite else texto
+
+
+# ───────────────────────────────────────────── OpenAlex (fuente primaria)
+_OA_SELECT = ("id,doi,title,display_name,publication_year,authorships,primary_location,"
+              "open_access,cited_by_count,type,biblio,abstract_inverted_index,language")
+
+
+def _openalex(query: str, rows: int, desde_anio: int | None) -> list[dict]:
+    filtros = ["type:article|review|book-chapter"]
+    if desde_anio:
+        filtros.append(f"from_publication_date:{desde_anio}-01-01")
+    params = {
+        "search": query,
+        "per_page": str(min(rows, 25)),
+        "select": _OA_SELECT,
+        "filter": ",".join(filtros),
+        "mailto": _MAILTO,
+    }
+    url = "https://api.openalex.org/works?" + urllib.parse.urlencode(params)
+    data = _get(url)
+    refs = []
+    for it in data.get("results", []) or []:
+        doi = _norm_doi(it.get("doi"))
+        titulo = it.get("title") or it.get("display_name")
+        if not doi or not titulo:
+            continue  # sin DOI verificable -> se descarta
+        loc = (it.get("primary_location") or {})
+        fuente = (loc.get("source") or {})
+        biblio = (it.get("biblio") or {})
+        oa = (it.get("open_access") or {})
+        autores = []
+        for a in (it.get("authorships") or []):
+            nom = (a.get("author") or {}).get("display_name")
+            if nom:
+                autores.append(_split_nombre(nom))
+        pag = None
+        fp, lp = biblio.get("first_page"), biblio.get("last_page")
+        if fp:
+            pag = (f"{fp}-{lp}" if lp and lp != fp else str(fp))
+        refs.append({
+            "id_tipo": "DOI", "id": doi, "url": "https://doi.org/" + doi,
+            "titulo": titulo.strip(), "autores": autores,
+            "revista": fuente.get("display_name"),
+            "issn": fuente.get("issn_l"),
+            "anio": it.get("publication_year"),
+            "volumen": biblio.get("volume"), "numero": biblio.get("issue"), "paginas": pag,
+            "tipo": it.get("type"),
+            "abstract": _abstract_desde_invertido(it.get("abstract_inverted_index")),
+            "citas": it.get("cited_by_count"),
+            "oa": bool(oa.get("is_oa")),
+            "oa_estado": oa.get("oa_status"),
+            "oa_url": oa.get("oa_url"),
+            "idioma": it.get("language"),
+            "_fuente": "OpenAlex",
+        })
+    return refs
+
+
+# ───────────────────────────────────────────── Crossref (enriquece autores/metadatos)
+def _crossref(query: str, rows: int = 8, desde_anio: int | None = None) -> list[dict]:
+    filtro = f"&filter=from-pub-date:{desde_anio}-01-01" if desde_anio else ""
     url = ("https://api.crossref.org/works?rows=" + str(rows)
-           + "&select=DOI,title,author,container-title,issued,volume,issue,page,type"
+           + "&select=DOI,title,author,container-title,issued,volume,issue,page,type,ISSN"
+           + filtro + "&mailto=" + _MAILTO
            + "&query.bibliographic=" + urllib.parse.quote(query))
     data = _get(url)
     items = (data.get("message") or {}).get("items", [])
     refs = []
     for it in items:
-        doi = it.get("DOI")
+        doi = _norm_doi(it.get("DOI"))
         titulo = (it.get("title") or [None])[0]
         if not doi or not titulo:
-            continue          # sin DOI o sin título -> no verificable, se descarta
+            continue
         autores = [{"family": a.get("family", ""), "given": a.get("given", "")}
                    for a in (it.get("author") or []) if a.get("family")]
         issued = (((it.get("issued") or {}).get("date-parts") or [[None]])[0] or [None])
@@ -46,36 +165,39 @@ def _crossref(query: str, rows: int = 6) -> list[dict]:
             "id_tipo": "DOI", "id": doi, "url": "https://doi.org/" + doi,
             "titulo": titulo.strip(), "autores": autores,
             "revista": (it.get("container-title") or [None])[0],
+            "issn": (it.get("ISSN") or [None])[0],
             "anio": anio, "volumen": it.get("volume"), "numero": it.get("issue"),
-            "paginas": it.get("page"), "tipo": it.get("type"),
+            "paginas": it.get("page"), "tipo": it.get("type"), "_fuente": "Crossref",
         })
     return refs
 
 
 # ───────────────────────────────────────────── formato de cita
 def _norm_family(f: str) -> str:
-    """Apellidos que Crossref devuelve en MAYÚSCULAS -> Capitalizado (respeta guiones)."""
+    """Apellidos en MAYÚSCULAS -> Capitalizado (respeta guiones y compuestos con espacio)."""
     if f and f == f.upper():
-        return "-".join(w.capitalize() for w in f.split("-"))
+        return " ".join("-".join(w.capitalize() for w in parte.split("-")) for parte in f.split())
     return f
 
 
 def _iniciales(given: str) -> str:
-    partes = [p for p in given.replace(".", " ").split() if p]
+    partes = [p for p in (given or "").replace(".", " ").split() if p]
     return " ".join(p[0].upper() + "." for p in partes)
 
 
 def _apa_autores(autores: list[dict]) -> str:
     if not autores:
         return ""
-    fmt = [_norm_family(a["family"]) + ", " + _iniciales(a.get("given", "")) for a in autores[:20]]
+    fmt = [_norm_family(a["family"]) + (", " + _iniciales(a.get("given", "")) if a.get("given") else "")
+           for a in autores[:20]]
     if len(fmt) == 1:
         return fmt[0]
     return ", ".join(fmt[:-1]) + ", & " + fmt[-1]
 
 
 def _vanc_autores(autores: list[dict]) -> str:
-    fmt = [_norm_family(a["family"]) + " " + _iniciales(a.get("given", "")).replace(".", "") for a in autores[:6]]
+    fmt = [(_norm_family(a["family"]) + " " + _iniciales(a.get("given", "")).replace(".", "")).strip()
+           for a in autores[:6]]
     s = ", ".join(fmt)
     if len(autores) > 6:
         s += ", et al"
@@ -106,23 +228,123 @@ def formatear(ref: dict, fmt: str = "apa") -> str:
     return " ".join(p for p in partes if p).strip()
 
 
-def buscar(query: str, rows: int = 5) -> dict:
-    """Devuelve artículos reales verificados por DOI, con cita en APA 7 y Vancouver."""
+# ───────────────────────────────────────────── export a gestores (BibTeX / RIS)
+def _cite_key(ref: dict) -> str:
+    fam = ""
+    if ref.get("autores"):
+        fam = re.sub(r"[^A-Za-z]", "", (ref["autores"][0].get("family") or "").split()[-1] if ref["autores"][0].get("family") else "")
+    return (fam or "ref") + str(ref.get("anio") or "")
+
+
+def _bibtex(ref: dict) -> str:
+    autores = " and ".join(
+        (a.get("family", "") + (", " + a["given"] if a.get("given") else "")) for a in ref.get("autores", []))
+    campos = [("author", autores), ("title", ref.get("titulo")), ("journal", ref.get("revista")),
+              ("year", ref.get("anio")), ("volume", ref.get("volumen")), ("number", ref.get("numero")),
+              ("pages", (ref.get("paginas") or "").replace("-", "--") if ref.get("paginas") else None),
+              ("doi", ref.get("id")), ("issn", ref.get("issn"))]
+    cuerpo = ",\n  ".join(f"{k} = {{{v}}}" for k, v in campos if v)
+    return "@article{" + _cite_key(ref) + ",\n  " + cuerpo + "\n}"
+
+
+def _ris(ref: dict) -> str:
+    lineas = ["TY  - JOUR"]
+    for a in ref.get("autores", []):
+        au = a.get("family", "") + (", " + a["given"] if a.get("given") else "")
+        lineas.append("AU  - " + au)
+    campos = [("TI", ref.get("titulo")), ("JO", ref.get("revista")), ("PY", ref.get("anio")),
+              ("VL", ref.get("volumen")), ("IS", ref.get("numero")), ("DO", ref.get("id")),
+              ("SN", ref.get("issn"))]
+    for tag, v in campos:
+        if v:
+            lineas.append(f"{tag}  - {v}")
+    if ref.get("paginas") and "-" in str(ref["paginas"]):
+        sp, ep = str(ref["paginas"]).split("-", 1)
+        lineas += ["SP  - " + sp, "EP  - " + ep]
+    elif ref.get("paginas"):
+        lineas.append("SP  - " + str(ref["paginas"]))
+    lineas.append("ER  - ")
+    return "\n".join(lineas)
+
+
+# ───────────────────────────────────────────── fusión + deduplicación
+def _fusionar(primaria: list[dict], enriquecedora: list[dict]) -> list[dict]:
+    """Parte de la lista primaria (OpenAlex, ordenada por relevancia) y la enriquece con datos
+    limpios de Crossref cuando comparten DOI; luego añade los de Crossref no presentes."""
+    por_doi = {_norm_doi(r["id"]): r for r in enriquecedora}
+    vistos_doi, vistos_tit = set(), set()
+    salida = []
+    for r in primaria:
+        d = _norm_doi(r["id"])
+        cr = por_doi.get(d)
+        if cr:  # Crossref manda en autores/volumen/número/páginas (metadatos canónicos)
+            for k in ("autores", "volumen", "numero", "paginas"):
+                if cr.get(k):
+                    r[k] = cr[k]
+            r["revista"] = r.get("revista") or cr.get("revista")
+        vistos_doi.add(d)
+        vistos_tit.add(_norm_titulo(r["titulo"]))
+        salida.append(r)
+    for cr in enriquecedora:
+        d = _norm_doi(cr["id"])
+        if d in vistos_doi or _norm_titulo(cr["titulo"]) in vistos_tit:
+            continue
+        vistos_doi.add(d)
+        vistos_tit.add(_norm_titulo(cr["titulo"]))
+        salida.append(cr)
+    return salida
+
+
+# ───────────────────────────────────────────── API pública
+def buscar(query: str, rows: int = 8, anios: int | None = None) -> dict:
+    """Artículos reales verificados por DOI, con abstract, citas, OA, cita APA 7/Vancouver y
+    export BibTeX/RIS. `anios`: ventana temporal (5/10/15…; 0 o None = sin límite).
+
+    Fuente primaria OpenAlex (relevancia + abstract + citas + OA), enriquecida con Crossref.
+    Nunca inventa referencias; deduplica por DOI/título."""
     query = (query or "").strip()
     if not query:
-        return {"query": query, "n": 0, "articulos": [], "fuente": "crossref",
+        return {"query": query, "n": 0, "articulos": [], "fuente": "OpenAlex",
                 "nota": "Escribe una línea de investigación para buscar."}
+
+    desde_anio = None
+    if anios and anios > 0:
+        desde_anio = datetime.date.today().year - int(anios) + 1
+
+    primaria, enriquecedora, fuentes = [], [], []
     try:
-        refs = _crossref(query, rows=rows)
-    except Exception as e:
-        return {"query": query, "n": 0, "articulos": [], "fuente": "crossref",
-                "error": type(e).__name__, "nota": "No se pudo consultar Crossref en este momento."}
+        primaria = _openalex(query, rows=max(rows, 8), desde_anio=desde_anio)
+        if primaria:
+            fuentes.append("OpenAlex")
+    except Exception:
+        primaria = []
+    try:
+        enriquecedora = _crossref(query, rows=max(rows, 8), desde_anio=desde_anio)
+        if enriquecedora:
+            fuentes.append("Crossref")
+    except Exception:
+        enriquecedora = []
+
+    if not primaria and not enriquecedora:
+        return {"query": query, "n": 0, "articulos": [], "fuente": "OpenAlex",
+                "error": "sin_conexion",
+                "nota": "No se pudo consultar OpenAlex/Crossref en este momento."}
+
+    fusion = _fusionar(primaria or enriquecedora, enriquecedora if primaria else [])
     arts = []
-    for r in refs[:rows]:
+    for r in fusion[:rows]:
         arts.append({
-            "titulo": r["titulo"], "anio": r["anio"], "revista": r["revista"],
+            "titulo": r["titulo"], "anio": r.get("anio"), "revista": r.get("revista"),
             "id_tipo": r["id_tipo"], "id": r["id"], "url": r["url"], "tipo": r.get("tipo"),
+            "abstract": r.get("abstract"), "citas": r.get("citas"),
+            "oa": r.get("oa"), "oa_estado": r.get("oa_estado"), "oa_url": r.get("oa_url"),
+            "issn": r.get("issn"), "idioma": r.get("idioma"),
             "apa": formatear(r, "apa"), "vancouver": formatear(r, "vancouver"),
+            "bibtex": _bibtex(r), "ris": _ris(r),
         })
-    return {"query": query, "n": len(arts), "articulos": arts, "fuente": "Crossref",
-            "nota": "Referencias reales verificadas por DOI; nunca inventadas."}
+    nota = "Referencias reales verificadas por DOI; nunca inventadas."
+    if desde_anio:
+        nota += f" Ventana: {desde_anio}–{datetime.date.today().year} (últimos {anios} años)."
+    return {"query": query, "n": len(arts), "articulos": arts,
+            "fuente": " + ".join(fuentes) or "OpenAlex",
+            "ventana_anios": anios or None, "desde_anio": desde_anio, "nota": nota}
