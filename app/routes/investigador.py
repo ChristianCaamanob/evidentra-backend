@@ -334,9 +334,11 @@ def reporte_reproducible(assessment_id: UUID, db: Session = Depends(get_db)):
             hechos["invarianza"] = inv.get("veredicto")
         except Exception:
             pass
-        red = reporte_service.redactar(hechos)
-        return {"hechos": hechos, "metodos": red["metodos"], "resultados": red["resultados"],
-                "motor": red["motor"], "checklist": reporte_service.checklist_cosmin(hechos),
+        if c and getattr(c, "name", None):
+            hechos["titulo"] = f"Evidencia de validez y fiabilidad: {c.name}"
+        ms = manuscrito_service.redactar_imrad(hechos, "datos")   # IMRaD completo (COSMIN)
+        return {"hechos": hechos, "manuscrito": ms, "motor": ms.get("motor"),
+                "checklist": reporte_service.checklist_cosmin(hechos),
                 "_meta": _meta(datos, "cfa")}
     except Exception:
         logger.error(f"Error en reporte {assessment_id}: {traceback.format_exc()}")
