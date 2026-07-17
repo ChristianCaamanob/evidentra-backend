@@ -169,6 +169,18 @@ def literatura(q: str = Query(..., min_length=2),
         raise
 
 
+@router.get("/investigacion/cobertura")
+def cobertura(q: str = Query(..., min_length=2), anios: int = Query(0, ge=0, le=50),
+              _: object = _Dep(req_investigador)):
+    """Embudo de cobertura: cuántos resultados hay para la línea en cada gran fuente ABIERTA
+    (OpenAlex · PubMed/MEDLINE · Crossref · DOAJ). Responde '¿son todos los disponibles?'."""
+    try:
+        return literatura_service.cobertura(q, anios=(anios or None))
+    except Exception:
+        logger.error(f"Error en cobertura '{q}': {traceback.format_exc()}")
+        raise
+
+
 class MetaEstudio(BaseModel):
     label: str | None = None
     # efecto ya calculado (opcional):

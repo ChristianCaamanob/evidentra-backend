@@ -114,6 +114,7 @@ def _oa_item(it: dict) -> dict | None:
         "id_tipo": "DOI", "id": doi, "url": "https://doi.org/" + doi,
         "titulo": titulo.strip(), "autores": autores,
         "revista": fuente.get("display_name"), "issn": fuente.get("issn_l"),
+        "source_id": (fuente.get("id") or "").rsplit("/", 1)[-1] if fuente.get("id") else None,
         "anio": it.get("publication_year"),
         "volumen": biblio.get("volume"), "numero": biblio.get("issue"), "paginas": pag,
         "tipo": it.get("type"),
@@ -294,6 +295,84 @@ def _fusionar(primaria: list[dict], enriquecedora: list[dict]) -> list[dict]:
 
 
 # ───────────────────────────────────────────── API pública
+# ───────────────────────────────────────────── Cobertura (¿cuántos hay en total, por fuente?)
+def _oa_count(query: str, desde_anio: int | None) -> int | None:
+    try:
+        data = _get(_oa_url(query, 1, desde_anio), timeout=10)
+        return (data.get("meta") or {}).get("count")
+    except Exception:
+        return None
+
+
+def _pubmed_count(query: str, desde_anio: int | None) -> int | None:
+    """Total en PubMed/MEDLINE vía E-utilities (solo el conteo, rápido)."""
+    try:
+        term = query
+        if desde_anio:
+            term += f" AND {desde_anio}:{datetime.date.today().year}[dp]"
+        url = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&retmax=0&retmode=json"
+               "&term=" + urllib.parse.quote(term))
+        return int(((_get(url, timeout=10).get("esearchresult") or {}).get("count")) or 0)
+    except Exception:
+        return None
+
+
+def _crossref_count(query: str, desde_anio: int | None) -> int | None:
+    try:
+        filtro = f"&filter=from-pub-date:{desde_anio}-01-01" if desde_anio else ""
+        url = "https://api.crossref.org/works?rows=0&query=" + urllib.parse.quote(query) + filtro + "&mailto=" + _MAILTO
+        return ((_get(url, timeout=10).get("message") or {}).get("total-results"))
+    except Exception:
+        return None
+
+
+def _doaj_count(query: str) -> int | None:
+    """Total en DOAJ (revistas de acceso abierto confiables)."""
+    try:
+        url = "https://doaj.org/api/v2/search/articles/" + urllib.parse.quote(query) + "?pageSize=1"
+        return (_get(url, timeout=10).get("total"))
+    except Exception:
+        return None
+
+
+def cobertura(query: str, anios: int | None = None) -> dict:
+    """Cuántos resultados hay para la línea en cada gran fuente abierta (embudo de cobertura)."""
+    query = (query or "").strip()
+    desde = (datetime.date.today().year - int(anios) + 1) if (anios and anios > 0) else None
+    return {"openalex": _oa_count(query, desde), "pubmed": _pubmed_count(query, desde),
+            "crossref": _crossref_count(query, desde), "doaj": _doaj_count(query),
+            "ventana_anios": anios or None}
+
+
+# ───────────────────────────────────────────── Métricas de revista (OpenAlex Sources, abierto)
+def metricas_revistas(source_ids: list[str]) -> dict:
+    """Por revista (source de OpenAlex): país, H-index, nº de trabajos, citas 2y, DOAJ, editorial,
+    ISSN y APC. Es la base ABIERTA de indicadores (el cuartil SJR se añade con el CSV de SCImago).
+    Devuelve {source_id: {...}}. Lote de hasta 50 por llamada."""
+    ids = [s for s in dict.fromkeys(source_ids) if s]
+    out = {}
+    for i in range(0, len(ids), 50):
+        lote = ids[i:i + 50]
+        try:
+            sel = "id,display_name,issn_l,country_code,works_count,cited_by_count,summary_stats,is_in_doaj,host_organization_name,apc_usd"
+            url = ("https://api.openalex.org/sources?per_page=50&mailto=" + _MAILTO +
+                   "&select=" + sel + "&filter=ids.openalex:" + "|".join(lote))
+            for s in (_get(url, timeout=12).get("results") or []):
+                sid = (s.get("id") or "").rsplit("/", 1)[-1]
+                ss = s.get("summary_stats") or {}
+                out[sid] = {
+                    "revista": s.get("display_name"), "issn": s.get("issn_l"),
+                    "pais": s.get("country_code"), "h_index": ss.get("h_index"),
+                    "citas_2y": round(ss.get("2yr_mean_citedness"), 2) if ss.get("2yr_mean_citedness") is not None else None,
+                    "works": s.get("works_count"), "citas_total": s.get("cited_by_count"),
+                    "en_doaj": bool(s.get("is_in_doaj")), "editorial": s.get("host_organization_name"),
+                    "apc_usd": s.get("apc_usd"),
+                }
+        except Exception:
+            continue
+    return out
+
+
 def buscar(query: str, rows: int = 8, anios: int | None = None) -> dict:
     """Artículos reales verificados por DOI, con abstract, citas, OA, cita APA 7/Vancouver y
     export BibTeX/RIS. `anios`: ventana temporal (5/10/15…; 0 o None = sin límite).
@@ -329,21 +408,34 @@ def buscar(query: str, rows: int = 8, anios: int | None = None) -> dict:
                 "nota": "No se pudo consultar OpenAlex/Crossref en este momento."}
 
     fusion = _fusionar(primaria or enriquecedora, enriquecedora if primaria else [])
+    seleccion = fusion[:rows]
+    # métricas de revista (OpenAlex Sources) para las revistas del resultado
+    met = {}
+    try:
+        met = metricas_revistas([r.get("source_id") for r in seleccion if r.get("source_id")])
+    except Exception:
+        met = {}
     arts = []
-    for r in fusion[:rows]:
+    for r in seleccion:
         arts.append({
             "titulo": r["titulo"], "anio": r.get("anio"), "revista": r.get("revista"),
             "id_tipo": r["id_tipo"], "id": r["id"], "url": r["url"], "tipo": r.get("tipo"),
             "abstract": r.get("abstract"), "citas": r.get("citas"),
             "oa": r.get("oa"), "oa_estado": r.get("oa_estado"), "oa_url": r.get("oa_url"),
             "issn": r.get("issn"), "idioma": r.get("idioma"),
+            "metricas": met.get(r.get("source_id")),   # país, H-index, citas, DOAJ, editorial…
             "apa": formatear(r, "apa"), "vancouver": formatear(r, "vancouver"),
             "bibtex": _bibtex(r), "ris": _ris(r),
         })
+    total = None
+    try:
+        total = _oa_count(query, desde_anio)
+    except Exception:
+        total = None
     nota = "Referencias reales verificadas por DOI; nunca inventadas."
     if desde_anio:
         nota += f" Ventana: {desde_anio}–{datetime.date.today().year} (últimos {anios} años)."
-    return {"query": query, "n": len(arts), "articulos": arts,
+    return {"query": query, "n": len(arts), "articulos": arts, "total": total,
             "fuente": " + ".join(fuentes) or "OpenAlex",
             "ventana_anios": anios or None, "desde_anio": desde_anio, "nota": nota}
 
