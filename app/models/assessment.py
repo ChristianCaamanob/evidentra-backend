@@ -46,6 +46,9 @@ class Assessment(UUIDMixin, TimestampMixin, Base):
     # Aditivo: las evaluaciones existentes quedan 'escrita' (server_default), sin cambios.
     modalidad: Mapped[str] = mapped_column(String(20), default=MODALIDAD_ESCRITA,
                                            server_default=MODALIDAD_ESCRITA, nullable=False)
+    # Tipo/categoría de la evaluación (solemne | certamen | prueba | control | otro). Etiqueta
+    # para los informes; no altera el cálculo de la nota. Nullable (evaluaciones antiguas).
+    tipo: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Opt-in del docente: en escalas de BANDAS (EEUU/UK/IB/ECTS), mover los cortes con la
     # exigencia en vez de dejarlos fijos. Solo aplica a esas escalas; el resto lo ignora.
     bandas_moviles: Mapped[bool] = mapped_column(Boolean, default=False,

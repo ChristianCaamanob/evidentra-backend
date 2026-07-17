@@ -107,6 +107,8 @@ class AssessmentIn(_BaseModel):
     n_desarrollo: int = 0
     # Opt-in: en escalas de bandas, mover los cortes con la exigencia (curva la evaluación).
     bandas_moviles: bool = False
+    # Tipo/categoría institucional (solemne | certamen | prueba | control | otro). Etiqueta para informes.
+    tipo: str | None = None
 
 @router.get("/by-course/{course_id}")
 def list_assessments(course_id: UUID, db: Session = Depends(get_db)):
@@ -124,6 +126,7 @@ def list_assessments(course_id: UUID, db: Session = Depends(get_db)):
             "has_answer_key": ak is not None,
             "answer_key_valid": ak.is_valid if ak else False,
             "modalidad": modalidad_norm(a.modalidad),
+            "tipo": a.tipo,
             "created_at": str(a.created_at)[:10] if a.created_at else None,
         })
     return result
@@ -146,6 +149,7 @@ def create_assessment(payload: AssessmentIn, db: Session = Depends(get_db)):
         name=payload.name,
         status="draft",
         modalidad=modalidad,
+        tipo=((payload.tipo or "").strip().lower()[:20] or None),
         bandas_moviles=bool(payload.bandas_moviles),
         has_versions=len(payload.versions) > 1,
         version_count=payload.n_questions,
@@ -322,6 +326,7 @@ def get_assessment_config(assessment_id: UUID, db: Session = Depends(get_db)):
         "passing_threshold": a.passing_threshold or 60.0,
         "status": a.status,
         "modalidad": modalidad_norm(a.modalidad),
+        "tipo": a.tipo,
         "bandas_moviles": bool(getattr(a, "bandas_moviles", False)),
         "course_id": str(a.course_id),
         "available_scales": listar_escalas(),
@@ -344,10 +349,12 @@ def update_assessment_config(assessment_id: UUID, payload: dict, db: Session = D
         a.version_count = int(payload["n_questions"])
     if "bandas_moviles" in payload:
         a.bandas_moviles = bool(payload["bandas_moviles"])
+    if "tipo" in payload:
+        a.tipo = ((payload.get("tipo") or "").strip().lower()[:20] or None)
     db.commit()
     db.refresh(a)
     return {"id": str(a.id), "name": a.name, "grading_scale": a.grading_scale,
-            "passing_threshold": a.passing_threshold,
+            "passing_threshold": a.passing_threshold, "tipo": a.tipo,
             "bandas_moviles": bool(getattr(a, "bandas_moviles", False))}
 
 

@@ -286,6 +286,9 @@ _COLUMNAS_ADITIVAS = {
         "webauthn_challenge": "VARCHAR(255)",
         "webauthn_challenge_exp": "INTEGER",
     },
+    "assessments": {
+        "tipo": "VARCHAR(20)",
+    },
 }
 
 
