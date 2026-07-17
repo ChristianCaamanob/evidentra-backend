@@ -1,11 +1,16 @@
 """
-Generador de BRIEFINGS reales (feedback diferenciado) sobre resultados verificados.
+Informes/briefings diferenciados sobre resultados verificados (Fase 4).
 
-Cierra el ciclo evaluación → nota → inteligencia: toma los datos REALES del informe
-(`informe_service.build_datos`: nota, brechas y fortalezas por RA, posición en el curso) o
-del curso completo, y redacta con el LLM un briefing personalizado, FUNDAMENTADO SOLO en
-esos datos. Línea roja: no inventa cifras, RA ni logros; si no hay API key, cae a un
-armado determinista con los mismos datos. La nota es del docente (G1); el briefing orienta.
+Cierra el ciclo evaluación → nota → inteligencia con DOS productos:
+  1. Briefing por ESTUDIANTE — retroalimentación formativa personalizada, centrada en las
+     BRECHAS por resultado de aprendizaje / competencia (no solo la nota), con estrategias.
+  2. Informe único del CURSO para el DOCENTE — métricas INTERPRETADAS (no repetidas), brechas
+     por RA, ítems críticos, propuestas de mejora y estrategias didácticas para los contenidos
+     débiles, de cara al avance del curso.
+
+Ambos se ADAPTAN al tipo (solemne/certamen/…) y a la modalidad (desarrollo/selección/oral).
+Línea roja: usan SOLO los datos dados; no inventan cifras, RA ni logros. Sin clave de IA caen
+a un armado determinista con los mismos datos. La nota es del docente (G1); el informe orienta.
 """
 from __future__ import annotations
 
@@ -16,29 +21,33 @@ logger = logging.getLogger(__name__)
 
 MODELO = os.environ.get("EVALYS_REPORT_MODEL", "claude-opus-4-8")
 
-_SIS_ALUMNO = (
-    "Eres un docente que redacta retroalimentación formativa para UN estudiante, en español, "
-    "cercana y constructiva. Te doy datos REALES de su evaluación (nota, aciertos/errores, "
-    "resultados de aprendizaje logrados y por reforzar, y su posición en el curso). Escribe un "
-    "briefing de 2 a 3 párrafos breves: (1) reconoce lo logrado citando los RA/temas concretos "
-    "en que le fue bien; (2) señala con precisión qué reforzar (los RA con brecha) y por qué "
-    "importa; (3) da 2-3 pasos concretos de estudio. Reglas estrictas: usa SOLO los datos dados; "
-    "NO inventes notas, porcentajes, RA ni contenidos que no aparezcan; tono motivador y "
-    "respetuoso; sin viñetas rígidas ni encabezados; devuelve solo el texto."
-)
-
-_SIS_CURSO = (
-    "Eres un asesor pedagógico que redacta un briefing para EL DOCENTE sobre el desempeño del "
-    "curso en una evaluación, en español. Te doy datos REALES: distribución de notas, % de "
-    "aprobación, ítems más difíciles y resultados de aprendizaje con brecha. Escribe 2 a 3 "
-    "párrafos: (1) panorama del curso (dominio general y dispersión); (2) focos de reenseñanza "
-    "priorizados por los RA/ítems con más brecha, con justificación; (3) 2-3 acciones concretas "
-    "de remediación para la próxima clase. Reglas: usa SOLO los datos dados; NO inventes cifras "
-    "ni RA; concreto y accionable; devuelve solo el texto, sin encabezados."
-)
+_TIPO_TXT = {
+    "solemne": "una SOLEMNE (evaluación sumativa de alto impacto en la nota final)",
+    "certamen": "un CERTAMEN (evaluación sumativa de alto impacto)",
+    "prueba": "una prueba",
+    "control": "un control (evaluación breve y focalizada)",
+}
+_MOD_TXT = {
+    "alternativas": ("de SELECCIÓN ÚNICA (ítems de alternativas corregidos contra la pauta)",
+                     "tus respuestas marcadas"),
+    "desarrollo": ("de DESARROLLO (respuestas abiertas evaluadas con rúbrica por criterios)",
+                   "tus respuestas y los criterios de la rúbrica"),
+    "mixta": ("MIXTA (alternativas + desarrollo por rúbrica)", "tus respuestas y criterios"),
+    "oral": ("de EXPOSICIÓN/DISERTACIÓN ORAL (evaluada con rúbrica de criterios, con parte "
+             "grupal e individual)", "tu disertación y los criterios de la rúbrica (grupales e individuales)"),
+}
 
 
-def _llm(sistema: str, usuario: str, max_tokens: int = 700) -> str | None:
+def _contexto(tipo, modalidad):
+    tipo = (tipo or "").lower().strip()
+    mod = (modalidad or "").lower().strip()
+    tt = _TIPO_TXT.get(tipo, "una evaluación")
+    mt, voc = _MOD_TXT.get(mod, ("", "tus respuestas"))
+    marco = "Es " + tt + (", " + mt if mt else "") + "."
+    return marco, voc
+
+
+def _llm(sistema: str, usuario: str, max_tokens: int = 1100) -> str | None:
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return None
     try:
@@ -51,27 +60,41 @@ def _llm(sistema: str, usuario: str, max_tokens: int = 700) -> str | None:
             if getattr(b, "type", None) == "text" and b.text.strip():
                 return b.text.strip()
     except Exception as e:
-        logger.warning("Briefing cayó a plantilla: %s", str(e)[:150])
+        logger.warning("Informe cayó a plantilla: %s", str(e)[:150])
     return None
 
 
-def _nombres_ra(items: list, k: str = "ra") -> list[str]:
+def _nombres_ra(items: list) -> list[str]:
     out = []
     for g in items or []:
-        n = g.get("nombre") or g.get(k) or g.get("ra") or g.get("titulo")
+        n = g.get("nombre") or g.get("ra") or g.get("titulo") or g.get("clave")
         if n:
             out.append(str(n))
     return out
 
 
-def briefing_estudiante(datos: dict) -> dict:
-    """Briefing personalizado desde `informe_service.build_datos`."""
+# ─────────────────────────────── ESTUDIANTE ───────────────────────────────
+def briefing_estudiante(datos: dict, tipo: str | None = None, modalidad: str | None = None) -> dict:
+    """Briefing personalizado centrado en brechas por RA/competencia, con estrategias."""
     resumen = datos.get("resumen", {}) or {}
     brechas = datos.get("brechas", []) or []
     fortalezas = datos.get("fortalezas", []) or []
     dist = datos.get("distribucion_curso", {}) or {}
-    nombre = datos.get("estudiante", {}).get("nombre") if isinstance(datos.get("estudiante"), dict) else None
+    est = datos.get("estudiante") if isinstance(datos.get("estudiante"), dict) else {}
+    nombre = (est or {}).get("nombre")
+    marco, voc = _contexto(tipo, modalidad)
 
+    sistema = (
+        "Eres un docente que redacta retroalimentación formativa para UN estudiante, en español, "
+        "cercana y constructiva. " + marco + " Céntrate en las BRECHAS por resultado de "
+        "aprendizaje / competencia / habilidad (no solo en la nota). Estructura en 3 bloques con "
+        "subtítulos en negrita Markdown: **Lo que lograste** (RA/habilidades dominadas, citando "
+        "los datos); **Lo que conviene reforzar** (los RA con brecha, explicando por qué importan "
+        "para lo que viene en el curso); **Cómo avanzar** (2-4 estrategias de estudio CONCRETAS y "
+        "accionables por cada RA débil: qué hacer, cómo, con qué tipo de recurso o ejercicio). "
+        "Habla de " + voc + " según corresponda. Reglas: usa SOLO los datos dados; NO inventes "
+        "notas, %, RA ni contenidos; tono respetuoso y motivador; ~200-320 palabras."
+    )
     usuario = (
         "ESTUDIANTE: " + (nombre or "(seudonimizado)") + "\n"
         "Nota: " + str(resumen.get("nota", "—")) + " · "
@@ -80,49 +103,81 @@ def briefing_estudiante(datos: dict) -> dict:
         + str(resumen.get("omitidas", "?")) + " omitidas.\n"
         "Posición en el curso: percentil " + str(resumen.get("percentil", dist.get("percentil", "—")))
         + " (promedio del curso: " + str(dist.get("promedio", "—")) + "%).\n"
-        "RA LOGRADOS (fortalezas): " + (", ".join(_nombres_ra(fortalezas)) or "—") + "\n"
-        "RA POR REFORZAR (brechas): " + (", ".join(_nombres_ra(brechas)) or "—") + "\n"
+        "RA/COMPETENCIAS LOGRADAS: " + (", ".join(_nombres_ra(fortalezas)) or "—") + "\n"
+        "RA/COMPETENCIAS CON BRECHA (por reforzar): " + (", ".join(_nombres_ra(brechas)) or "—") + "\n"
     )
-    texto = _llm(_SIS_ALUMNO, usuario)
+    texto = _llm(sistema, usuario, max_tokens=900)
     if texto:
         return {"briefing": texto, "motor": "IA (" + MODELO + ")"}
 
-    # Respaldo determinista (mismos datos, sin IA).
-    fo = _nombres_ra(fortalezas)
-    br = _nombres_ra(brechas)
-    partes = []
-    partes.append("Obtuviste una nota de " + str(resumen.get("nota", "—")) + " con "
-                  + str(resumen.get("correctas", "?")) + " respuestas correctas.")
-    if fo:
-        partes.append("Demostraste dominio en: " + ", ".join(fo[:4]) + ".")
+    fo, br = _nombres_ra(fortalezas), _nombres_ra(brechas)
+    partes = ["**Lo que lograste.** Obtuviste una nota de " + str(resumen.get("nota", "—")) + " con "
+              + str(resumen.get("correctas", "?")) + " respuestas correctas."
+              + (" Dominaste: " + ", ".join(fo[:5]) + "." if fo else "")]
     if br:
-        partes.append("Conviene reforzar: " + ", ".join(br[:4])
-                      + ". Repasa esos contenidos, resuelve ejercicios similares y consulta tus dudas en la próxima clase.")
+        partes.append("\n\n**Lo que conviene reforzar.** " + ", ".join(br[:5]) + ".")
+        partes.append("\n\n**Cómo avanzar.** Repasa esos resultados de aprendizaje con ejercicios "
+                      "similares, identifica dónde te equivocaste y consulta tus dudas antes de la "
+                      "próxima unidad, que se apoya en estos contenidos.")
     else:
-        partes.append("No se detectaron brechas marcadas; mantén el ritmo y profundiza donde te interese.")
-    return {"briefing": " ".join(partes), "motor": "plantilla determinista"}
+        partes.append("\n\n**Cómo avanzar.** No se detectaron brechas marcadas; mantén el ritmo y "
+                      "profundiza en lo que te interese.")
+    return {"briefing": "".join(partes), "motor": "plantilla determinista"}
 
 
-def briefing_curso(distribucion: dict, items_dificiles: list, brechas_ra: list,
-                   n_estudiantes: int, aprobacion_pct: float | None = None) -> dict:
-    """Briefing para el docente sobre el curso completo."""
-    usuario = (
-        "CURSO — n=" + str(n_estudiantes) + " estudiantes.\n"
-        "Promedio: " + str(distribucion.get("promedio", "—")) + "% · mediana: "
-        + str(distribucion.get("mediana", "—")) + "%"
-        + (" · aprobación: " + str(aprobacion_pct) + "%" if aprobacion_pct is not None else "") + ".\n"
-        "Ítems más difíciles (menor % de acierto): "
-        + ("; ".join(str(i) for i in (items_dificiles or [])[:8]) or "—") + "\n"
-        "RA con más brecha en el curso: " + (", ".join(brechas_ra or []) or "—") + "\n"
+# ─────────────────────────────── CURSO (DOCENTE) ───────────────────────────────
+def briefing_curso(metricas: dict, por_ra: list, items_dificiles: list,
+                   tipo: str | None = None, modalidad: str | None = None) -> dict:
+    """Informe integral para el docente: métricas interpretadas + brechas + estrategias."""
+    marco, _ = _contexto(tipo, modalidad)
+    m = metricas or {}
+    ra_txt = "; ".join(
+        str(g.get("clave", "?")) + ": " + str(g.get("logro_promedio", "?")) + "% ("
+        + str(g.get("items", "?")) + " ítems)"
+        for g in (por_ra or [])) or "—"
+
+    sistema = (
+        "Eres un asesor pedagógico experto en evaluación. Redactas UN informe integral para EL "
+        "DOCENTE sobre el desempeño del curso, en español. " + marco + " No te limites a repetir "
+        "las cifras: INTERPRÉTALAS (qué significan para el aprendizaje). Estructura con subtítulos "
+        "en negrita Markdown:\n"
+        "**Panorama del curso** — nivel de logro general, dispersión y forma de la distribución; "
+        "qué dice sobre cómo aprendió el grupo (homogéneo/heterogéneo, cola de rezago, techo).\n"
+        "**Brechas por resultado de aprendizaje** — qué RA/competencias dominó el curso y cuáles "
+        "quedaron débiles, con lectura pedagógica de por qué (prioriza los de menor logro).\n"
+        "**Ítems críticos** — los de menor acierto y qué concepción errónea o dificultad sugieren.\n"
+        "**Propuestas de mejora** — acciones para el avance de los contenidos del curso, "
+        "priorizadas.\n"
+        "**Estrategias para los contenidos débiles** — 3-5 estrategias didácticas CONCRETAS "
+        "(actividades, secuencia, evaluación formativa, agrupamientos) para abordar los RA débiles.\n"
+        "Reglas: usa SOLO los datos dados; NO inventes cifras ni RA; específico y accionable; "
+        "~350-550 palabras."
     )
-    texto = _llm(_SIS_CURSO, usuario)
+    usuario = (
+        "CURSO — n=" + str(m.get("n", "?")) + " estudiantes.\n"
+        "Promedio: " + str(m.get("promedio", "—")) + "% · mediana: " + str(m.get("mediana", "—")) + "%"
+        + " · desviación: " + str(m.get("desviacion", "—")) + " pts%"
+        + " · rango: " + str(m.get("minimo", "—")) + "–" + str(m.get("maximo", "—")) + "%.\n"
+        "Aprobación: " + (str(m.get("aprobacion_pct")) + "%" if m.get("aprobacion_pct") is not None else "—")
+        + " · forma de la distribución: " + str(m.get("forma", "—")) + ".\n"
+        "Logro por resultado de aprendizaje (RA: % logro): " + ra_txt + "\n"
+        "Ítems más difíciles (menor acierto): " + ("; ".join(str(i) for i in (items_dificiles or [])[:10]) or "—") + "\n"
+    )
+    texto = _llm(sistema, usuario, max_tokens=1400)
     if texto:
         return {"briefing": texto, "motor": "IA (" + MODELO + ")"}
 
-    partes = ["El curso promedió " + str(distribucion.get("promedio", "—")) + "%"
-              + (" con " + str(aprobacion_pct) + "% de aprobación" if aprobacion_pct is not None else "") + "."]
-    if brechas_ra:
-        partes.append("Los focos de reenseñanza prioritarios son: " + ", ".join(brechas_ra[:5]) + ".")
+    debiles = [g for g in (por_ra or []) if g.get("logro_promedio", 100) < 60]
+    partes = ["**Panorama del curso.** El curso promedió " + str(m.get("promedio", "—")) + "% (mediana "
+              + str(m.get("mediana", "—")) + "%)"
+              + (", con " + str(m.get("aprobacion_pct")) + "% de aprobación" if m.get("aprobacion_pct") is not None else "")
+              + ". Dispersión " + str(m.get("desviacion", "—")) + " pts%: distribución " + str(m.get("forma", "—")) + "."]
+    if debiles:
+        partes.append("\n\n**Brechas por resultado de aprendizaje.** Prioriza: "
+                      + ", ".join(str(g.get("clave")) + " (" + str(g.get("logro_promedio")) + "%)" for g in debiles[:6]) + ".")
     if items_dificiles:
-        partes.append("Revisa especialmente los ítems de menor logro y sus distractores para detectar concepciones erróneas.")
-    return {"briefing": " ".join(partes), "motor": "plantilla determinista"}
+        partes.append("\n\n**Ítems críticos.** Revisa " + ", ".join(str(i) for i in items_dificiles[:6])
+                      + " y sus distractores para detectar concepciones erróneas.")
+    partes.append("\n\n**Estrategias.** Reenseña los contenidos débiles con ejemplos contrastantes, "
+                  "trabajo entre pares heterogéneos y un control formativo breve antes de avanzar.")
+    return {"briefing": "".join(partes), "motor": "plantilla determinista"}

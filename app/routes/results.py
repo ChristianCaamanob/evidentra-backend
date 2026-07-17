@@ -48,8 +48,21 @@ def get_briefing_estudiante(scan_id: UUID, db: Session = Depends(get_db)):
     logger = logging.getLogger("evalys")
     try:
         datos = informe_service.build_datos(db, scan_id)
-        rep = briefing_service.briefing_estudiante(datos)
+        tipo = modalidad = None
+        try:
+            from app.models.scan import Scan
+            from app.models.assessment import Assessment, modalidad_norm
+            sc = db.get(Scan, scan_id)
+            a = db.get(Assessment, sc.assessment_id) if sc else None
+            if a:
+                tipo = a.tipo
+                modalidad = modalidad_norm(a.modalidad)
+        except Exception:
+            pass
+        rep = briefing_service.briefing_estudiante(datos, tipo=tipo, modalidad=modalidad)
         rep["nota"] = (datos.get("resumen") or {}).get("nota")
+        rep["tipo"] = tipo
+        rep["modalidad"] = modalidad
         return rep
     except Exception:
         logger.error(f"Error en get_briefing_estudiante {scan_id}: {traceback.format_exc()}")

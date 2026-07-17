@@ -376,34 +376,54 @@ def briefing_del_curso(assessment_id: UUID, db: Session = Depends(get_db)):
     import traceback, logging
     logger = logging.getLogger("evalys")
     try:
+        from app.models.assessment import Assessment, modalidad_norm
+        a = db.get(Assessment, assessment_id)
+        tipo = a.tipo if a else None
+        modalidad = modalidad_norm(a.modalidad) if a else None
         res = result_service.list_results_for_assessment(db, assessment_id)
         rows = res.get("results", [])
         pcts = sorted(r["percentage"] for r in rows if r.get("percentage") is not None)
         n = len(pcts)
         promedio = round(sum(pcts) / n, 1) if n else None
         mediana = pcts[n // 2] if n else None
+        desviacion = minimo = maximo = forma = None
+        if n:
+            mean = sum(pcts) / n
+            desviacion = round((sum((p - mean) ** 2 for p in pcts) / n) ** 0.5, 1)
+            minimo, maximo = round(pcts[0], 1), round(pcts[-1], 1)
+            # Forma (interpretación simple para el prompt): sesgo + dispersión.
+            sesgo = ("cola de rezago (algunos muy bajo el resto)" if promedio < mediana - 4
+                     else "cola alta (algunos muy sobre el resto)" if promedio > mediana + 4
+                     else "aproximadamente simétrica")
+            disp = ("homogénea" if desviacion < 12 else "muy heterogénea" if desviacion > 22 else "heterogénea")
+            forma = disp + ", " + sesgo
         aprob = sum(1 for r in rows if r.get("pass_status") == "approved")
         aprob_pct = round(aprob / len(rows) * 100, 1) if rows else None
-        items_dificiles, brechas_ra = [], []
+        items_dificiles, por_ra = [], []
         try:
             d = matriz_service.cargar_respuestas_letras(db, assessment_id)
             ia = curso_stats_service.analizar_evaluacion(
                 d["respuestas_alumnos"], d["pauta"], te_tags=d.get("te_tags"))
             items = sorted(ia.get("items", []), key=lambda x: x.get("dificultad_p", 1))
-            for it in items[:8]:
+            for it in items[:10]:
                 items_dificiles.append("P" + str(it["item"]) + " ("
                                        + str(round(it.get("dificultad_p", 0) * 100)) + "% acierto)")
-            for g in (ia.get("por_ra") or []):
-                if g.get("clave") and g["clave"] != "sin_clasificar" and g.get("logro_promedio", 100) < 60:
-                    brechas_ra.append(str(g["clave"]) + " (" + str(g["logro_promedio"]) + "%)")
+            por_ra = [g for g in (ia.get("por_ra") or [])
+                      if g.get("clave") and g["clave"] != "sin_clasificar"]
         except Exception:
             pass
-        rep = briefing_service.briefing_curso(
-            {"promedio": promedio, "mediana": mediana}, items_dificiles, brechas_ra,
-            len(rows), aprob_pct)
+        metricas = {"n": len(rows), "promedio": promedio, "mediana": mediana,
+                    "desviacion": desviacion, "minimo": minimo, "maximo": maximo,
+                    "aprobacion_pct": aprob_pct, "forma": forma}
+        rep = briefing_service.briefing_curso(metricas, por_ra, items_dificiles,
+                                              tipo=tipo, modalidad=modalidad)
+        brechas_ra = [str(g["clave"]) + " (" + str(g["logro_promedio"]) + "%)"
+                      for g in por_ra if g.get("logro_promedio", 100) < 60]
         rep["resumen"] = {"n": len(rows), "promedio_pct": promedio, "mediana_pct": mediana,
-                          "aprobacion_pct": aprob_pct, "items_dificiles": items_dificiles,
-                          "brechas_ra": brechas_ra}
+                          "desviacion": desviacion, "minimo": minimo, "maximo": maximo,
+                          "aprobacion_pct": aprob_pct, "forma": forma, "tipo": tipo,
+                          "modalidad": modalidad, "items_dificiles": items_dificiles,
+                          "brechas_ra": brechas_ra, "por_ra": por_ra}
         return rep
     except Exception:
         logger.error(f"Error en briefing_del_curso {assessment_id}: {traceback.format_exc()}")
