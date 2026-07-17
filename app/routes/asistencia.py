@@ -21,6 +21,8 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, req_lectura_datos, usuario_actual
 from app.services import asistencia_service as asis
+from app.services import asistencia_webauthn as awa
+from app.models.asistencia import AsistenciaMatricula
 
 router = APIRouter(tags=["asistencia"])
 
@@ -75,6 +77,33 @@ def estado(codigo: str, db: Session = Depends(get_db)):
 @router.post("/asistencia/sesion/{codigo}/override", dependencies=[Depends(req_lectura_datos)])
 def override(codigo: str, payload: dict, db: Session = Depends(get_db)):
     return asis.override_marca(db, codigo, payload.get("matricula_id"), payload.get("estado"))
+
+
+# ── enrolamiento del alumno (WebAuthn, público por invite_token) ──────────────────────
+@router.get("/asistencia/enrolar/{invite_token}")
+def enrolar_info(invite_token: str, db: Session = Depends(get_db)):
+    m = db.query(AsistenciaMatricula).filter(AsistenciaMatricula.invite_token == invite_token).first()
+    if not m:
+        from app.core.errors import not_found
+        raise not_found("Invitación no válida.")
+    return {"nombre": m.nombre, "correo": m.correo, "estado": m.estado,
+            "tiene_passkey": any(d.activo for d in m.dispositivos)}
+
+
+@router.post("/asistencia/enrolar/opciones")
+def enrolar_opciones(payload: dict, request: Request, db: Session = Depends(get_db)):
+    return awa.opciones_registro(db, payload.get("invite_token"), request.headers.get("origin"))
+
+
+@router.post("/asistencia/enrolar/verificar")
+def enrolar_verificar(payload: dict, request: Request, db: Session = Depends(get_db)):
+    return awa.verificar_registro(db, payload.get("invite_token"), payload.get("credential"),
+                                  request.headers.get("origin"))
+
+
+@router.post("/asistencia/matricula/{matricula_id}/revocar-passkey", dependencies=[Depends(req_lectura_datos)])
+def revocar_passkey(matricula_id: UUID, db: Session = Depends(get_db)):
+    return awa.revocar_dispositivos(db, matricula_id)
 
 
 # ── alumno (público) ──────────────────────────────────────────────────────────────────

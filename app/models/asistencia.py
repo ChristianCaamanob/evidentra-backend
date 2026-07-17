@@ -50,6 +50,9 @@ class AsistenciaMatricula(UUIDMixin, TimestampMixin, Base):
     estado: Mapped[str] = mapped_column(String(20), default=MAT_INVITADO, server_default=MAT_INVITADO, nullable=False)
     invite_token: Mapped[str | None] = mapped_column(String(48), unique=True, index=True, nullable=True)
     validado_at: Mapped["DateTime | None"] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Challenge WebAuthn en curso (entre las dos llamadas de la ceremonia). Transitorio.
+    webauthn_challenge: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    webauthn_challenge_exp: Mapped[int | None] = mapped_column(Integer, nullable=True)  # epoch seg
 
     dispositivos = relationship("DispositivoWebAuthn", back_populates="matricula",
                                 cascade="all, delete-orphan")

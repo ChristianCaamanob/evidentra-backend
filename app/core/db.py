@@ -282,6 +282,10 @@ _COLUMNAS_ADITIVAS = {
         "opciones_json": "JSON",
         "justificacion": "TEXT",
     },
+    "asistencia_matriculas": {
+        "webauthn_challenge": "VARCHAR(255)",
+        "webauthn_challenge_exp": "INTEGER",
+    },
 }
 
 

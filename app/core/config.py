@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     # que va dentro del QR. Vacío => el backend usa el header Origin de la petición; si
     # tampoco hay, el QR cae a codificar solo el código de sala.
     public_app_url: str = ""
+    # WebAuthn / passkeys (asistencia). RP ID = dominio registrable del FRONTEND (host, sin
+    # esquema ni puerto), p.ej. "evalys-web.vercel.app" o "app.evalys.cl". El origin es el
+    # https completo. Si están vacíos, el backend los deriva del header Origin de la petición.
+    webauthn_rp_id: str = ""
+    webauthn_rp_name: str = "Evalys"
+    webauthn_origin: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
