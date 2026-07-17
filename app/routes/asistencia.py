@@ -65,8 +65,16 @@ def cerrar_sesion(codigo: str, db: Session = Depends(get_db)):
 
 
 @router.get("/asistencia/sesion/{codigo}/qr", dependencies=[Depends(req_lectura_datos)])
-def qr(codigo: str, db: Session = Depends(get_db)):
-    return asis.qr_actual(db, codigo)
+def qr(codigo: str, request: Request, db: Session = Depends(get_db)):
+    d = asis.qr_actual(db, codigo)
+    # URL de marcado que codifica el QR: lleva el token+bucket vigentes (rotan cada 4 s).
+    from app.core.config import settings
+    from app.services import en_vivo_service as ev
+    base = (settings.public_app_url or request.headers.get("origin") or "").rstrip("/")
+    ruta = f"/app.html?asistencia={d['codigo']}&t={d['token']}&b={d['bucket']}"
+    d["marcar_url"] = (base + ruta) if base else ruta
+    d["qr"] = ev.qr_data_url(d["marcar_url"] if base else (d["codigo"] + ":" + d["token"]))
+    return d
 
 
 @router.get("/asistencia/sesion/{codigo}/estado", dependencies=[Depends(req_lectura_datos)])
