@@ -11,6 +11,8 @@ from app.models.student import Student
 from app.models.teacher import Teacher
 from app.models.password_reset import PasswordResetToken
 from app.models.en_vivo import SesionEnVivo, ParticipanteVivo, RespuestaVivo  # noqa: F401
+from app.models.asistencia import (  # noqa: F401
+    AsistenciaMatricula, DispositivoWebAuthn, SesionAsistencia, MarcaAsistencia)
 from app.models.suscripcion import Suscripcion, EventoPago  # noqa: F401
 
 # Normaliza el esquema de Render/Heroku: SQLAlchemy 2.0 exige 'postgresql://'.

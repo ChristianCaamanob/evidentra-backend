@@ -62,6 +62,8 @@ from app.routes.en_vivo import router as en_vivo_router
 api_router.include_router(en_vivo_router)
 from app.routes.banco import router as banco_router
 api_router.include_router(banco_router)
+from app.routes.asistencia import router as asistencia_router
+api_router.include_router(asistencia_router)
 # Pagos: módulo opcional/incompleto (pagos.py, suscripcion no versionados). Se carga si existe;
 # si no, NO debe tumbar toda la app (esto rompía el arranque en Render con status 1).
 try:
