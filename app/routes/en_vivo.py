@@ -18,14 +18,16 @@ Participantes (publico, sin login: los estudiantes se unen con el codigo):
 Gobernanza: en vivo NO se salta la corrección con pauta ya validada; al cerrar, la
 matriz alimenta la misma psicometría (Rasch/KR-20), sin silos.
 """
+import re
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, req_profesor
 from app.core.config import settings
 from app.services import en_vivo_service as ev
+from app.services import exportador_service
 
 router = APIRouter(tags=["en-vivo"])
 
@@ -79,6 +81,25 @@ def resultados(codigo: str, db: Session = Depends(get_db)):
 @router.get("/en-vivo/{codigo}/matriz", dependencies=[Depends(req_profesor)])
 def matriz(codigo: str, db: Session = Depends(get_db)):
     return ev.matriz_binaria(db, codigo)
+
+
+@router.get("/en-vivo/{codigo}/informe", dependencies=[Depends(req_profesor)])
+def informe(codigo: str, db: Session = Depends(get_db)):
+    """Informe integral de la sala (psicometría TCT + resultados por RA + estudiantes)."""
+    return ev.informe_en_vivo(db, codigo)
+
+
+@router.post("/en-vivo/{codigo}/informe/{formato}", dependencies=[Depends(req_profesor)])
+def informe_export(codigo: str, formato: str, db: Session = Depends(get_db)):
+    """Descarga el informe de la sala en Word/PDF/Excel (psicométrico + por RA)."""
+    if formato not in ("docx", "pdf", "xlsx"):
+        from app.core.errors import unprocessable
+        raise unprocessable("Formato no soportado (docx | pdf | xlsx).")
+    payload = ev.informe_payload(db, codigo, formato)
+    data, media = exportador_service.exportar(formato, payload)
+    fn = re.sub(r"[^A-Za-z0-9_\-]", "_", f"informe_en_vivo_{codigo}")[:80]
+    return Response(content=data, media_type=media,
+                    headers={"Content-Disposition": f'attachment; filename="{fn}.{formato}"'})
 
 
 # ── banco de ítems (contenido para el modo digital) ──────────────────────────────────

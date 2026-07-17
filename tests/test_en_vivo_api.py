@@ -346,6 +346,53 @@ def test_banco_items_guardar_y_leer(entorno):
     assert p1["justificacion"] == "Nueva justificación"
 
 
+def test_drilldown_por_pregunta_en_resultados(entorno):
+    """resultados().por_pregunta trae el detalle para el drill-down: opciones con texto+%,
+    correcta, justificación y RA."""
+    aid, c = entorno["aid"], entorno["client"]
+    cod = c.post(f"/api/v1/assessments/{aid}/en-vivo", json={}).json()["codigo"]
+    pid, tk = _unir(c, cod, "Ana")
+    c.post(f"/api/v1/en-vivo/{cod}/avanzar")
+    c.post(f"/api/v1/en-vivo/{cod}/responder", json={"participante_id": pid, "token": tk, "respuesta": "B"})
+    pp = c.get(f"/api/v1/en-vivo/{cod}/resultados").json()["por_pregunta"][0]
+    assert pp["enunciado"] and pp["justificacion"]
+    assert pp["pct_correcta"] == 100.0 and pp["pct_incorrecta"] == 0.0
+    opB = next(o for o in pp["opciones"] if o["letra"] == "B")
+    assert opB["texto"] == "Yeyuno" and opB["correcta"] is True and opB["pct"] == 100.0
+
+
+def test_informe_psicometrico_y_por_ra(entorno):
+    """El informe integra psicometría (dificultad, discriminación, KR-20), resultados por RA
+    y estudiantes con nota; y se exporta a Word/PDF/Excel."""
+    aid, c = entorno["aid"], entorno["client"]
+    cod = c.post(f"/api/v1/assessments/{aid}/en-vivo", json={}).json()["codigo"]
+    # dos participantes con patrones distintos para que haya variación
+    a_id, a_tk = _unir(c, cod, "Ana")
+    b_id, b_tk = _unir(c, cod, "Beto")
+    for qn, (aA, aB) in zip([1, 2, 3], [("B", "A"), ("C", "C"), ("A", "D")]):
+        c.post(f"/api/v1/en-vivo/{cod}/avanzar")
+        c.post(f"/api/v1/en-vivo/{cod}/responder", json={"participante_id": a_id, "token": a_tk, "respuesta": aA})
+        c.post(f"/api/v1/en-vivo/{cod}/responder", json={"participante_id": b_id, "token": b_tk, "respuesta": aB})
+    inf = c.get(f"/api/v1/en-vivo/{cod}/informe").json()
+    assert inf["n_participantes"] == 2 and inf["n_items"] == 3
+    assert len(inf["items"]) == 3 and "dificultad_p" in inf["items"][0]
+    assert inf["por_ra"] and "logro_pct" in inf["por_ra"][0]
+    assert len(inf["estudiantes"]) == 2 and "nota" in inf["estudiantes"][0]
+    # Ana acertó 3/3 → aprobada; Beto 1/3 (solo P2=C)
+    ana = next(e for e in inf["estudiantes"] if e["alias"] == "Ana")
+    assert ana["aciertos"] == 3 and ana["aprobado"] is True
+    # exportación XLSX (openpyxl es dependencia dura) por el endpoint real
+    r = c.post(f"/api/v1/en-vivo/{cod}/informe/xlsx")
+    assert r.status_code == 200, r.text
+    assert r.content[:2] == b"PK"   # zip (xlsx)
+    # el payload docx/pdf se arma bien (el render depende de python-docx/reportlab, en prod)
+    from app.services import en_vivo_service as ev
+    with Session(entorno["engine"]) as db:
+        pl = ev.informe_payload(db, cod, "docx")
+    assert pl["titulo"] and pl["secciones"] and pl["tablas"]
+    assert any(t["titulo"].startswith("Resultados por Resultado") for t in pl["tablas"])
+
+
 def test_no_se_puede_iniciar_sin_pauta_valida(entorno):
     # Evaluacion nueva sin AnswerKey valida -> 409 al crear la sala.
     c = entorno["client"]

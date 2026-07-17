@@ -403,11 +403,20 @@ def resultados(db, codigo: str) -> dict:
             dist[r.respuesta] = dist.get(r.respuesta, 0) + 1
         ncnt = len(rs)
         n_ok = sum(1 for r in rs if r.correcta)
+        # Distribución por alternativa (para el drill-down): texto + n + % + si es la correcta.
+        textos = {str(o.get("letra", "")).strip().upper(): o.get("texto", "") for o in item["opciones"]}
+        letras = item["letras"] if item["tiene_opciones"] else ["A", "B", "C", "D"]
+        opciones = [{"letra": L, "texto": textos.get(L, ""), "n": dist.get(L, 0),
+                     "pct": round(dist.get(L, 0) / ncnt * 100, 1) if ncnt else 0.0,
+                     "correcta": L == item["correcta"]} for L in letras]
         por_pregunta.append({
             "pregunta": i, "correcta": item["correcta"],
-            "n_respuestas": ncnt, "n_correctas": n_ok,
+            "n_respuestas": ncnt, "n_correctas": n_ok, "n_incorrectas": ncnt - n_ok,
             "pct_correcta": round(n_ok / ncnt * 100, 1) if ncnt else 0.0,
-            "distribucion": dist,
+            "pct_incorrecta": round((ncnt - n_ok) / ncnt * 100, 1) if ncnt else 0.0,
+            "distribucion": dist, "opciones": opciones,
+            "enunciado": item["enunciado"], "justificacion": item["justificacion"],
+            "ra": item["ra"], "bloom": item["bloom"], "unidad": item["unidad"],
         })
 
     # Grilla alumno × pregunta (estilo "Live Results"): cada celda = su letra + acierto.
@@ -479,6 +488,170 @@ def mi_resultado(db, codigo: str, participante_id, token: str) -> dict:
         "escala": escala, "umbral": umbral,
         "revelar": s.revelar_correccion, "detalle": detalle,
     }
+
+
+# ── informe de la sala (psicometría + resultados de aprendizaje) ──────────────────────
+def _media(xs):
+    return sum(xs) / len(xs) if xs else 0.0
+
+
+def _pearson(xs, ys):
+    n = len(xs)
+    if n < 2:
+        return 0.0
+    mx, my = _media(xs), _media(ys)
+    num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    dx = sum((x - mx) ** 2 for x in xs) ** 0.5
+    dy = sum((y - my) ** 2 for y in ys) ** 0.5
+    return (num / (dx * dy)) if dx > 0 and dy > 0 else 0.0
+
+
+def _kr20(matriz, ps):
+    """KR-20 (fiabilidad de consistencia interna para ítems dicotómicos), Python puro."""
+    k = len(ps)
+    if k < 2 or not matriz:
+        return None
+    totales = [sum(fila) for fila in matriz]
+    n = len(totales)
+    mt = _media(totales)
+    var_total = sum((t - mt) ** 2 for t in totales) / n  # varianza poblacional
+    if var_total <= 0:
+        return 0.0
+    sum_pq = sum(p * (1 - p) for p in ps)
+    return round((k / (k - 1)) * (1 - sum_pq / var_total), 3)
+
+
+def informe_en_vivo(db, codigo: str) -> dict:
+    """Informe integral de la sala: psicometría clásica (dificultad, discriminación, KR-20)
+    y resultados por Resultado de Aprendizaje (RA). Python puro (sin numpy), sobre la matriz
+    de correctitud participante×ítem. Base para exportar a Word/PDF/Excel."""
+    s = _sesion(db, codigo)
+    items = _items_contenido(db, uuid.UUID(s.assessment_id), s.version)
+    n_items = len(items)
+    parts = db.query(ParticipanteVivo).filter(ParticipanteVivo.sesion_id == s.id).all()
+    resp = db.query(RespuestaVivo).filter(RespuestaVivo.sesion_id == s.id).all()
+    por_part: dict[uuid.UUID, dict[int, RespuestaVivo]] = {}
+    for r in resp:
+        por_part.setdefault(r.participante_id, {})[r.question_number] = r
+
+    # Matriz 0/1 de quienes respondieron al menos una (evita filas todo-cero que distorsionan).
+    matriz, aliases = [], []
+    for p in parts:
+        celdas = por_part.get(p.id, {})
+        if not celdas:
+            continue
+        matriz.append([1 if (celdas.get(i) and celdas[i].correcta) else 0 for i in range(1, n_items + 1)])
+        aliases.append(p.alias)
+    n_estud = len(matriz)
+
+    # Dificultad p (proporción de aciertos) y discriminación (biserial-puntual corregida).
+    ps, items_stat = [], []
+    for j, it in enumerate(items):
+        col = [fila[j] for fila in matriz]
+        p = _media(col)
+        ps.append(p)
+        resto = [sum(fila[q] for q in range(n_items) if q != j) for fila in matriz]  # total sin el ítem
+        disc = round(_pearson(col, resto), 3)
+        items_stat.append({
+            "n": it["ordinal"], "enunciado": it["enunciado"] or f"Pregunta {it['ordinal']}",
+            "correcta": it["correcta"], "dificultad_p": round(p, 3),
+            "discriminacion": disc, "ra": it["ra"], "bloom": it["bloom"], "unidad": it["unidad"],
+            "alerta": ("muy fácil" if p >= 0.9 else "muy difícil" if p <= 0.2 else
+                       "baja discriminación" if (n_estud >= 5 and disc < 0.2) else ""),
+        })
+    kr20 = _kr20(matriz, ps)
+
+    # Resultados por RA (agrupa ítems por learning_outcome_id; logro = dificultad media del bloque).
+    por_ra_map: dict[str, list] = {}
+    for j, it in enumerate(items):
+        clave = it["ra"] or "Sin RA asignado"
+        por_ra_map.setdefault(clave, []).append(j)
+    por_ra = []
+    for ra, idxs in por_ra_map.items():
+        logro = round(_media([ps[j] for j in idxs]) * 100, 1)
+        nivel = ("Logrado" if logro >= 80 else "En desarrollo" if logro >= 60 else "Inicial")
+        por_ra.append({"ra": ra, "n_items": len(idxs), "items": [items[j]["ordinal"] for j in idxs],
+                       "logro_pct": logro, "nivel": nivel})
+    por_ra.sort(key=lambda x: x["logro_pct"])
+
+    # Estudiantes: aciertos, % y nota (mismo motor que el escaneo).
+    ass = db.query(Assessment).filter(Assessment.id == uuid.UUID(s.assessment_id)).first()
+    escala = getattr(ass, "grading_scale", "chile_1_7") or "chile_1_7"
+    umbral = float(getattr(ass, "passing_threshold", 60.0) or 60.0)
+    peso_total = sum(it["weight"] for it in items) or 1.0
+    estudiantes = []
+    for alias, fila in zip(aliases, matriz):
+        peso_ok = sum(items[j]["weight"] for j in range(n_items) if fila[j])
+        pct = round(peso_ok / peso_total * 100, 1)
+        nota, _lbl, aprob = result_service.calculate_grade(pct, escala, umbral)
+        estudiantes.append({"alias": alias, "aciertos": sum(fila), "n_items": n_items,
+                            "pct": pct, "nota": nota, "aprobado": aprob})
+    estudiantes.sort(key=lambda x: -x["aciertos"])
+    aprobados = sum(1 for e in estudiantes if e["aprobado"])
+
+    return {
+        "codigo": s.codigo, "evaluacion": getattr(ass, "name", "Evaluación"),
+        "curso_id": str(getattr(ass, "course_id", "")) if ass else "",
+        "n_participantes": n_estud, "n_items": n_items,
+        "kr20": kr20, "dificultad_media": round(_media(ps) * 100, 1) if ps else 0.0,
+        "escala": escala, "umbral": umbral,
+        "aprobados": aprobados, "reprobados": n_estud - aprobados,
+        "nota_media": round(_media([e["nota"] for e in estudiantes]), 2) if estudiantes else None,
+        "items": items_stat, "por_ra": por_ra, "estudiantes": estudiantes,
+    }
+
+
+def _interp_kr20(v):
+    if v is None:
+        return "no estimable (pocos datos)"
+    return ("excelente" if v >= 0.9 else "buena" if v >= 0.8 else "aceptable" if v >= 0.7
+            else "cuestionable" if v >= 0.6 else "baja")
+
+
+def informe_payload(db, codigo: str, formato: str) -> dict:
+    """Arma el payload para exportador_service según el formato (docx/pdf usan secciones+tablas;
+    xlsx usa hojas)."""
+    inf = informe_en_vivo(db, codigo)
+    titulo = f"Informe de resultados · {inf['evaluacion']} · Sala {inf['codigo']}"
+    t_items = {"titulo": "Análisis de ítems (TCT)",
+               "headers": ["N°", "Correcta", "Dificultad p", "Discriminación", "RA", "Bloom", "Alerta"],
+               "rows": [[it["n"], it["correcta"], it["dificultad_p"], it["discriminacion"],
+                         it["ra"] or "—", it["bloom"] or "—", it["alerta"] or "ok"] for it in inf["items"]]}
+    t_ra = {"titulo": "Resultados por Resultado de Aprendizaje (RA)",
+            "headers": ["RA", "N° ítems", "Logro clase %", "Nivel"],
+            "rows": [[r["ra"], r["n_items"], r["logro_pct"], r["nivel"]] for r in inf["por_ra"]]}
+    t_est = {"titulo": "Estudiantes", "headers": ["Participante", "Aciertos", "% logro", "Nota", "Aprobado"],
+             "rows": [[e["alias"], f"{e['aciertos']}/{e['n_items']}", e["pct"], e["nota"],
+                       "Sí" if e["aprobado"] else "No"] for e in inf["estudiantes"]]}
+
+    if formato == "xlsx":
+        resumen = {"nombre": "Resumen", "headers": ["Métrica", "Valor"], "rows": [
+            ["Evaluación", inf["evaluacion"]], ["Sala", inf["codigo"]],
+            ["Participantes", inf["n_participantes"]], ["Ítems", inf["n_items"]],
+            ["KR-20", inf["kr20"]], ["Dificultad media %", inf["dificultad_media"]],
+            ["Nota media", inf["nota_media"]], ["Aprobados", inf["aprobados"]],
+            ["Reprobados", inf["reprobados"]]]}
+        return {"hojas": [resumen,
+                          {"nombre": "Items", "headers": t_items["headers"], "rows": t_items["rows"]},
+                          {"nombre": "Por RA", "headers": t_ra["headers"], "rows": t_ra["rows"]},
+                          {"nombre": "Estudiantes", "headers": t_est["headers"], "rows": t_est["rows"]}]}
+
+    resumen_txt = (
+        f"Evaluación: {inf['evaluacion']}. Sala en vivo {inf['codigo']}. "
+        f"Participantes: {inf['n_participantes']}. Ítems de alternativas: {inf['n_items']}. "
+        f"Fiabilidad KR-20 = {inf['kr20']} ({_interp_kr20(inf['kr20'])}). "
+        f"Dificultad media = {inf['dificultad_media']}% de aciertos. "
+        f"Nota media = {inf['nota_media']} (escala {inf['escala']}, exigencia {inf['umbral']}%). "
+        f"Aprobados: {inf['aprobados']} · Reprobados: {inf['reprobados']}.")
+    metodo = ("Dificultad (p) = proporción de aciertos por ítem (0–1). Discriminación = correlación "
+              "biserial-puntual corregida del ítem con el total sin ese ítem (≥0,30 buena). KR-20 = "
+              "consistencia interna para ítems dicotómicos. El logro por RA es la dificultad media de "
+              "sus ítems. **Gobernanza:** el modo en vivo aporta evidencia de medición; no altera "
+              "calificaciones oficiales (G1).")
+    return {"titulo": titulo, "secciones": [
+        {"heading": "Resumen ejecutivo", "nivel": 1, "texto": resumen_txt},
+        {"heading": "Nota metodológica", "nivel": 2, "texto": metodo}],
+        "tablas": [t_ra, t_items, t_est]}
 
 
 # ── banco de ítems (contenido para el modo en vivo digital) ───────────────────────────
