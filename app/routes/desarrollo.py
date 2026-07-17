@@ -448,6 +448,7 @@ async def importar_prueba_desarrollo(ak_id: UUID, file: UploadFile = File(...),
         return None
     ci_en = col("enunciado", "pregunta", "enunciado de la pregunta")
     ci_pe = col("peso", "puntaje", "puntos", "ponderacion", "ponderación")
+    ci_ro = col("respuesta_optima", "respuesta optima", "respuesta óptima", "respuesta de referencia", "referencia")
     if ci_en is None:
         return {"guardado": False, "preguntas": [], "nota": "Falta la columna 'enunciado' (o 'pregunta')."}
     prev = []
@@ -459,7 +460,10 @@ async def importar_prueba_desarrollo(ak_id: UUID, file: UploadFile = File(...),
             pe = float(row[ci_pe]) if (ci_pe is not None and ci_pe < len(row) and row[ci_pe] is not None) else 1.0
         except (TypeError, ValueError):
             pe = 1.0
-        prev.append({"enunciado": str(en).strip(), "weight": max(0.1, pe)})
+        ro = ""
+        if ci_ro is not None and ci_ro < len(row) and row[ci_ro] is not None:
+            ro = str(row[ci_ro]).strip()
+        prev.append({"enunciado": str(en).strip(), "weight": max(0.1, pe), "respuesta_optima": ro})
     if not confirmar:
         return {"guardado": False, "n": len(prev), "preguntas": prev,
                 "nota": "Vista previa. Confirma para crear las preguntas."}
@@ -468,7 +472,7 @@ async def importar_prueba_desarrollo(ak_id: UUID, file: UploadFile = File(...),
     creadas = []
     for i, p in enumerate(prev, start=1):
         it = AnswerKeyItem(answer_key_id=ak.id, question_number=n0 + i, version="A",
-                           correct_answer="", weight=p["weight"], is_annulled=False,
+                           correct_answer=p.get("respuesta_optima", ""), weight=p["weight"], is_annulled=False,
                            question_type=QUESTION_TYPE_OPEN_RESPONSE, enunciado=p["enunciado"])
         db.add(it); creadas.append(p)
     ak.is_valid = True
