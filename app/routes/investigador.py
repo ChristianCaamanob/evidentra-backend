@@ -23,6 +23,7 @@ from fastapi import Depends as _Dep
 from app.api.deps import get_db, req_investigador, req_lectura_datos
 from app.services import exportador_service
 from app.services import matriz_service
+from app.services import psico_cache
 from app.services import irt_service
 from app.services import dimensionalidad_service
 from app.services import dina_service
@@ -61,13 +62,15 @@ def _meta(datos: dict, tecnica: str | None = None) -> dict:
 @router.get("/{assessment_id}/psicometria/rasch")
 def psicometria_rasch(assessment_id: UUID, db: Session = Depends(get_db)):
     """I1 - Modelo de Rasch (dificultad, habilidad, ajuste, informacion, fiabilidad)."""
-    try:
+    def _c():
         datos = matriz_service.cargar_matriz_respuestas(db, assessment_id)
         rep = irt_service.estimar_rasch(datos["X"])
         for it, num in zip(rep["items"], datos["items"]):
             it["pregunta"] = num                       # numero real de pregunta (no indice)
         rep["_meta"] = _meta(datos, "rasch")
         return rep
+    try:
+        return psico_cache.memo(db, assessment_id, "rasch", _c)
     except Exception:
         logger.error(f"Error en psicometria_rasch {assessment_id}: {traceback.format_exc()}")
         raise
@@ -78,7 +81,7 @@ def estadistica_clasica(assessment_id: UUID, db: Session = Depends(get_db)):
     """Fases 1-2 del pipeline: depuracion de datos (descriptivos, supuestos, perdidos) y
     analisis de items en Teoria Clasica (dificultad, discriminacion, fiabilidad: alfa, omega,
     SEM, Guttman). Numera los items con su pregunta real."""
-    try:
+    def _c():
         datos = matriz_service.cargar_matriz_respuestas(db, assessment_id)
         rep = estadistica_service.reporte_completo(datos["X"])
         nums = datos["items"]
@@ -88,6 +91,8 @@ def estadistica_clasica(assessment_id: UUID, db: Session = Depends(get_db)):
                 it["pregunta"] = num
         rep["_meta"] = _meta(datos, "clasica")
         return rep
+    try:
+        return psico_cache.memo(db, assessment_id, "clasica", _c)
     except Exception:
         logger.error(f"Error en estadistica_clasica {assessment_id}: {traceback.format_exc()}")
         raise
@@ -99,7 +104,7 @@ def analisis_cualitativo(assessment_id: UUID, db: Session = Depends(get_db),
     """I4 - Análisis cualitativo: mapa de concepciones erróneas (puente cuanti->cuali).
     Cada distractor con prevalencia >= umbral revela una concepción errónea específica,
     con severidad y RA afectado. Trabaja sobre respuestas seudonimizadas (G2)."""
-    try:
+    def _c():
         datos = matriz_service.cargar_respuestas_letras(db, assessment_id)
         resultado = curso_stats_service.analizar_evaluacion(
             datos["respuestas_alumnos"], datos["pauta"], te_tags=datos["te_tags"])
@@ -111,6 +116,8 @@ def analisis_cualitativo(assessment_id: UUID, db: Session = Depends(get_db),
                 "joint_display": jd,
                 "_meta": {"n_personas": n_personas,
                           "n_items": resultado["instrumento"]["n_items"]}}
+    try:
+        return psico_cache.memo(db, assessment_id, "cualitativo", _c)
     except Exception:
         logger.error(f"Error en analisis_cualitativo {assessment_id}: {traceback.format_exc()}")
         raise
@@ -340,11 +347,13 @@ def corpus(q: str = Query(..., min_length=2),
 @router.get("/{assessment_id}/psicometria/dimensionalidad")
 def psicometria_dimensionalidad(assessment_id: UUID, db: Session = Depends(get_db)):
     """I7 - Dimensionalidad (KMO, Bartlett, analisis paralelo, EFA) + fiabilidad ampliada."""
-    try:
+    def _c():
         datos = matriz_service.cargar_matriz_respuestas(db, assessment_id)
         rep = dimensionalidad_service.analizar_dimensionalidad(datos["X"], dicotomico=True)
         rep["_meta"] = _meta(datos, "dimensionalidad")
         return rep
+    try:
+        return psico_cache.memo(db, assessment_id, "dimensionalidad", _c)
     except Exception:
         logger.error(f"Error en psicometria_dimensionalidad {assessment_id}: {traceback.format_exc()}")
         raise
@@ -355,7 +364,7 @@ def psicometria_dina(assessment_id: UUID, base: str = Query("ra", pattern="^(ra|
                      db: Session = Depends(get_db)):
     """I9 - Diagnostico cognitivo (DINA). La Q-matrix se deriva del etiquetado C3: cada
     item carga en su RA (base=ra) o nivel Bloom (base=bloom)."""
-    try:
+    def _c():
         d = matriz_service.cargar_dina(db, assessment_id, base=base)
         rep = dina_service.estimar_dina(d["X"], d["Q"], atributos=d["atributos"])
         for it, num in zip(rep["items"], d["items"]):
@@ -367,6 +376,8 @@ def psicometria_dina(assessment_id: UUID, base: str = Query("ra", pattern="^(ra|
                         "gobernanza": "Diagnostico agregado y seudonimizado (G2); orienta "
                                       "remediacion, no altera notas (G1). Q-matrix derivada de C3."}
         return rep
+    try:
+        return psico_cache.memo(db, assessment_id, "dina:" + base, _c)
     except Exception:
         logger.error(f"Error en psicometria_dina {assessment_id}: {traceback.format_exc()}")
         raise
@@ -454,13 +465,15 @@ def reporte_reproducible(assessment_id: UUID, db: Session = Depends(get_db)):
 def psicometria_tri(assessment_id: UUID, db: Session = Depends(get_db)):
     """Fase 3 - TRI: compara 1PL vs 2PL (AIC/BIC), parametros 2PL (discriminacion/dificultad)
     e independencia local (Q3 de Yen). Estimacion MML con girth."""
-    try:
+    def _c():
         datos = matriz_service.cargar_matriz_respuestas(db, assessment_id)
         rep = tri_service.comparar_modelos(datos["X"])
         for it, num in zip(rep["items_2PL"], datos["items"]):
             it["pregunta"] = num
         rep["_meta"] = _meta(datos, "tri")
         return rep
+    try:
+        return psico_cache.memo(db, assessment_id, "tri", _c)
     except Exception:
         logger.error(f"Error en psicometria_tri {assessment_id}: {traceback.format_exc()}")
         raise
@@ -470,7 +483,7 @@ def psicometria_tri(assessment_id: UUID, db: Session = Depends(get_db)):
 def estructura_cfa(assessment_id: UUID, db: Session = Depends(get_db)):
     """Fase 4 - CFA de 1 factor: indices de ajuste (chi2/gl, CFI, TLI, RMSEA, SRMR),
     cargas estandarizadas, AVE y fiabilidad compuesta."""
-    try:
+    def _c():
         from app.models.assessment import Assessment
         from app.models.course import Course
         datos = matriz_service.cargar_matriz_respuestas(db, assessment_id)
@@ -482,6 +495,8 @@ def estructura_cfa(assessment_id: UUID, db: Session = Depends(get_db)):
             it["pregunta"] = num
         rep["_meta"] = _meta(datos, "cfa")
         return rep
+    try:
+        return psico_cache.memo(db, assessment_id, "cfa", _c)
     except Exception:
         logger.error(f"Error en estructura_cfa {assessment_id}: {traceback.format_exc()}")
         raise
@@ -492,11 +507,13 @@ def estructura_invarianza_cfa(assessment_id: UUID, grupo: str = Query(..., patte
                               db: Session = Depends(get_db)):
     """Fase 5 - Invarianza configural entre 2 grupos consentidos: CFA por grupo + congruencia
     de Tucker de las cargas."""
-    try:
+    def _c():
         d = matriz_service.cargar_matriz_con_grupo(db, assessment_id, grupo)
         rep = cfa_service.invarianza_configural(np.asarray(d["X"], dtype=float), d["grupo"])
         rep["_meta"] = _meta_equidad(d)
         return rep
+    try:
+        return psico_cache.memo(db, assessment_id, "invcfa:" + grupo, _c)
     except Exception:
         logger.error(f"Error en estructura_invarianza_cfa {assessment_id}: {traceback.format_exc()}")
         raise
@@ -508,7 +525,7 @@ def efectos_grupo(assessment_id: UUID, grupo: str = Query(..., pattern="^(sexo|d
     """Fase 7 - Comparacion del puntaje total entre 2 grupos consentidos: t de Welch,
     Mann-Whitney, tamanos de efecto (d de Cohen, g de Hedges) con IC95%, y resumen de
     correlaciones inter-item. Reusa las salvaguardas de equidad (consentimiento, minimo por grupo)."""
-    try:
+    def _c():
         d = matriz_service.cargar_matriz_con_grupo(db, assessment_id, grupo)
         X = np.asarray(d["X"], dtype=float)
         total = np.nansum(X, axis=1)
@@ -516,6 +533,8 @@ def efectos_grupo(assessment_id: UUID, grupo: str = Query(..., pattern="^(sexo|d
         rep["correlaciones"] = efectos_service.correlaciones_resumen(X)
         rep["_meta"] = _meta_equidad(d)
         return rep
+    try:
+        return psico_cache.memo(db, assessment_id, "efectos:" + grupo, _c)
     except Exception:
         logger.error(f"Error en efectos_grupo {assessment_id}: {traceback.format_exc()}")
         raise
@@ -525,13 +544,15 @@ def efectos_grupo(assessment_id: UUID, grupo: str = Query(..., pattern="^(sexo|d
 def psicometria_dif(assessment_id: UUID, grupo: str = Query(..., pattern="^(sexo|dependencia)$"),
                     db: Session = Depends(get_db)):
     """I2 - DIF (Mantel-Haenszel + logistica) entre 2 grupos consentidos. Equidad del item."""
-    try:
+    def _c():
         d = matriz_service.cargar_matriz_con_grupo(db, assessment_id, grupo)
         X = np.asarray(d["X"], dtype=float)
         matching = np.nansum(X, axis=1)                # puntaje total como variable de igualacion
         rep = dif_service.analizar_dif(X, d["grupo"], matching, etiqueta_focal=d["focal"])
         rep["_meta"] = _meta_equidad(d)
         return rep
+    try:
+        return psico_cache.memo(db, assessment_id, "dif:" + grupo, _c)
     except Exception:
         logger.error(f"Error en psicometria_dif {assessment_id}: {traceback.format_exc()}")
         raise
