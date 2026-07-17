@@ -78,7 +78,7 @@ async def upload_nomina(course_id: UUID, file: UploadFile = File(...), db: Sessi
 @router.get("/{course_id}/students")
 def get_students(course_id: UUID, db: Session = Depends(get_db)):
     students = db.query(Student).filter(Student.course_id == course_id).all()
-    return [{"rut": s.rut, "apellido_paterno": s.apellido_paterno,
+    return [{"id": str(s.id), "rut": s.rut, "apellido_paterno": s.apellido_paterno,
              "apellido_materno": s.apellido_materno, "nombres": s.nombres} for s in students]
 
 

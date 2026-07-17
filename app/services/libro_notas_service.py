@@ -75,12 +75,19 @@ def libro_notas(db, assessment_id, escala: str = "chile_1_7", exigencia: float =
         estudiantes = db.query(Student).filter(Student.course_id == assessment.course_id).all()
         sujetos = [(_pseudo(st.id), None, str(st.id)) for st in estudiantes]
     else:
-        rut_a_id = ({st.rut: str(st.id) for st in
-                     db.query(Student).filter(Student.course_id == assessment.course_id).all()}
-                    if assessment else {})
+        estudiantes = (db.query(Student).filter(Student.course_id == assessment.course_id).all()
+                       if assessment else [])
+        rut_a_id = {st.rut: str(st.id) for st in estudiantes}
         sujetos = [(_pseudo(sc.id), sc, rut_a_id.get(sc.student_identifier))
                    for sc in scan_repo.list_by_assessment(db, assessment_id)
                    if not getattr(sc, "requires_review", False)]
+        # Desarrollo validado DIRECTO al estudiante (lote por foto/PDF, sin escaneo OMR):
+        # incluir a esos estudiantes si aún no están cubiertos por un escaneo.
+        cubiertos = {sid for _, _, sid in sujetos if sid}
+        for st in estudiantes:
+            p = _pseudo(st.id)
+            if str(st.id) not in cubiertos and p in validado:
+                sujetos.append((p, None, str(st.id)))
 
     filas = []
     for pseudo, scan, student_id in sujetos:
