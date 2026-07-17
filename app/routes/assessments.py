@@ -249,10 +249,13 @@ def oral_estudiantes(assessment_id: UUID, db: Session = Depends(get_db)):
         for it in db.query(AnswerKeyItem).filter(
                 AnswerKeyItem.answer_key_id == ak.id,
                 AnswerKeyItem.question_type == QUESTION_TYPE_OPEN_RESPONSE).all():
-            for c in db.query(RubricCriterion).filter(RubricCriterion.answer_key_item_id == it.id).all():
-                criterios.append((c.name, c.weight or 1.0, c.niveles_json, c.ambito or "individual"))
-    peso_total = sum(w for _, w, _, _ in criterios) or 1.0
-    hay_grupal = any(amb == "grupal" for _, _, _, amb in criterios)
+            for c in db.query(RubricCriterion).filter(
+                    RubricCriterion.answer_key_item_id == it.id).order_by(RubricCriterion.order).all():
+                criterios.append({"name": c.name, "weight": c.weight or 1.0,
+                                  "niveles": c.niveles_json, "ambito": c.ambito or "individual",
+                                  "seccion": c.seccion, "descriptor": c.descriptor})
+    peso_total = sum(c["weight"] for c in criterios) or 1.0
+    hay_grupal = any(c["ambito"] == "grupal" for c in criterios)
     # Registros por seudónimo (incluye seudónimos de estudiante Y de grupo).
     por_pseudo: dict[str, dict] = {}
     for r in db.query(RegistroValidacion).filter(
@@ -275,10 +278,10 @@ def oral_estudiantes(assessment_id: UUID, db: Session = Depends(get_db)):
         nombre = (" ".join(x for x in [st.nombres, st.apellido_paterno, st.apellido_materno] if x)).strip() or st.rut
         acc = 0.0
         resueltos = 0
-        for cn, w, niv, amb in criterios:
-            fuente = sv_grp if amb == "grupal" else sv_ind
-            if cn in fuente:
-                acc += fraccion_logro(niv, fuente[cn]) * w
+        for c in criterios:
+            fuente = sv_grp if c["ambito"] == "grupal" else sv_ind
+            if c["name"] in fuente:
+                acc += fraccion_logro(c["niveles"], fuente[c["name"]]) * c["weight"]
                 resueltos += 1
         completo = (len(criterios) > 0 and resueltos == len(criterios))
         nota = logro_pct = etiqueta = aprobado = None
@@ -297,8 +300,10 @@ def oral_estudiantes(assessment_id: UUID, db: Session = Depends(get_db)):
         })
     return {"modalidad": modalidad_norm(a.modalidad), "n": len(filas),
             "n_calificados": sum(1 for f in filas if f["calificado"]),
-            "hay_grupal": hay_grupal,
-            "criterios": [{"name": cn, "weight": w, "ambito": amb} for cn, w, niv, amb in criterios],
+            "hay_grupal": hay_grupal, "puntaje_max": None,
+            "criterios": [{"name": c["name"], "weight": c["weight"], "ambito": c["ambito"],
+                           "niveles": c["niveles"], "seccion": c["seccion"],
+                           "descriptor": c["descriptor"]} for c in criterios],
             "estudiantes": filas}
 
 
