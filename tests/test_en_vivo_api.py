@@ -78,7 +78,7 @@ def entorno():
 
     app.dependency_overrides[get_db] = _override
     app.dependency_overrides[usuario_actual] = lambda: _CREADOR
-    yield {"aid": aid, "client": TestClient(app)}
+    yield {"aid": aid, "client": TestClient(app), "engine": engine}
     app.dependency_overrides.clear()
 
 
@@ -160,6 +160,66 @@ def test_ciclo_completo_en_vivo(entorno):
     # union tardia (sesion cerrada) -> 409.
     tarde = c.post(f"/api/v1/en-vivo/{cod}/unir", json={"alias": "Caro"})
     assert tarde.status_code == 409
+
+
+def test_cierre_vuelca_escaneos_para_la_psicometria(entorno):
+    """Al cerrar, cada participante que respondió se convierte en un Scan del mismo
+    assessment (origen 'en_vivo'), con answers ubicadas por nº de pregunta real, para
+    que los motores psicométricos (que leen Scan) vean esta evidencia. Idempotente."""
+    from app.models.scan import Scan
+    aid, c, engine = entorno["aid"], entorno["client"], entorno["engine"]
+
+    cod = c.post(f"/api/v1/assessments/{aid}/en-vivo").json()["codigo"]
+    ana_id, ana_tk = _unir(c, cod, "Ana")
+    beto_id, beto_tk = _unir(c, cod, "Beto")
+    # q1: Ana B (ok), Beto A (mal)
+    c.post(f"/api/v1/en-vivo/{cod}/avanzar")
+    c.post(f"/api/v1/en-vivo/{cod}/responder",
+           json={"participante_id": ana_id, "token": ana_tk, "respuesta": "B"})
+    c.post(f"/api/v1/en-vivo/{cod}/responder",
+           json={"participante_id": beto_id, "token": beto_tk, "respuesta": "A"})
+    # q2: ambos C (ok)
+    c.post(f"/api/v1/en-vivo/{cod}/avanzar")
+    for pid, tk in [(ana_id, ana_tk), (beto_id, beto_tk)]:
+        c.post(f"/api/v1/en-vivo/{cod}/responder",
+               json={"participante_id": pid, "token": tk, "respuesta": "C"})
+    # q3: solo Ana A (ok)
+    c.post(f"/api/v1/en-vivo/{cod}/avanzar")
+    c.post(f"/api/v1/en-vivo/{cod}/responder",
+           json={"participante_id": ana_id, "token": ana_tk, "respuesta": "A"})
+
+    # cierre explícito -> reporta cuántos escaneos incorporó (2).
+    fin = c.post(f"/api/v1/en-vivo/{cod}/cerrar").json()
+    assert fin["estado"] == "cerrada"
+    assert fin["scans_incorporados"] == 2
+
+    import uuid as _uuid
+    with Session(engine) as s:
+        scans = s.query(Scan).filter(Scan.assessment_id == _uuid.UUID(aid)).all()
+        assert len(scans) == 2
+        by_alias = {sc.raw_ocr_payload_json["alias"]: sc for sc in scans}
+        # answers por nº de pregunta real (1..3); origen trazable; sin requerir revisión.
+        assert by_alias["Ana"].raw_ocr_payload_json["answers"] == ["B", "C", "A"]
+        assert by_alias["Beto"].raw_ocr_payload_json["answers"] == ["A", "C", None]
+        assert all(sc.raw_ocr_payload_json["origen"] == "en_vivo" for sc in scans)
+        assert all(sc.requires_review is False for sc in scans)
+
+    # idempotente: cerrar de nuevo no duplica.
+    again = c.post(f"/api/v1/en-vivo/{cod}/cerrar").json()
+    assert again["scans_incorporados"] == 0
+    with Session(engine) as s:
+        assert s.query(Scan).filter(Scan.assessment_id == _uuid.UUID(aid)).count() == 2
+
+
+def test_qr_codifica_url_de_union_con_origin(entorno):
+    """El QR debe codificar una URL de unión absoluta (?sala=CODE) cuando llega el
+    header Origin, para que escanear con el teléfono abra la pantalla del alumno."""
+    aid, c = entorno["aid"], entorno["client"]
+    r = c.post(f"/api/v1/assessments/{aid}/en-vivo",
+               headers={"origin": "https://evalys.example"})
+    j = r.json()
+    assert j["join_url"] == "https://evalys.example/app.html?sala=" + j["codigo"]
+    assert (j["qr"] or "").startswith("data:image/")  # PNG embebido, no solo el código
 
 
 def test_no_se_puede_iniciar_sin_pauta_valida(entorno):

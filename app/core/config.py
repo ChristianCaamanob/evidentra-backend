@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     ratelimit_enabled: bool = True
     # Observabilidad: DSN de Sentry. Vacío = Sentry apagado (no-op). Se pega en Render.
     sentry_dsn: str = ""
+    # URL pública del frontend (app.html) para armar el enlace de unión del modo en vivo
+    # que va dentro del QR. Vacío => el backend usa el header Origin de la petición; si
+    # tampoco hay, el QR cae a codificar solo el código de sala.
+    public_app_url: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

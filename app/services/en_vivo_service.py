@@ -15,6 +15,11 @@ from app.models.en_vivo import (
     SesionEnVivo, ParticipanteVivo, RespuestaVivo,
     ESTADO_LOBBY, ESTADO_ACTIVA, ESTADO_PAUSADA, ESTADO_CERRADA,
 )
+from app.models.scan import Scan
+
+# Prefijo del identificador de los escaneos generados por el modo en vivo. Permite
+# reconocerlos (origen trazable) y hace idempotente el cierre (no se duplican).
+_SCAN_PREFIX = "envivo:"
 
 # Alfabeto sin caracteres ambiguos (0/O, 1/I) para dictar el codigo en voz alta.
 _ALFABETO = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -67,12 +72,15 @@ def avanzar(db, codigo: str) -> SesionEnVivo:
     s = _sesion(db, codigo)
     if s.estado == ESTADO_CERRADA:
         raise conflict("La sesion ya esta cerrada.")
-    if s.pregunta_actual >= s.n_preguntas:
+    cierra = s.pregunta_actual >= s.n_preguntas
+    if cierra:
         s.estado = ESTADO_CERRADA                 # se acabaron las preguntas -> cierra
     else:
         s.pregunta_actual += 1
         s.estado = ESTADO_ACTIVA
     db.commit(); db.refresh(s)
+    if cierra:
+        _persistir_scans(db, s)                   # auto-cierre también alimenta la psicometría
     return s
 
 
@@ -92,11 +100,66 @@ def reanudar(db, codigo: str) -> SesionEnVivo:
     return s
 
 
-def cerrar(db, codigo: str) -> SesionEnVivo:
+def cerrar(db, codigo: str) -> dict:
+    """Cierra la sala y VUELCA las respuestas a escaneos (Scan) del mismo assessment.
+
+    Así el modo en vivo deja de ser un silo: los mismos motores psicométricos del módulo
+    Profesor/Investigador (que leen `Scan.raw_ocr_payload_json`) ven esta evidencia. No
+    escribe notas ni Result (gobernanza G1: en vivo no altera calificaciones); solo aporta
+    la matriz de correctitud. Idempotente: si ya se persistió, no duplica.
+    """
     s = _sesion(db, codigo)
     s.estado = ESTADO_CERRADA
     db.commit(); db.refresh(s)
-    return s
+    n = _persistir_scans(db, s)
+    return {"codigo": s.codigo, "estado": s.estado, "pregunta_actual": s.pregunta_actual,
+            "n_preguntas": s.n_preguntas, "scans_incorporados": n}
+
+
+def _persistir_scans(db, s: SesionEnVivo) -> int:
+    """Convierte cada participante que respondió en un Scan (answers por nº de pregunta real).
+
+    Devuelve cuántos escaneos se crearon (0 si ya existían = idempotente, o si nadie jugó).
+    """
+    ya = db.query(Scan).filter(
+        Scan.assessment_id == uuid.UUID(s.assessment_id),
+        Scan.student_identifier.like(_SCAN_PREFIX + s.codigo + ":%")).first()
+    if ya:
+        return 0  # ya se volcó este cierre; no duplicar
+
+    items = _items_mc(db, uuid.UUID(s.assessment_id), s.version)
+    if not items:
+        return 0
+    # ordinal (1..N en vivo) -> nº de pregunta real de la pauta
+    ordinal_a_real = {i: it.question_number for i, it in enumerate(items, start=1)}
+    max_q = max(ordinal_a_real.values())
+
+    parts = db.query(ParticipanteVivo).filter(ParticipanteVivo.sesion_id == s.id).all()
+    resp = db.query(RespuestaVivo).filter(RespuestaVivo.sesion_id == s.id).all()
+    por_part: dict[uuid.UUID, dict[int, str]] = {}
+    for r in resp:
+        por_part.setdefault(r.participante_id, {})[r.question_number] = r.respuesta
+
+    creados = 0
+    for p in parts:
+        elecciones = por_part.get(p.id)
+        if not elecciones:
+            continue  # participante que no respondió nada: no aporta fila
+        answers: list = [None] * max_q
+        for ordinal, letra in elecciones.items():
+            real = ordinal_a_real.get(ordinal)
+            if real:
+                answers[real - 1] = letra
+        db.add(Scan(
+            assessment_id=uuid.UUID(s.assessment_id),
+            student_identifier=(_SCAN_PREFIX + s.codigo + ":" + str(p.id)[:8])[:100],
+            status="en_vivo", detected_version=s.version, requires_review=False,
+            raw_ocr_payload_json={"answers": answers, "origen": "en_vivo",
+                                  "sesion": s.codigo, "alias": p.alias},
+        ))
+        creados += 1
+    db.commit()
+    return creados
 
 
 # ── participantes ────────────────────────────────────────────────────────────────────
@@ -211,6 +274,14 @@ def matriz_binaria(db, codigo: str) -> dict:
         aliases.append(p.alias)
     return {"codigo": s.codigo, "participantes": aliases,
             "items": list(range(1, n + 1)), "matriz": filas}
+
+
+def join_url(codigo: str, base: str | None = None) -> str:
+    """Enlace de unión que codifica el QR. Absoluto si hay base (ideal para escanear con
+    el teléfono); relativo si no, para que el frontend lo complete con su propio origen."""
+    ruta = "/app.html?sala=" + str(codigo).upper()
+    b = (base or "").strip().rstrip("/")
+    return (b + ruta) if b else ruta
 
 
 def qr_data_url(payload: str) -> str | None:

@@ -20,10 +20,11 @@ matriz alimenta la misma psicometría (Rasch/KR-20), sin silos.
 """
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, req_profesor
+from app.core.config import settings
 from app.services import en_vivo_service as ev
 
 router = APIRouter(tags=["en-vivo"])
@@ -36,12 +37,15 @@ def _sesion_dict(s) -> dict:
 
 # ── docente ──────────────────────────────────────────────────────────────────────────
 @router.post("/assessments/{assessment_id}/en-vivo", dependencies=[Depends(req_profesor)])
-def crear_sesion(assessment_id: UUID, payload: dict | None = None,
+def crear_sesion(assessment_id: UUID, request: Request, payload: dict | None = None,
                  db: Session = Depends(get_db)):
     version = (payload or {}).get("version", "A")
     s = ev.crear_sesion(db, assessment_id, version=version)
-    join_url = f"/en-vivo/{s.codigo}"
-    return {**_sesion_dict(s), "join_url": join_url, "qr": ev.qr_data_url(s.codigo)}
+    # Base pública para el QR: config explícita > header Origin de la petición.
+    base = settings.public_app_url or request.headers.get("origin") or ""
+    enlace = ev.join_url(s.codigo, base)
+    return {**_sesion_dict(s), "join_url": enlace,
+            "qr": ev.qr_data_url(enlace if base else s.codigo)}
 
 
 @router.post("/en-vivo/{codigo}/avanzar", dependencies=[Depends(req_profesor)])
@@ -61,7 +65,7 @@ def reanudar(codigo: str, db: Session = Depends(get_db)):
 
 @router.post("/en-vivo/{codigo}/cerrar", dependencies=[Depends(req_profesor)])
 def cerrar(codigo: str, db: Session = Depends(get_db)):
-    return _sesion_dict(ev.cerrar(db, codigo))
+    return ev.cerrar(db, codigo)  # incluye scans_incorporados
 
 
 @router.get("/en-vivo/{codigo}/resultados", dependencies=[Depends(req_profesor)])
