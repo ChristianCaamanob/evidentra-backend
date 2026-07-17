@@ -101,6 +101,24 @@ def validar_oral(assessment_id: UUID, student_id: UUID, payload: dict,
         raise
 
 
+@router.post("/answer-key-items/{item_id}/transcribir", dependencies=[Depends(req_profesor)])
+async def transcribir_respuesta(item_id: UUID, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Transcribe con IA de visión una respuesta MANUSCRITA (foto/PDF) de una pregunta de
+    desarrollo. Devuelve el texto tal cual para que el docente lo revise y pre-califique (G1).
+    No corrige ni califica; marca lo ilegible."""
+    from app.services import transcripcion_service
+    from app.models.answer_key import AnswerKeyItem
+    try:
+        it = db.get(AnswerKeyItem, item_id)
+        enun = (getattr(it, "enunciado", "") or "") if it else ""
+        data = await file.read()
+        mt = file.content_type or "image/jpeg"
+        return transcripcion_service.transcribir(data, mt, enun)
+    except Exception:
+        logger.error(f"Error en transcribir_respuesta {item_id}: {traceback.format_exc()}")
+        raise
+
+
 @router.post("/answer-key-items/{item_id}/precalificar", dependencies=[Depends(req_profesor)])
 def precalificar(item_id: UUID, payload: dict, db: Session = Depends(get_db)):
     """
