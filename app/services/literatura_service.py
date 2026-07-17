@@ -354,20 +354,36 @@ def metricas_revistas(source_ids: list[str]) -> dict:
     for i in range(0, len(ids), 50):
         lote = ids[i:i + 50]
         try:
-            sel = "id,display_name,issn_l,country_code,works_count,cited_by_count,summary_stats,is_in_doaj,host_organization_name,apc_usd"
+            sel = "id,display_name,issn_l,issn,country_code,works_count,cited_by_count,summary_stats,is_in_doaj,host_organization_name,apc_usd"
             url = ("https://api.openalex.org/sources?per_page=50&mailto=" + _MAILTO +
                    "&select=" + sel + "&filter=ids.openalex:" + "|".join(lote))
             for s in (_get(url, timeout=12).get("results") or []):
                 sid = (s.get("id") or "").rsplit("/", 1)[-1]
                 ss = s.get("summary_stats") or {}
-                out[sid] = {
-                    "revista": s.get("display_name"), "issn": s.get("issn_l"),
+                issn = s.get("issn_l")
+                m = {
+                    "revista": s.get("display_name"), "issn": issn,
                     "pais": s.get("country_code"), "h_index": ss.get("h_index"),
                     "citas_2y": round(ss.get("2yr_mean_citedness"), 2) if ss.get("2yr_mean_citedness") is not None else None,
                     "works": s.get("works_count"), "citas_total": s.get("cited_by_count"),
                     "en_doaj": bool(s.get("is_in_doaj")), "editorial": s.get("host_organization_name"),
                     "apc_usd": s.get("apc_usd"),
                 }
+                # Cuartil SJR oficial (SCImago) por ISSN — el indicador de calidad autoritativo.
+                try:
+                    from app.services import scimago_service
+                    sjr = None
+                    for cand in ([issn] + list((s.get("issn") or []))):
+                        sjr = scimago_service.metrica(cand)
+                        if sjr:
+                            break
+                    if sjr:
+                        m.update({"cuartil": sjr.get("cuartil"), "sjr": sjr.get("sjr"),
+                                  "categorias": sjr.get("categorias"),
+                                  "pais_sjr": sjr.get("pais_sjr")})
+                except Exception:
+                    pass
+                out[sid] = m
         except Exception:
             continue
     return out
