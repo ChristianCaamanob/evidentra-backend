@@ -244,6 +244,12 @@ async def importar_rubrica(item_id: UUID, file: UploadFile = File(...), confirma
         item = db.get(AnswerKeyItem, item_id)
         if not item:
             raise not_found("Item de pauta no encontrado.")
+        # Reemplazo total: borra los criterios previos (y sus anclas por cascada) para que
+        # reimportar no duplique; el docente parte de la planilla nueva.
+        for _old in db.query(RubricCriterion).filter(
+                RubricCriterion.answer_key_item_id == item_id).all():
+            db.delete(_old)
+        db.flush()
         for i, c in enumerate(preview["criterios"]):
             db.add(RubricCriterion(
                 answer_key_item_id=item_id, name=c["name"][:255], weight=c["weight"],
