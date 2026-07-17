@@ -7,6 +7,7 @@ from app.api.deps import get_db
 from app.schemas.result import ImmediateResultOut
 from app.services import result_service
 from app.services import informe_service
+from app.services import briefing_service
 
 router = APIRouter(prefix="/results", tags=["results"])
 
@@ -35,4 +36,21 @@ def get_informe(scan_id: UUID, db: Session = Depends(get_db)):
         return informe_service.build_datos(db, scan_id)
     except Exception:
         logger.error(f"Error en get_informe {scan_id}: {traceback.format_exc()}")
+        raise
+
+
+@router.get("/{scan_id}/briefing")
+def get_briefing_estudiante(scan_id: UUID, db: Session = Depends(get_db)):
+    """Briefing personalizado (feedback diferenciado) del estudiante, generado con IA sobre
+    los datos REALES de su informe (nota, RA logrados/por reforzar, posición en el curso).
+    No inventa; cae a plantilla determinista si no hay clave de IA."""
+    import traceback, logging
+    logger = logging.getLogger("evalys")
+    try:
+        datos = informe_service.build_datos(db, scan_id)
+        rep = briefing_service.briefing_estudiante(datos)
+        rep["nota"] = (datos.get("resumen") or {}).get("nota")
+        return rep
+    except Exception:
+        logger.error(f"Error en get_briefing_estudiante {scan_id}: {traceback.format_exc()}")
         raise

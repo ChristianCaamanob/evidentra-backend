@@ -14,6 +14,9 @@ from app.schemas.assessment import (
 )
 from app.services import assessment_service
 from app.services import result_service
+from app.services import briefing_service
+from app.services import curso_stats_service
+from app.services import matriz_service
 from app.services.sheet_service import generate_answer_sheet_pdf
 
 router = APIRouter(prefix="/assessments", tags=["assessments"])
@@ -352,3 +355,44 @@ def list_grading_scales():
 @router.get("/{assessment_id}/results")
 def list_assessment_results(assessment_id: UUID, db: Session = Depends(get_db)):
     return result_service.list_results_for_assessment(db, assessment_id)
+
+
+@router.get("/{assessment_id}/briefing")
+def briefing_del_curso(assessment_id: UUID, db: Session = Depends(get_db)):
+    """Briefing del CURSO para el docente (IA sobre resultados REALES): panorama, focos de
+    reenseñanza priorizados por RA/ítems con brecha y acciones. No inventa cifras."""
+    import traceback, logging
+    logger = logging.getLogger("evalys")
+    try:
+        res = result_service.list_results_for_assessment(db, assessment_id)
+        rows = res.get("results", [])
+        pcts = sorted(r["percentage"] for r in rows if r.get("percentage") is not None)
+        n = len(pcts)
+        promedio = round(sum(pcts) / n, 1) if n else None
+        mediana = pcts[n // 2] if n else None
+        aprob = sum(1 for r in rows if r.get("pass_status") == "approved")
+        aprob_pct = round(aprob / len(rows) * 100, 1) if rows else None
+        items_dificiles, brechas_ra = [], []
+        try:
+            d = matriz_service.cargar_respuestas_letras(db, assessment_id)
+            ia = curso_stats_service.analizar_evaluacion(
+                d["respuestas_alumnos"], d["pauta"], te_tags=d.get("te_tags"))
+            items = sorted(ia.get("items", []), key=lambda x: x.get("dificultad_p", 1))
+            for it in items[:8]:
+                items_dificiles.append("P" + str(it["item"]) + " ("
+                                       + str(round(it.get("dificultad_p", 0) * 100)) + "% acierto)")
+            for g in (ia.get("por_ra") or []):
+                if g.get("clave") and g["clave"] != "sin_clasificar" and g.get("logro_promedio", 100) < 60:
+                    brechas_ra.append(str(g["clave"]) + " (" + str(g["logro_promedio"]) + "%)")
+        except Exception:
+            pass
+        rep = briefing_service.briefing_curso(
+            {"promedio": promedio, "mediana": mediana}, items_dificiles, brechas_ra,
+            len(rows), aprob_pct)
+        rep["resumen"] = {"n": len(rows), "promedio_pct": promedio, "mediana_pct": mediana,
+                          "aprobacion_pct": aprob_pct, "items_dificiles": items_dificiles,
+                          "brechas_ra": brechas_ra}
+        return rep
+    except Exception:
+        logger.error(f"Error en briefing_del_curso {assessment_id}: {traceback.format_exc()}")
+        raise
