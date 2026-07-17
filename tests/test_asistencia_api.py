@@ -100,9 +100,13 @@ def test_flujo_asistencia_qr_firmado(entorno):
                    json={"matricula_id": ana["id"], "token": qr["token"], "bucket": qr["bucket"] - 5})
     assert viejo.status_code == 409
 
-    # 5) panel docente
+    # 5) panel docente — la sesión y cada marca registran fecha/hora (auditoría)
     est = c.get(f"/api/v1/asistencia/sesion/{cod}/estado").json()
     assert est["total"] == 2 and est["presentes"] == 1 and est["ausentes"] == 1
+    assert est["fecha"] == "2026-07-17" and est["inicio"] and est["fin"]
+    assert est["abierta_at"] and est["abierta_por"]           # momento y autor de la apertura
+    fila_ana = next(f for f in est["filas"] if f["matricula_id"] == ana["id"])
+    assert fila_ana["presente"] and fila_ana["hora"]          # hora exacta en que marcó
 
     # 6) override manual del docente (Beto presente)
     beto = next(m for m in nomina if m["nombre"] == "Beto Soto")

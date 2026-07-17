@@ -261,6 +261,8 @@ def estado_sesion(db, codigo) -> dict:
     presentes = sum(1 for f in filas if f["presente"])
     return {"codigo": s.codigo, "titulo": s.titulo, "fecha": s.fecha, "estado": s.estado,
             "inicio": _aware(s.inicio).isoformat(), "fin": _aware(s.fin).isoformat(),
+            "abierta_at": (_aware(s.created_at).isoformat() if s.created_at else None),
+            "abierta_por": s.abierta_por,
             "total": len(nomina), "presentes": presentes, "ausentes": len(nomina) - presentes,
             "con_anomalia": sum(1 for f in filas if f["anomalias"]), "filas": filas}
 
