@@ -94,7 +94,7 @@ def enrolar_info(invite_token: str, db: Session = Depends(get_db)):
     if not m:
         from app.core.errors import not_found
         raise not_found("Invitación no válida.")
-    return {"nombre": m.nombre, "correo": m.correo, "estado": m.estado,
+    return {"matricula_id": str(m.id), "nombre": m.nombre, "correo": m.correo, "estado": m.estado,
             "tiene_passkey": any(d.activo for d in m.dispositivos)}
 
 
