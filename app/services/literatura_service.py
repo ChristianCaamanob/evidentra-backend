@@ -87,7 +87,7 @@ def _abstract_desde_invertido(idx: dict | None, limite: int = 1500) -> str | Non
 
 
 # ───────────────────────────────────────────── OpenAlex (fuente primaria)
-_OA_SELECT = ("id,doi,title,display_name,publication_year,authorships,primary_location,"
+_OA_SELECT = ("id,ids,doi,title,display_name,publication_year,authorships,primary_location,"
               "open_access,cited_by_count,type,biblio,abstract_inverted_index,language")
 
 
@@ -97,6 +97,9 @@ def _oa_item(it: dict) -> dict | None:
     titulo = it.get("title") or it.get("display_name")
     if not doi or not titulo:
         return None
+    ids = (it.get("ids") or {})
+    pmid = (ids.get("pmid") or "").rstrip("/").rsplit("/", 1)[-1] or None
+    pmcid = (ids.get("pmcid") or "").rstrip("/").rsplit("/", 1)[-1] or None
     loc = (it.get("primary_location") or {})
     fuente = (loc.get("source") or {})
     biblio = (it.get("biblio") or {})
@@ -112,6 +115,7 @@ def _oa_item(it: dict) -> dict | None:
         pag = (f"{fp}-{lp}" if lp and lp != fp else str(fp))
     return {
         "id_tipo": "DOI", "id": doi, "url": "https://doi.org/" + doi,
+        "pmid": pmid, "pmcid": pmcid,
         "titulo": titulo.strip(), "autores": autores,
         "revista": fuente.get("display_name"), "issn": fuente.get("issn_l"),
         "source_id": (fuente.get("id") or "").rsplit("/", 1)[-1] if fuente.get("id") else None,
@@ -436,6 +440,7 @@ def buscar(query: str, rows: int = 8, anios: int | None = None) -> dict:
         arts.append({
             "titulo": r["titulo"], "anio": r.get("anio"), "revista": r.get("revista"),
             "id_tipo": r["id_tipo"], "id": r["id"], "url": r["url"], "tipo": r.get("tipo"),
+            "pmid": r.get("pmid"), "pmcid": r.get("pmcid"),
             "abstract": r.get("abstract"), "citas": r.get("citas"),
             "oa": r.get("oa"), "oa_estado": r.get("oa_estado"), "oa_url": r.get("oa_url"),
             "issn": r.get("issn"), "idioma": r.get("idioma"),
@@ -510,6 +515,7 @@ def buscar_corpus(query: str, anios: int | None = None, limite: int = 150) -> di
         arts.append({
             "titulo": r["titulo"], "anio": r.get("anio"), "revista": r.get("revista"),
             "id_tipo": r["id_tipo"], "id": r["id"], "url": r["url"], "tipo": r.get("tipo"),
+            "pmid": r.get("pmid"), "pmcid": r.get("pmcid"),
             "abstract": r.get("abstract"), "citas": r.get("citas"),
             "oa": r.get("oa"), "oa_estado": r.get("oa_estado"), "oa_url": r.get("oa_url"),
             "issn": r.get("issn"), "idioma": r.get("idioma"),
