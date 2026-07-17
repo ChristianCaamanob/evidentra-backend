@@ -106,11 +106,41 @@ def revocar_passkey(matricula_id: UUID, db: Session = Depends(get_db)):
     return awa.revocar_dispositivos(db, matricula_id)
 
 
+# ── informe / export (docente) ────────────────────────────────────────────────────────
+@router.post("/asistencia/sesion/{codigo}/informe/{formato}", dependencies=[Depends(req_lectura_datos)])
+def informe(codigo: str, formato: str, db: Session = Depends(get_db)):
+    if formato not in ("docx", "pdf", "xlsx"):
+        from app.core.errors import unprocessable
+        raise unprocessable("Formato no soportado (docx | pdf | xlsx).")
+    from fastapi import Response
+    import re
+    from app.services import exportador_service
+    data, media = exportador_service.exportar(formato, asis.informe_payload(db, codigo, formato))
+    fn = re.sub(r"[^A-Za-z0-9_\-]", "_", f"asistencia_{codigo}")[:80]
+    return Response(content=data, media_type=media,
+                    headers={"Content-Disposition": f'attachment; filename="{fn}.{formato}"'})
+
+
 # ── alumno (público) ──────────────────────────────────────────────────────────────────
+@router.post("/asistencia/sesion/{codigo}/passkey/opciones")
+def passkey_opciones(codigo: str, payload: dict, request: Request, db: Session = Depends(get_db)):
+    return awa.opciones_login(db, codigo, payload.get("token"), payload.get("bucket"),
+                              request.headers.get("origin"))
+
+
+@router.post("/asistencia/sesion/{codigo}/passkey/marcar")
+def passkey_marcar(codigo: str, payload: dict, request: Request, db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else None
+    return awa.marcar_con_passkey(db, codigo, payload.get("bucket"), payload.get("credential"),
+                                  request.headers.get("origin"), ip=ip,
+                                  ua=request.headers.get("user-agent"))
+
+
 @router.post("/asistencia/sesion/{codigo}/marcar")
 def marcar(codigo: str, payload: dict, request: Request, db: Session = Depends(get_db)):
+    """Fallback SIN passkey (seguridad menor): solo desafío del QR + matrícula."""
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
     return asis.registrar_marca(db, codigo, payload.get("matricula_id"), payload.get("token"),
                                 payload.get("bucket"), ip=ip, ua=ua,
-                                metodo=payload.get("metodo", "passkey"))
+                                metodo=payload.get("metodo", "qr"))

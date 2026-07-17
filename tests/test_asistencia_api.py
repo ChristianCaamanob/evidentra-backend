@@ -116,6 +116,24 @@ def test_flujo_asistencia_qr_firmado(entorno):
     assert c.get(f"/api/v1/asistencia/sesion/{cod}/estado").json()["presentes"] == 2
 
 
+def test_export_asistencia_xlsx(entorno):
+    """El informe de asistencia exporta a Excel con fecha/hora y detalle por alumno."""
+    cid, c = entorno["cid"], entorno["client"]
+    from datetime import datetime, timedelta, timezone
+    c.post(f"/api/v1/asistencia/{cid}/nomina", json={"filas": [{"nombre": "Ana", "correo": "a@u.cl"}]})
+    mid = c.get(f"/api/v1/asistencia/{cid}/nomina").json()["matriculas"][0]["id"]
+    now = datetime.now(timezone.utc)
+    cod = c.post(f"/api/v1/asistencia/{cid}/sesiones", json={
+        "titulo": "Clase", "fecha": "2026-07-17",
+        "inicio": (now - timedelta(minutes=1)).isoformat(),
+        "fin": (now + timedelta(hours=1)).isoformat()}).json()["codigo"]
+    qr = c.get(f"/api/v1/asistencia/sesion/{cod}/qr").json()
+    c.post(f"/api/v1/asistencia/sesion/{cod}/marcar",
+           json={"matricula_id": mid, "token": qr["token"], "bucket": qr["bucket"]})
+    r = c.post(f"/api/v1/asistencia/sesion/{cod}/informe/xlsx")
+    assert r.status_code == 200 and r.content[:2] == b"PK"
+
+
 def test_fuera_de_ventana_rechaza(entorno):
     """Marca fuera de la ventana horaria -> rechazada."""
     cid, c = entorno["cid"], entorno["client"]

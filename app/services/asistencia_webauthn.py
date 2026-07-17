@@ -130,6 +130,79 @@ def verificar_registro(db, invite_token, credential, origin_header=None, verify_
     return {"ok": True, "estado": m.estado, "credential_id": cred_id}
 
 
+# ── marcado con passkey (aserción sobre el desafío del QR) ────────────────────────────
+def opciones_login(db, codigo, token, bucket, origin_header=None) -> dict:
+    """Opciones de autenticación cuyo challenge = el desafío del QR vigente. Así la aserción
+    de la passkey queda ATADA a ese QR fresco (prueba presencia-en-el-QR + posesión de la llave)."""
+    import json
+    from app.services import asistencia_service as asis
+    from webauthn import generate_authentication_options
+    from webauthn.helpers import options_to_json
+    from webauthn.helpers.structs import UserVerificationRequirement
+
+    s = asis._sesion(db, codigo)
+    challenge = asis.desafio_vigente(s, token, bucket)
+    if challenge is None:
+        raise conflict("El código QR venció o no es válido; escanea el que está en pantalla.")
+    rp_id, _rp_name, _origin = _rp(origin_header)
+    opts = generate_authentication_options(
+        rp_id=rp_id, challenge=challenge,
+        user_verification=UserVerificationRequirement.REQUIRED)   # allow_credentials vacío = passkey descubrible
+    return {"options": json.loads(options_to_json(opts)), "rp_id": rp_id}
+
+
+def marcar_con_passkey(db, codigo, bucket, credential, origin_header=None,
+                       ip=None, ua=None, verify_fn=None) -> dict:
+    """Verifica la aserción WebAuthn sobre el desafío del QR y registra la asistencia.
+    Identifica al alumno por la credencial (userHandle = matrícula); verifica signCount."""
+    import json
+    from app.services import asistencia_service as asis
+    s = asis._sesion(db, codigo)
+    # el challenge debe ser el del bucket que firmó, aún vigente (ventana + tolerancia)
+    challenge = asis._digest(s.secreto, str(s.id), int(bucket))
+    now_ok = asis._bucket_actual() - int(bucket) in (0, 1)
+    if not now_ok:
+        raise conflict("El código QR venció; vuelve a escanear.")
+    rp_id, _rp_name, origin = _rp(origin_header)
+
+    cred = credential if isinstance(credential, dict) else json.loads(credential)
+    cred_id = cred.get("id") or cred.get("rawId")
+    disp = db.query(DispositivoWebAuthn).filter(
+        DispositivoWebAuthn.credential_id == str(cred_id or ""), DispositivoWebAuthn.activo.is_(True)).first()
+    if not disp:
+        raise not_found("Este dispositivo no está enrolado para asistencia.")
+
+    verify = verify_fn
+    if verify is None:
+        from webauthn import verify_authentication_response
+        def verify(credential, expected_challenge, expected_rp_id, expected_origin,  # noqa: E306
+                   credential_public_key, credential_current_sign_count):
+            c = credential if isinstance(credential, str) else json.dumps(credential)
+            return verify_authentication_response(
+                credential=c, expected_challenge=expected_challenge, expected_rp_id=expected_rp_id,
+                expected_origin=expected_origin, credential_public_key=credential_public_key,
+                credential_current_sign_count=credential_current_sign_count,
+                require_user_verification=True)
+
+    try:
+        va = verify(credential=cred, expected_challenge=challenge, expected_rp_id=rp_id,
+                    expected_origin=origin, credential_public_key=base64.b64decode(disp.public_key),
+                    credential_current_sign_count=disp.sign_count)
+    except Exception as e:  # noqa: BLE001
+        raise unprocessable(f"No se pudo verificar la passkey: {e}")
+
+    flags = []
+    nuevo = int(getattr(va, "new_sign_count", 0) or 0)
+    if disp.sign_count and nuevo and nuevo <= disp.sign_count:
+        flags.append("sign_count_no_aumento")   # posible clonación del autenticador (bandera, no rechazo)
+    disp.sign_count = max(nuevo, disp.sign_count or 0)
+
+    m = disp.matricula
+    if str(m.course_id) != str(s.course_id):
+        raise conflict("La passkey no corresponde a este curso.")
+    return asis.marcar_verificado(db, s, m, ip=ip, ua=ua, metodo="passkey", flags_extra=flags)
+
+
 def revocar_dispositivos(db, matricula_id) -> dict:
     """Recuperación (cambio/pérdida de teléfono): revoca las passkeys activas y devuelve la
     matrícula a 'validado' para re-enrolar. Lo ejecuta el docente/admin tras verificar."""

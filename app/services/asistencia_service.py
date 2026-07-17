@@ -35,10 +35,22 @@ def _bucket_actual() -> int:
     return int(time.time() // BUCKET_SEG)
 
 
+def _digest(secreto: str, sesion_id: str, bucket: int) -> bytes:
+    """HMAC-SHA256 (32 bytes) del bucket temporal. Es el desafío que firma la passkey."""
+    return hmac.new(secreto.encode(), f"{sesion_id}:{bucket}".encode(), hashlib.sha256).digest()
+
+
 def _firmar(secreto: str, sesion_id: str, bucket: int) -> str:
-    msg = f"{sesion_id}:{bucket}".encode()
-    dig = hmac.new(secreto.encode(), msg, hashlib.sha256).digest()
-    return base64.urlsafe_b64encode(dig).decode().rstrip("=")[:22]
+    return base64.urlsafe_b64encode(_digest(secreto, sesion_id, bucket)).decode().rstrip("=")[:22]
+
+
+def desafio_vigente(s, token, bucket) -> bytes | None:
+    """Si el desafío del QR (token+bucket) es válido y vigente, devuelve sus 32 bytes
+    (el challenge WebAuthn); si no, None. Une la aserción de la passkey a ESE QR fresco."""
+    ok, _motivo = verificar_desafio(s, token, bucket)
+    if not ok:
+        return None
+    return _digest(s.secreto, str(s.id), int(bucket))
 
 
 def _aware(dt) -> datetime:
@@ -223,8 +235,23 @@ def _anomalias(db, s, matricula_id, ip, ua) -> list:
     return flags
 
 
+def marcar_verificado(db, s, matricula, ip=None, ua=None, metodo="passkey", flags_extra=None) -> dict:
+    """Crea la marca tras la verificación (QR o passkey). Idempotente por (sesión, matrícula).
+    Corre antifraude y deja banderas (no rechaza). El docente es la autoridad final."""
+    ya = db.query(MarcaAsistencia).filter(
+        MarcaAsistencia.sesion_id == s.id, MarcaAsistencia.matricula_id == matricula.id).first()
+    if ya:
+        return {"estado": ya.estado, "duplicada": True}
+    flags = _anomalias(db, s, matricula.id, ip, ua) + list(flags_extra or [])
+    marca = MarcaAsistencia(sesion_id=s.id, matricula_id=matricula.id, metodo=metodo,
+                            estado=MARCA_REVISADO if flags else MARCA_PRESENTE,
+                            anomalias=flags or None, ip=(ip or "")[:64], user_agent=(ua or "")[:300])
+    db.add(marca); db.commit()
+    return {"estado": marca.estado, "anomalias": flags, "duplicada": False}
+
+
 def registrar_marca(db, codigo, matricula_id, token, bucket, ip=None, ua=None, metodo="passkey") -> dict:
-    """Registra la marca tras verificar el desafío. Idempotente por (sesión, matrícula)."""
+    """Marca verificando SOLO el desafío del QR (sin passkey). Vía de respaldo/fallback."""
     s = _sesion(db, codigo)
     ok, motivo = verificar_desafio(s, token, bucket)
     if not ok:
@@ -233,16 +260,7 @@ def registrar_marca(db, codigo, matricula_id, token, bucket, ip=None, ua=None, m
         AsistenciaMatricula.id == _uid(matricula_id), AsistenciaMatricula.course_id == s.course_id).first()
     if not m:
         raise not_found("La matrícula no pertenece a este curso.")
-    ya = db.query(MarcaAsistencia).filter(
-        MarcaAsistencia.sesion_id == s.id, MarcaAsistencia.matricula_id == m.id).first()
-    if ya:
-        return {"estado": ya.estado, "duplicada": True}
-    flags = _anomalias(db, s, m.id, ip, ua)
-    marca = MarcaAsistencia(sesion_id=s.id, matricula_id=m.id, metodo=metodo,
-                            estado=MARCA_REVISADO if flags else MARCA_PRESENTE,
-                            anomalias=flags or None, ip=(ip or "")[:64], user_agent=(ua or "")[:300])
-    db.add(marca); db.commit()
-    return {"estado": marca.estado, "anomalias": flags, "duplicada": False}
+    return marcar_verificado(db, s, m, ip=ip, ua=ua, metodo=metodo)
 
 
 def estado_sesion(db, codigo) -> dict:
@@ -265,6 +283,38 @@ def estado_sesion(db, codigo) -> dict:
             "abierta_por": s.abierta_por,
             "total": len(nomina), "presentes": presentes, "ausentes": len(nomina) - presentes,
             "con_anomalia": sum(1 for f in filas if f["anomalias"]), "filas": filas}
+
+
+def informe_payload(db, codigo, formato) -> dict:
+    """Payload para exportar la asistencia (docx/pdf = secciones+tablas; xlsx = hojas).
+    Registra fecha, ventana horaria, apertura, y por alumno: presente, hora y anomalías."""
+    est = estado_sesion(db, codigo)
+    titulo = f"Asistencia · {est['titulo']} · {est['fecha']} · Sala {est['codigo']}"
+    hora = lambda x: (x[11:16] if x and len(x) >= 16 else "")   # noqa: E731
+    filas = [[f["nombre"], f.get("seccion") or "—",
+              "Presente" if f["presente"] else "Ausente",
+              hora(f.get("hora")) or "—",
+              ", ".join(f.get("anomalias") or []) or ""] for f in est["filas"]]
+    headers = ["Estudiante", "Sección", "Estado", "Hora de marca", "Anomalías"]
+    if formato == "xlsx":
+        resumen = {"nombre": "Resumen", "headers": ["Campo", "Valor"], "rows": [
+            ["Sesión", est["titulo"]], ["Fecha", est["fecha"]],
+            ["Ventana", est["inicio"] + " → " + est["fin"]],
+            ["Abierta", est.get("abierta_at") or ""], ["Código", est["codigo"]],
+            ["Total", est["total"]], ["Presentes", est["presentes"]],
+            ["Ausentes", est["ausentes"]], ["Con anomalía", est["con_anomalia"]]]}
+        return {"hojas": [resumen, {"nombre": "Asistencia", "headers": headers, "rows": filas}]}
+    resumen_txt = (f"Sesión: {est['titulo']}. Fecha: {est['fecha']}. Ventana: {est['inicio']} → "
+                   f"{est['fin']}. Apertura: {est.get('abierta_at') or '—'}. "
+                   f"Presentes: {est['presentes']}/{est['total']} · Ausentes: {est['ausentes']} · "
+                   f"Con anomalía: {est['con_anomalia']}.")
+    return {"titulo": titulo,
+            "secciones": [{"heading": "Resumen", "nivel": 1, "texto": resumen_txt},
+                          {"heading": None, "nivel": 2,
+                           "texto": "Registro con QR dinámico + passkey. La hora es el instante "
+                                    "exacto de marca de cada estudiante. Las anomalías son señales "
+                                    "para revisión del docente, no rechazos automáticos."}],
+            "tablas": [{"titulo": "Detalle de asistencia", "headers": headers, "rows": filas}]}
 
 
 def override_marca(db, codigo, matricula_id, estado) -> dict:

@@ -88,6 +88,47 @@ def test_registro_con_stub_una_credencial_activa(db):
     assert len(activos) == 1 and activos[0].credential_id.startswith("Y3JlZC1CQkI")  # b64u de "cred-BBB"
 
 
+def test_marcar_con_passkey_sobre_qr(db):
+    """Aserción passkey atada al desafío del QR: identifica al alumno por su credencial y
+    registra la marca. signCount que no aumenta → bandera (no rechazo)."""
+    from datetime import datetime, timedelta, timezone
+    from app.services import asistencia_service as asis
+    m = _matricula(db)
+    asis.validar_presencial(db, m.id)
+    awa.opciones_registro(db, m.invite_token, ORIGIN)
+    awa.verificar_registro(db, m.invite_token, {"id": "x"}, ORIGIN,
+                           verify_fn=lambda **k: types.SimpleNamespace(
+                               credential_id=b"cred-AAA", credential_public_key=b"pubkey",
+                               sign_count=0, aaguid=""))
+    cred_id_b64 = "Y3JlZC1BQUE"   # base64url de "cred-AAA"
+
+    now = datetime.now(timezone.utc)
+    s = asis.abrir_sesion(db, m.course_id, "t-1", "Clase", "2026-07-17",
+                          (now - timedelta(minutes=1)).isoformat(), (now + timedelta(hours=1)).isoformat())
+    qr = asis.qr_actual(db, s.codigo)
+
+    def _va(credential, expected_challenge, expected_rp_id, expected_origin,
+            credential_public_key, credential_current_sign_count):
+        assert expected_rp_id == "evalys-web.vercel.app" and expected_origin == ORIGIN
+        assert isinstance(expected_challenge, (bytes, bytearray)) and len(expected_challenge) == 32
+        return types.SimpleNamespace(new_sign_count=1)
+
+    out = awa.marcar_con_passkey(db, s.codigo, qr["bucket"], {"id": cred_id_b64}, ORIGIN,
+                                 ip="1.2.3.4", ua="test", verify_fn=_va)
+    assert out["estado"] == "presente" and out["duplicada"] is False
+
+    # segunda marca del mismo alumno -> idempotente
+    qr2 = asis.qr_actual(db, s.codigo)
+    out2 = awa.marcar_con_passkey(db, s.codigo, qr2["bucket"], {"id": cred_id_b64}, ORIGIN,
+                                  ip="1.2.3.4", ua="test", verify_fn=_va)
+    assert out2["duplicada"] is True
+
+    # QR vencido (bucket viejo) -> rechazo
+    with pytest.raises(Exception):
+        awa.marcar_con_passkey(db, s.codigo, qr["bucket"] - 10, {"id": cred_id_b64}, ORIGIN,
+                               verify_fn=_va)
+
+
 def test_recuperacion_revoca_y_vuelve_a_validado(db):
     m = _matricula(db)
     asis.validar_presencial(db, m.id)
