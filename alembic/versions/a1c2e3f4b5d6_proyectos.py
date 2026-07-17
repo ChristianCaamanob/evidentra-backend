@@ -28,9 +28,9 @@ def upgrade():
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
-    op.create_index("ix_proyectos_investigador_id", "proyectos", ["investigador_id"])
+    # El índice ix_proyectos_investigador_id ya lo crea la columna con index=True arriba;
+    # no lo dupliques aquí (create_index redundante rompía el upgrade: "already exists").
 
 
 def downgrade():
-    op.drop_index("ix_proyectos_investigador_id", table_name="proyectos")
     op.drop_table("proyectos")

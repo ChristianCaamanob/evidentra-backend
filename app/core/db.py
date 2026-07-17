@@ -261,9 +261,58 @@ def _seed_desarrollo(db) -> None:
     db.commit()
 
 
+# Columnas ADITIVAS que deben existir aunque Alembic no corra (prod histórico usa
+# create_all, que crea tablas nuevas pero NO altera las existentes). Idempotente: solo
+# añade las que faltan. DDL válido en Postgres (prod) y SQLite (local/tests).
+_COLUMNAS_ADITIVAS = {
+    "sesiones_en_vivo": {
+        "retro_alumno": "BOOLEAN NOT NULL DEFAULT false",
+        "revelar_correccion": "BOOLEAN NOT NULL DEFAULT true",
+        "modo_ritmo": "VARCHAR(20) NOT NULL DEFAULT 'docente'",
+        "shuffle_preguntas": "BOOLEAN NOT NULL DEFAULT false",
+        "shuffle_opciones": "BOOLEAN NOT NULL DEFAULT false",
+    },
+    "participantes_vivo": {
+        "layout_json": "JSON",
+        "progreso": "INTEGER NOT NULL DEFAULT 0",
+    },
+    "answer_key_items": {
+        "opciones_json": "JSON",
+        "justificacion": "TEXT",
+    },
+}
+
+
+def _ensure_columns(log) -> None:
+    """Añade columnas aditivas que falten en tablas ya existentes (idempotente)."""
+    from sqlalchemy import inspect as sa_inspect, text
+    try:
+        insp = sa_inspect(engine)
+        tablas = set(insp.get_table_names())
+    except Exception as e:  # noqa: BLE001
+        log.warning("No se pudo inspeccionar el esquema: %s", e); return
+    for tabla, cols in _COLUMNAS_ADITIVAS.items():
+        if tabla not in tablas:
+            continue
+        try:
+            existentes = {c["name"] for c in insp.get_columns(tabla)}
+        except Exception:
+            continue
+        for nombre, ddl in cols.items():
+            if nombre in existentes:
+                continue
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(f'ALTER TABLE {tabla} ADD COLUMN {nombre} {ddl}'))
+                log.info("Columna aditiva añadida: %s.%s", tabla, nombre)
+            except Exception as e:  # noqa: BLE001
+                log.warning("No se pudo añadir %s.%s: %s", tabla, nombre, e)
+
+
 def _init_schema() -> None:
     """Crea/actualiza el esquema. Fuente de verdad = Alembic (upgrade head). Si Alembic no
-    está disponible o falla, cae a create_all (idempotente) para no bloquear el arranque."""
+    está disponible o falla, cae a create_all (idempotente) para no bloquear el arranque.
+    Tras crear, garantiza columnas aditivas en tablas existentes (independiente de Alembic)."""
     import logging
     log = logging.getLogger("evalys")
     if settings.run_migrations:
@@ -276,10 +325,10 @@ def _init_schema() -> None:
             cfg.set_main_option("script_location", os.path.join(root, "alembic"))  # robusto ante cwd
             command.upgrade(cfg, "head")
             log.info("Esquema al día vía Alembic (upgrade head).")
-            return
         except Exception as e:  # noqa: BLE001
             log.warning("Alembic upgrade falló, se usa create_all: %s", e)
     Base.metadata.create_all(bind=engine)
+    _ensure_columns(log)
 
 
 def create_db_and_seed() -> None:
