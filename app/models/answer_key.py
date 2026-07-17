@@ -71,7 +71,16 @@ class AnswerKeyItem(UUIDMixin, Base):
 
     # F1 (desarrollo multi-pregunta) - enunciado de la pregunta abierta. Aditivo/nullable:
     # solo aplica a open_response; las de alternativas no lo usan. El peso (score) es 'weight'.
+    # LV (modo en vivo): el enunciado también se reutiliza para mostrar la pregunta de
+    # alternativas en el teléfono del alumno (banco de ítems), cuando está cargado.
     enunciado: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # LV (banco de ítems) - contenido opcional para el modo en vivo digital. Aditivo/nullable:
+    # opciones_json = textos de las alternativas ([{"letra":"A","texto":"..."}, ...]);
+    # justificacion = por qué la correcta es correcta (retroalimentación real al alumno).
+    # Si están vacíos, el modo en vivo cae al modo genérico (solo letras A-D), sin romper nada.
+    opciones_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    justificacion: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     answer_key = relationship("AnswerKey", back_populates="items")
     # F1 - criterios de rubrica (solo relevantes para preguntas open_response).

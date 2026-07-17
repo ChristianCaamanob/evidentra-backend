@@ -16,7 +16,7 @@ Estados de la sesion:
 """
 import uuid
 
-from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, UniqueConstraint, func
+from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, UniqueConstraint, JSON, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -27,6 +27,11 @@ ESTADO_ACTIVA = "activa"
 ESTADO_PAUSADA = "pausada"
 ESTADO_CERRADA = "cerrada"
 ESTADOS = (ESTADO_LOBBY, ESTADO_ACTIVA, ESTADO_PAUSADA, ESTADO_CERRADA)
+
+# Ritmo de avance: 'docente' = el profesor avanza a toda la clase (una pregunta global);
+# 'alumno' = cada estudiante avanza solo (self-paced, requerido si se barajan preguntas).
+RITMO_DOCENTE = "docente"
+RITMO_ALUMNO = "alumno"
 
 
 class SesionEnVivo(UUIDMixin, Base):
@@ -40,6 +45,13 @@ class SesionEnVivo(UUIDMixin, Base):
     pregunta_actual: Mapped[int] = mapped_column(Integer, default=0)
     n_preguntas: Mapped[int] = mapped_column(Integer, default=0)
     version: Mapped[str] = mapped_column(String(10), default="A")   # el quiz en vivo usa una version
+    # Retroalimentación al alumno (config del docente antes de abrir la sala):
+    retro_alumno: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    revelar_correccion: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
+    modo_ritmo: Mapped[str] = mapped_column(String(20), default=RITMO_DOCENTE,
+                                            server_default=RITMO_DOCENTE, nullable=False)
+    shuffle_preguntas: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    shuffle_opciones: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     participantes = relationship("ParticipanteVivo", back_populates="sesion",
@@ -55,6 +67,10 @@ class ParticipanteVivo(UUIDMixin, Base):
     alias: Mapped[str] = mapped_column(String(80))
     student_id: Mapped[str | None] = mapped_column(String(64), nullable=True)  # si es un alumno de la nomina
     token: Mapped[str] = mapped_column(String(48))     # autoriza a responder sin login
+    # Distribución personal del quiz (barajado por-alumno): {"q_order":[...], "opt_map":{"1":["C","A",...]}}.
+    # q_order = orden de los ordinales de pregunta; opt_map[qn][posición_mostrada] = letra canónica.
+    layout_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    progreso: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # nº de preguntas respondidas (self-paced)
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     sesion = relationship("SesionEnVivo", back_populates="participantes")

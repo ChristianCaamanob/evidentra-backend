@@ -47,10 +47,27 @@ def _sembrar(engine):
         ak = AnswerKey(assessment_id=a.id, status="valid", is_valid=True)
         s.add(ak); s.commit(); s.refresh(ak)
         # 3 MC (version A) + 1 anulado + 1 desarrollo: solo las 3 MC cuentan en vivo.
+        # Con banco de ítems (enunciado + opciones + justificación) para el modo digital.
+        contenido = {
+            1: ("¿Porción con más pliegues circulares?",
+                [{"letra": "A", "texto": "Colon"}, {"letra": "B", "texto": "Yeyuno"},
+                 {"letra": "C", "texto": "Ciego"}, {"letra": "D", "texto": "Íleon"}],
+                "El yeyuno tiene pliegues circulares más altos y paredes más gruesas."),
+            2: ("¿Arteria del colon ascendente?",
+                [{"letra": "A", "texto": "Mesentérica inferior"}, {"letra": "B", "texto": "Renal"},
+                 {"letra": "C", "texto": "Mesentérica superior"}, {"letra": "D", "texto": "Esplénica"}],
+                "La mesentérica superior irriga el colon derecho."),
+            3: ("¿Elemento más anterior del pedículo renal?",
+                [{"letra": "A", "texto": "Vena renal"}, {"letra": "B", "texto": "Arteria"},
+                 {"letra": "C", "texto": "Uréter"}, {"letra": "D", "texto": "Pelvis"}],
+                "La vena renal es la estructura más anterior."),
+        }
         for qn, ans in [(1, "B"), (2, "C"), (3, "A")]:
+            enun, ops, just = contenido[qn]
             s.add(AnswerKeyItem(answer_key_id=ak.id, question_number=qn, version="A",
                                 correct_answer=ans, weight=1.0,
-                                question_type=QUESTION_TYPE_MULTIPLE_CHOICE))
+                                question_type=QUESTION_TYPE_MULTIPLE_CHOICE,
+                                enunciado=enun, opciones_json=ops, justificacion=just))
         s.add(AnswerKeyItem(answer_key_id=ak.id, question_number=4, version="A",
                             correct_answer="D", weight=1.0, is_annulled=True,
                             question_type=QUESTION_TYPE_MULTIPLE_CHOICE))
@@ -220,6 +237,113 @@ def test_qr_codifica_url_de_union_con_origin(entorno):
     j = r.json()
     assert j["join_url"] == "https://evalys.example/app.html?sala=" + j["codigo"]
     assert (j["qr"] or "").startswith("data:image/")  # PNG embebido, no solo el código
+
+
+def test_grid_y_config_en_resultados(entorno):
+    """resultados() expone la grilla alumno×pregunta (Live Results) + la config de sesión."""
+    aid, c = entorno["aid"], entorno["client"]
+    cod = c.post(f"/api/v1/assessments/{aid}/en-vivo",
+                 json={"retro_alumno": True, "revelar_correccion": True}).json()["codigo"]
+    ana_id, ana_tk = _unir(c, cod, "Ana")
+    c.post(f"/api/v1/en-vivo/{cod}/avanzar")   # pregunta 1
+    c.post(f"/api/v1/en-vivo/{cod}/responder",
+           json={"participante_id": ana_id, "token": ana_tk, "respuesta": "B"})
+    res = c.get(f"/api/v1/en-vivo/{cod}/resultados").json()
+    assert res["modo_ritmo"] == "docente" and res["retro_alumno"] is True
+    fila = next(g for g in res["grid"] if g["participante"] == "Ana")
+    assert fila["respuestas"]["1"] == {"letra": "B", "correcta": True}
+    assert fila["aciertos"] == 1
+
+
+def test_self_paced_con_shuffle_y_feedback(entorno):
+    """Ritmo-alumno + barajado de opciones: mi-estado da enunciado+opciones; responder por
+    posición mostrada mapea a la letra canónica y da feedback inmediato + justificación."""
+    aid, c = entorno["aid"], entorno["client"]
+    cod = c.post(f"/api/v1/assessments/{aid}/en-vivo",
+                 json={"modo_ritmo": "alumno", "shuffle_opciones": True,
+                       "retro_alumno": True, "revelar_correccion": True}).json()["codigo"]
+    pid, tk = _unir(c, cod, "Sole")
+    c.post(f"/api/v1/en-vivo/{cod}/avanzar")   # abre la sala (self-paced)
+
+    # el alumno ve su pregunta actual con enunciado y 4 opciones (con texto).
+    me = c.get(f"/api/v1/en-vivo/{cod}/mi-estado",
+               params={"participante_id": pid, "token": tk}).json()
+    assert me["modo_ritmo"] == "alumno" and me["pregunta"] is not None
+    q = me["pregunta"]
+    assert q["enunciado"] and len(q["opciones"]) == 4
+    assert q["numero_mostrado"] == 1
+
+    # responde eligiendo la posición cuyo texto es "Yeyuno" (la correcta de la P1).
+    pos_yeyuno = next(o["pos"] for o in q["opciones"] if o["texto"] == "Yeyuno")
+    r = c.post(f"/api/v1/en-vivo/{cod}/responder",
+               json={"participante_id": pid, "token": tk, "opcion_idx": pos_yeyuno}).json()
+    assert r["correcta"] is True and r["correcta_letra"] == "B"
+
+    # falla la P2 a propósito → feedback con justificación real.
+    me2 = c.get(f"/api/v1/en-vivo/{cod}/mi-estado",
+                params={"participante_id": pid, "token": tk}).json()
+    q2 = me2["pregunta"]; assert q2["numero_mostrado"] == 2
+    pos_mal = next(o["pos"] for o in q2["opciones"] if o["texto"] == "Renal")  # incorrecta
+    r2 = c.post(f"/api/v1/en-vivo/{cod}/responder",
+                json={"participante_id": pid, "token": tk, "opcion_idx": pos_mal}).json()
+    assert r2["correcta"] is False
+    assert "mesentérica superior" in r2["justificacion"].lower()
+
+
+def test_mi_resultado_nota_y_repaso(entorno):
+    """Al cerrar, el alumno recibe nota (mismo motor que el escaneo), % logro y detalle
+    por pregunta con justificación de las incorrectas. Gated por retro_alumno."""
+    aid, c = entorno["aid"], entorno["client"]
+    # sin retro: no habilitado
+    cod0 = c.post(f"/api/v1/assessments/{aid}/en-vivo", json={"retro_alumno": False}).json()["codigo"]
+    p0, t0 = _unir(c, cod0, "X")
+    r0 = c.get(f"/api/v1/en-vivo/{cod0}/mi-resultado", params={"participante_id": p0, "token": t0}).json()
+    assert r0["habilitado"] is False
+
+    cod = c.post(f"/api/v1/assessments/{aid}/en-vivo", json={"retro_alumno": True}).json()["codigo"]
+    pid, tk = _unir(c, cod, "Ana")
+    # P1 correcta (B), P2 incorrecta (A; correcta C), P3 sin responder.
+    c.post(f"/api/v1/en-vivo/{cod}/avanzar")
+    c.post(f"/api/v1/en-vivo/{cod}/responder", json={"participante_id": pid, "token": tk, "respuesta": "B"})
+    c.post(f"/api/v1/en-vivo/{cod}/avanzar")
+    c.post(f"/api/v1/en-vivo/{cod}/responder", json={"participante_id": pid, "token": tk, "respuesta": "A"})
+    c.post(f"/api/v1/en-vivo/{cod}/avanzar")   # P3
+    c.post(f"/api/v1/en-vivo/{cod}/avanzar")   # cierra
+
+    r = c.get(f"/api/v1/en-vivo/{cod}/mi-resultado", params={"participante_id": pid, "token": tk}).json()
+    assert r["habilitado"] is True
+    assert r["correctas"] == 1 and r["incorrectas"] == 2
+    assert r["pct_logro"] == 33.3
+    assert isinstance(r["nota"], (int, float)) and r["aprobado"] is False
+    # la P2 (incorrecta) trae justificación; la P1 (correcta) no.
+    d2 = next(d for d in r["detalle"] if d["numero"] == 2)
+    assert d2["ok"] is False and "mesentérica superior" in d2["justificacion"].lower()
+    d1 = next(d for d in r["detalle"] if d["numero"] == 1)
+    assert d1["ok"] is True and "justificacion" not in d1
+
+
+def test_banco_items_guardar_y_leer(entorno):
+    """El docente edita el contenido de un ítem (enunciado/opciones/justificación) sin tocar
+    la letra correcta; se lee de vuelta para editarlo."""
+    aid, c = entorno["aid"], entorno["client"]
+    # leer contenido actual (el seed ya trae contenido)
+    g = c.get(f"/api/v1/en-vivo/banco/{aid}", params={"version": "A"}).json()
+    assert g["n_preguntas"] == 3
+    assert any(it["enunciado"] for it in g["items"])
+
+    # actualizar el enunciado y la justificación de la P1 (no cambia 'correcta')
+    save = c.post(f"/api/v1/en-vivo/banco/{aid}", json={"version": "A", "items": [
+        {"question_number": 1, "enunciado": "Enunciado editado P1",
+         "opciones": [{"letra": "A", "texto": "uno"}, {"letra": "B", "texto": "dos"},
+                      {"letra": "C", "texto": "tres"}, {"letra": "D", "texto": "cuatro"}],
+         "justificacion": "Nueva justificación"}]})
+    assert save.status_code == 200 and save.json()["actualizados"] == 1
+
+    g2 = c.get(f"/api/v1/en-vivo/banco/{aid}", params={"version": "A"}).json()
+    p1 = next(it for it in g2["items"] if it["question_number"] == 1)
+    assert p1["enunciado"] == "Enunciado editado P1"
+    assert p1["correcta"] == "B"   # intacta
+    assert p1["justificacion"] == "Nueva justificación"
 
 
 def test_no_se_puede_iniciar_sin_pauta_valida(entorno):

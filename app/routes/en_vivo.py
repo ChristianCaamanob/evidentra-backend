@@ -39,13 +39,16 @@ def _sesion_dict(s) -> dict:
 @router.post("/assessments/{assessment_id}/en-vivo", dependencies=[Depends(req_profesor)])
 def crear_sesion(assessment_id: UUID, request: Request, payload: dict | None = None,
                  db: Session = Depends(get_db)):
-    version = (payload or {}).get("version", "A")
-    s = ev.crear_sesion(db, assessment_id, version=version)
+    payload = payload or {}
+    version = payload.get("version", "A")
+    # config: retro_alumno, revelar_correccion, modo_ritmo, shuffle_preguntas, shuffle_opciones
+    s = ev.crear_sesion(db, assessment_id, version=version, config=payload)
     # Base pública para el QR: config explícita > header Origin de la petición.
     base = settings.public_app_url or request.headers.get("origin") or ""
     enlace = ev.join_url(s.codigo, base)
     return {**_sesion_dict(s), "join_url": enlace,
-            "qr": ev.qr_data_url(enlace if base else s.codigo)}
+            "qr": ev.qr_data_url(enlace if base else s.codigo),
+            **ev._config_dict(s)}
 
 
 @router.post("/en-vivo/{codigo}/avanzar", dependencies=[Depends(req_profesor)])
@@ -78,6 +81,24 @@ def matriz(codigo: str, db: Session = Depends(get_db)):
     return ev.matriz_binaria(db, codigo)
 
 
+# ── banco de ítems (contenido para el modo digital) ──────────────────────────────────
+@router.get("/en-vivo/banco/{assessment_id}", dependencies=[Depends(req_profesor)])
+def banco_get(assessment_id: UUID, version: str = "A", db: Session = Depends(get_db)):
+    return ev.contenido_items(db, assessment_id, version)
+
+
+@router.post("/en-vivo/banco/{assessment_id}", dependencies=[Depends(req_profesor)])
+def banco_guardar(assessment_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    return ev.guardar_contenido_items(db, assessment_id,
+                                      payload.get("version", "A"), payload.get("items", []))
+
+
+@router.post("/en-vivo/banco-proponer", dependencies=[Depends(req_profesor)])
+def banco_proponer(payload: dict, db: Session = Depends(get_db)):
+    return ev.proponer_desde_texto(payload.get("texto", ""),
+                                   payload.get("n_alternativas", 4))
+
+
 # ── participantes (publico) ──────────────────────────────────────────────────────────
 @router.post("/en-vivo/{codigo}/unir")
 def unir(codigo: str, payload: dict, db: Session = Depends(get_db)):
@@ -88,9 +109,20 @@ def unir(codigo: str, payload: dict, db: Session = Depends(get_db)):
 @router.post("/en-vivo/{codigo}/responder")
 def responder(codigo: str, payload: dict, db: Session = Depends(get_db)):
     return ev.responder(db, codigo, payload.get("participante_id"),
-                        payload.get("token", ""), payload.get("respuesta", ""))
+                        payload.get("token", ""), respuesta=payload.get("respuesta"),
+                        opcion_idx=payload.get("opcion_idx"))
 
 
 @router.get("/en-vivo/{codigo}/estado")
 def estado(codigo: str, db: Session = Depends(get_db)):
     return ev.estado(db, codigo)
+
+
+@router.get("/en-vivo/{codigo}/mi-estado")
+def mi_estado(codigo: str, participante_id: str, token: str, db: Session = Depends(get_db)):
+    return ev.estado_participante(db, codigo, participante_id, token)
+
+
+@router.get("/en-vivo/{codigo}/mi-resultado")
+def mi_resultado(codigo: str, participante_id: str, token: str, db: Session = Depends(get_db)):
+    return ev.mi_resultado(db, codigo, participante_id, token)
