@@ -272,14 +272,18 @@ def analizar_datos(body: AnalizarDatosPeticion, db: Session = Depends(get_db),
 class ManuscritoPeticion(BaseModel):
     tipo: str = Field("revision", pattern="^(revision|datos)$")
     hechos: dict = Field(default_factory=dict)
+    capitulo: str | None = None       # si viene, redacta SOLO ese capítulo en profundidad
 
 
 @router.post("/investigacion/manuscrito")
 def manuscrito(body: ManuscritoPeticion, _: object = _Dep(req_investigador)):
-    """Genera un manuscrito IMRaD completo (Título, Abstract, Introducción, Métodos, Resultados,
-    Discusión, Limitaciones) anclado a las cifras REALES entregadas — no inventa números. Sigue
-    PRISMA 2020 (revisión) o COSMIN (validación). LLM con respaldo de plantilla determinista."""
+    """Genera el manuscrito. Con `capitulo` (meta|introduccion|marco_teorico|metodos|resultados|
+    discusion|conclusiones|limitaciones|etica|aporta) redacta SOLO ese capítulo en profundidad
+    (artículo largo por capítulos). Sin `capitulo`, devuelve el IMRaD completo en una pasada.
+    Anclado a cifras reales; PRISMA 2020 (revisión) o COSMIN (validación)."""
     try:
+        if body.capitulo:
+            return manuscrito_service.redactar_capitulo(body.hechos, body.tipo, body.capitulo)
         return manuscrito_service.redactar_imrad(body.hechos, body.tipo)
     except Exception:
         logger.error(f"Error en manuscrito: {traceback.format_exc()}")

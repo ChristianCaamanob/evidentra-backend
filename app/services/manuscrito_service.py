@@ -67,6 +67,119 @@ def _prompt(hechos: dict, tipo: str) -> str:
     )
 
 
+CAP_META = ["titulo", "titulo_corto", "abstract", "palabras_clave", "destacados"]
+_CAP_TOKENS = {"meta": 3000, "introduccion": 4500, "marco_teorico": 8000, "metodos": 8000,
+               "resultados": 6000, "discusion": 8000, "conclusiones": 2500, "limitaciones": 3500,
+               "etica": 5000, "aporta": 2000}
+_CAP_GUIA = {
+    "meta": ("Devuelve SOLO un JSON con {titulo, titulo_corto, abstract, palabras_clave (arreglo), "
+             "destacados (arreglo de 3-5)}. Abstract ESTRUCTURADO 220-300 palabras con etiquetas en "
+             "negrita (**Antecedentes:** **Objetivo:** **Métodos:** **Resultados:** **Conclusiones:** "
+             "y **Registro:** si es revisión)."),
+    "introduccion": ("Redacta la INTRODUCCIÓN completa (600-900 palabras): contexto y relevancia del "
+                     "problema, estado general del campo, el vacío de conocimiento específico y los "
+                     "objetivos/preguntas. Prosa fluida y argumentada. Devuelve SOLO JSON {\"texto\":\"...\"}."),
+    "marco_teorico": ("Redacta el MARCO TEÓRICO / ANTECEDENTES en profundidad (900-1400 palabras) "
+                      "TRENZANDO las referencias incluidas (te doy su cita y resumen): organiza por "
+                      "constructos o temas con SUBTÍTULOS en negrita, sintetiza el estado del arte, "
+                      "confronta hallazgos entre estudios, expón tensiones y delimita el vacío que la "
+                      "revisión llena. Cita autor-año SOLO de las referencias dadas. JSON {\"texto\":\"...\"}."),
+    "metodos": ("Redacta MATERIALES Y MÉTODOS en gran profundidad (900-1400 palabras) con SUBTÍTULOS en "
+                "negrita según la guía de reporte: **Diseño y registro**, **Criterios de elegibilidad**, "
+                "**Fuentes de información**, **Estrategia de búsqueda**, **Proceso de selección** (doble "
+                "revisor, concordancia κ, resolución de discrepancias), **Extracción / charting de datos**, "
+                "**Riesgo de sesgo** (herramienta), **Medidas de efecto**, **Síntesis estadística** "
+                "(efectos aleatorios, τ²/I², Hartung-Knapp), **Sesgo de publicación** (Egger, trim-and-fill), "
+                "**Evaluación de la certeza (GRADE)**. JSON {\"texto\":\"...\"}."),
+    "resultados": ("Redacta RESULTADOS (700-1100 palabras) con SUBTÍTULOS: **Selección de estudios** "
+                   "(remite al diagrama de flujo PRISMA con las cifras dadas), **Características de los "
+                   "estudios** (remite a la Tabla 1), **Efecto combinado**, **Heterogeneidad**, "
+                   "**Análisis de subgrupos / metarregresión** (si hay), **Sesgo de publicación** (remite "
+                   "a la Figura 2, funnel), **Certeza de la evidencia**. Remite a la Figura 1 (forest plot). "
+                   "Reporta efectos con su IC. JSON {\"texto\":\"...\"}."),
+    "discusion": ("Redacta la DISCUSIÓN (1100-1600 palabras): es el capítulo MÁS IMPORTANTE y el corazón "
+                  "de un artículo Q1. SUBTÍTULOS en negrita: **Hallazgos principales**; **Comparación con "
+                  "la literatura** (contrasta CADA hallazgo con las referencias incluidas —cita autor-año—, "
+                  "señalando concordancias y discrepancias y por qué); **Mecanismos e interpretación**; "
+                  "**Fortalezas y limitaciones metodológicas**; **Implicaciones** para la práctica, la "
+                  "política y la investigación futura. Argumenta sin sobrevender. JSON {\"texto\":\"...\"}."),
+    "conclusiones": ("Redacta CONCLUSIONES (150-300 palabras), sin cifras nuevas, cerrando la contribución. "
+                     "JSON {\"texto\":\"...\"}."),
+    "limitaciones": ("Redacta LIMITACIONES (300-500 palabras): sesgos evaluados y sus consecuencias, límites "
+                     "de la inferencia, generalización. JSON {\"texto\":\"...\"}."),
+    "etica": ("Redacta CONSIDERACIONES ÉTICAS Y DECLARACIONES (500-800 palabras) para un artículo Q1, con "
+              "SUBTÍTULOS en negrita: **Ética de la investigación** (una revisión de estudios publicados no "
+              "requiere aprobación de comité; para datos primarios: consentimiento informado, seudonimización "
+              "y protección de datos —Ley 21.719—); **Registro del protocolo** (PROSPERO/OSF); **Conflictos "
+              "de interés**; **Financiación**; **Disponibilidad de datos y código**; **Contribuciones "
+              "(CRediT)**; **Uso de inteligencia artificial** y su supervisión humana; **Reproducibilidad**. "
+              "JSON {\"texto\":\"...\"}."),
+    "aporta": ("Redacta 'LO QUE APORTA ESTE ESTUDIO' (caja What this paper adds) con 2-3 viñetas: qué se "
+               "sabía / qué añade. JSON {\"texto\":\"...\"}."),
+}
+
+
+def redactar_capitulo(hechos: dict, tipo: str = "revision", cap: str = "introduccion") -> dict:
+    """Genera UN capítulo en profundidad (llamada dedicada, prompt específico, presupuesto amplio).
+    Permite ensamblar un artículo largo por capítulos en vez de una sola pasada corta."""
+    guia = _CAP_GUIA.get(cap, _CAP_GUIA["introduccion"])
+    sistema = (
+        "Eres un metodólogo y autor experto que redacta artículos para revistas Q1 indexadas (Wiley, "
+        "Elsevier, Taylor & Francis, SAGE) en español académico, preciso y argumentado, APA 7. Escribes "
+        "capítulos EXTENSOS y de fondo, no resúmenes. REGLA ABSOLUTA: usa SOLO los números y las "
+        "referencias que se te entregan; jamás inventes cifras ni referencias ni resultados no dados. " + guia)
+    marco = ("una REVISIÓN SISTEMÁTICA con METAANÁLISIS" if tipo == "revision"
+             else "un ESTUDIO DE VALIDACIÓN / análisis de datos")
+    usuario = (f"Contexto: {marco}. Redacta el capítulo '{cap}'. Usa EXCLUSIVAMENTE estos hechos, cifras y "
+               "referencias REALES:\n\n" + json.dumps(hechos, ensure_ascii=False)[:14000] + "\n\nDevuelve SOLO el JSON pedido.")
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        pl = _plantilla(hechos, tipo)
+        if cap == "meta":
+            out = {k: pl.get(k, "") for k in CAP_META}
+        else:
+            m = {"marco_teorico": "introduccion", "etica": "limitaciones", "aporta": "lo_que_aporta"}
+            out = {"texto": pl.get(m.get(cap, cap), "")}
+        out["motor"] = "plantilla deterministica"
+        return out
+    try:
+        import anthropic
+        cliente = anthropic.Anthropic()
+        with cliente.messages.stream(model=MODELO, max_tokens=_CAP_TOKENS.get(cap, 5000),
+                                     system=sistema, messages=[{"role": "user", "content": usuario}]) as st:
+            final = st.get_final_message()
+        texto = ""
+        for b in final.content:
+            if getattr(b, "type", None) == "text":
+                texto = b.text
+                break
+        texto = texto.strip()
+        if texto.startswith("```"):
+            texto = texto.split("```", 2)[1]
+            if texto.lstrip().startswith("json"):
+                texto = texto.lstrip()[4:]
+        i, j = texto.find("{"), texto.rfind("}")
+        data = json.loads(texto[i:j + 1])
+        if cap == "meta":
+            out = {k: str(data.get(k, "")).strip() for k in ["titulo", "titulo_corto", "abstract"]}
+            for k in ["palabras_clave", "destacados"]:
+                v = data.get(k) or []
+                out[k] = [str(x).strip() for x in v if str(x).strip()][:6] if isinstance(v, list) else []
+        else:
+            out = {"texto": str(data.get("texto", "")).strip()}
+        out["motor"] = "IA (" + MODELO + ")"
+        return out
+    except Exception as e:
+        logger.warning("Capítulo %s cayó a plantilla: %s", cap, str(e)[:150])
+        pl = _plantilla(hechos, tipo)
+        if cap == "meta":
+            out = {k: pl.get(k, "") for k in CAP_META}
+        else:
+            m = {"marco_teorico": "introduccion", "etica": "limitaciones", "aporta": "lo_que_aporta"}
+            out = {"texto": pl.get(m.get(cap, cap), "")}
+        out["motor"] = "plantilla deterministica"
+        return out
+
+
 def redactar_imrad(hechos: dict, tipo: str = "revision") -> dict:
     """Genera las 7 secciones IMRaD con el LLM; cae a plantilla determinista si no hay clave/falla."""
     err = None
