@@ -169,6 +169,26 @@ def literatura(q: str = Query(..., min_length=2),
         raise
 
 
+class RelevanciaPeticion(BaseModel):
+    pregunta: str = Field(..., min_length=2)
+    titulo: str = Field(..., min_length=2)
+    abstract: str = ""
+    meta: dict | None = None
+
+
+@router.post("/investigacion/relevancia")
+def relevancia(body: RelevanciaPeticion, _: object = _Dep(req_investigador)):
+    """'¿Por qué considerar este artículo?': sugerencia de relevancia fundamentada en el abstract
+    real (título + abstract de OpenAlex) frente a la pregunta/línea del estudio. No inventa
+    hallazgos; si no conecta, lo dice. Cae a heurística determinista sin clave de IA."""
+    from app.services import relevancia_service
+    try:
+        return relevancia_service.sugerir(body.pregunta, body.titulo, body.abstract, body.meta)
+    except Exception:
+        logger.error(f"Error en relevancia: {traceback.format_exc()}")
+        raise
+
+
 @router.get("/investigacion/cobertura")
 def cobertura(q: str = Query(..., min_length=2), anios: int = Query(0, ge=0, le=50),
               _: object = _Dep(req_investigador)):
