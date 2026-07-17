@@ -140,8 +140,10 @@ def importar_nomina(db, course_id, filas: list[dict]) -> dict:
 
 def listar_nomina(db, course_id) -> list[dict]:
     ms = db.query(AsistenciaMatricula).filter(AsistenciaMatricula.course_id == course_id).all()
+    # invite_token se expone SOLO al docente (autorizado) para enviar la invitación de enrolamiento.
     return [{"id": str(m.id), "nombre": m.nombre, "correo": m.correo, "estado": m.estado,
              "identificador": m.identificador, "seccion": m.seccion,
+             "invite_token": m.invite_token,
              "tiene_passkey": any(d.activo for d in m.dispositivos)} for m in ms]
 
 
