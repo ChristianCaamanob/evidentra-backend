@@ -510,6 +510,12 @@ def buscar_corpus(query: str, anios: int | None = None, limite: int = 150) -> di
                     "limite": limite, "truncado": False, "error": "sin_conexion",
                     "nota": "No se pudo consultar OpenAlex en este momento."}
 
+    # métricas de revista (país, H-index, DOAJ, cuartil SJR…) para todo el corpus
+    met = {}
+    try:
+        met = metricas_revistas([r.get("source_id") for r in refs if r.get("source_id")])
+    except Exception:
+        met = {}
     arts = []
     for r in refs:
         arts.append({
@@ -519,6 +525,7 @@ def buscar_corpus(query: str, anios: int | None = None, limite: int = 150) -> di
             "abstract": r.get("abstract"), "citas": r.get("citas"),
             "oa": r.get("oa"), "oa_estado": r.get("oa_estado"), "oa_url": r.get("oa_url"),
             "issn": r.get("issn"), "idioma": r.get("idioma"),
+            "metricas": met.get(r.get("source_id")),
             "autores_str": _apa_autores(r.get("autores", [])),
             "apa": formatear(r, "apa"), "vancouver": formatear(r, "vancouver"),
             "bibtex": _bibtex(r), "ris": _ris(r),
