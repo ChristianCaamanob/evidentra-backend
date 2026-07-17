@@ -24,3 +24,4 @@ alembic>=1.13,<2.0
 slowapi>=0.1.9,<1.0
 sentry-sdk[fastapi]>=2.0,<3.0
 certifi>=2024.2.2
+python-docx>=1.1,<2.0

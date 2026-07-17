@@ -10,6 +10,7 @@ Los endpoints sobre rubrica (PCM, R, MFRM) y los con grupo (DIF, invarianza) lle
 fases 2 y 3, junto con los datos y decisiones que consumen.
 """
 import logging
+import re
 import traceback
 from uuid import UUID
 
@@ -19,7 +20,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from fastapi import Depends as _Dep
-from app.api.deps import get_db, req_investigador
+from app.api.deps import get_db, req_investigador, req_lectura_datos
+from app.services import exportador_service
 from app.services import matriz_service
 from app.services import irt_service
 from app.services import dimensionalidad_service

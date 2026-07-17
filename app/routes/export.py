@@ -16,16 +16,37 @@ import logging
 import traceback
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+import re
+
+from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, req_lectura_datos
 from app.models.assessment import Assessment
 from app.services import matriz_service
+from app.services import exportador_service
 
 router = APIRouter(tags=["export"])
 logger = logging.getLogger("evalys")
+
+
+@router.post("/export/{formato}", dependencies=[Depends(req_lectura_datos)])
+def exportar_informe(formato: str, body: dict):
+    """Exportación transversal DOCX/PDF/XLSX para CUALQUIER módulo. El cliente arma el contenido:
+    docx/pdf → {titulo, secciones:[{heading,nivel,texto}], tablas:[{titulo,headers,rows}]};
+    xlsx → {hojas:[{nombre,headers,rows}]}. `filename` opcional. Accesible a profesor/investigador/director."""
+    if formato not in ("docx", "pdf", "xlsx"):
+        from app.core.errors import unprocessable
+        raise unprocessable("Formato no soportado (docx | pdf | xlsx).")
+    fn = re.sub(r"[^A-Za-z0-9_\-]", "_", str(body.get("filename") or "informe"))[:80]
+    try:
+        data, media = exportador_service.exportar(formato, body)
+    except Exception:
+        logger.error(f"Error export {formato}: {traceback.format_exc()}")
+        raise
+    return Response(content=data, media_type=media,
+                    headers={"Content-Disposition": f'attachment; filename="{fn}.{formato}"'})
 
 
 def _csv(text: str, filename: str) -> StreamingResponse:
