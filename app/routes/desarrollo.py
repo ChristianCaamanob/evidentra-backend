@@ -340,6 +340,7 @@ def guardar_rubrica(item_id: UUID, payload: dict, db: Session = Depends(get_db))
 def _pregunta_dict(it, total_peso) -> dict:
     return {"id": str(it.id), "numero": it.question_number, "enunciado": it.enunciado or "",
             "weight": float(it.weight or 1),
+            "respuesta_optima": it.correct_answer or "",
             "pct": round(float(it.weight or 0) / total_peso * 100, 1) if total_peso else 0.0,
             "n_criterios": len(it.rubric_criteria)}
 
@@ -371,7 +372,8 @@ def crear_pregunta_desarrollo(ak_id: UUID, payload: dict, db: Session = Depends(
         w = 1.0
     nums = [it.question_number for it in ak.items] or [0]
     it = AnswerKeyItem(answer_key_id=ak.id, question_number=max(nums) + 1, version="A",
-                       correct_answer="", weight=max(0.1, w), is_annulled=False,
+                       correct_answer=(payload.get("respuesta_optima") or "").strip(),
+                       weight=max(0.1, w), is_annulled=False,
                        question_type=QUESTION_TYPE_OPEN_RESPONSE,
                        enunciado=((payload.get("enunciado") or "").strip() or None))
     db.add(it)
@@ -389,6 +391,8 @@ def editar_pregunta_desarrollo(item_id: UUID, payload: dict, db: Session = Depen
         raise not_found("Pregunta no encontrada.")
     if "enunciado" in payload:
         it.enunciado = (payload.get("enunciado") or "").strip() or None
+    if "respuesta_optima" in payload:
+        it.correct_answer = (payload.get("respuesta_optima") or "").strip()
     if "weight" in payload:
         try:
             w = float(payload["weight"])
