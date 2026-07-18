@@ -358,6 +358,30 @@ def update_assessment_config(assessment_id: UUID, payload: dict, db: Session = D
             "bandas_moviles": bool(getattr(a, "bandas_moviles", False))}
 
 
+@router.get("/{assessment_id}/students/{student_id}/briefing")
+def briefing_estudiante_oral(assessment_id: UUID, student_id: UUID, db: Session = Depends(get_db)):
+    """Briefing personalizado para un estudiante de ORAL (sin escaneo): brechas por sección de
+    la rúbrica + estrategias. Usa la nota de la rúbrica aplicada al estudiante/grupo."""
+    import traceback, logging
+    logger = logging.getLogger("evalys")
+    try:
+        from app.models.assessment import Assessment, modalidad_norm
+        from app.services import oral_stats_service, briefing_service
+        a = db.get(Assessment, assessment_id)
+        datos = oral_stats_service.stats_estudiante(db, assessment_id, student_id)
+        tipo = a.tipo if a else None
+        modalidad = modalidad_norm(a.modalidad) if a else "oral"
+        rep = briefing_service.briefing_estudiante(datos, tipo=tipo, modalidad=modalidad)
+        rep["nota"] = (datos.get("resumen") or {}).get("nota")
+        rep["tipo"] = tipo
+        rep["modalidad"] = modalidad
+        rep["completo"] = datos.get("completo")
+        return rep
+    except Exception:
+        logger.error(f"Error en briefing_estudiante_oral {assessment_id}/{student_id}: {traceback.format_exc()}")
+        raise
+
+
 @router.get("/grading-scales/list")
 def list_grading_scales():
     from app.services.result_service import listar_escalas
@@ -376,10 +400,43 @@ def briefing_del_curso(assessment_id: UUID, db: Session = Depends(get_db)):
     import traceback, logging
     logger = logging.getLogger("evalys")
     try:
-        from app.models.assessment import Assessment, modalidad_norm
+        from app.models.assessment import Assessment, MODALIDAD_ORAL, modalidad_norm
         a = db.get(Assessment, assessment_id)
         tipo = a.tipo if a else None
         modalidad = modalidad_norm(a.modalidad) if a else None
+        # ── Rama ORAL: la nota sale de la rúbrica (no de escaneos) ──
+        if a is not None and a.modalidad == MODALIDAD_ORAL:
+            from app.services import oral_stats_service
+            oc = oral_stats_service.stats_curso(db, assessment_id)
+            pcts = sorted(oc["pcts"])
+            n = len(pcts)
+            promedio = round(sum(pcts) / n, 1) if n else None
+            mediana = pcts[n // 2] if n else None
+            desviacion = minimo = maximo = forma = None
+            if n:
+                mean = sum(pcts) / n
+                desviacion = round((sum((p - mean) ** 2 for p in pcts) / n) ** 0.5, 1)
+                minimo, maximo = round(pcts[0], 1), round(pcts[-1], 1)
+                sesgo = ("cola de rezago" if promedio < mediana - 4 else "cola alta" if promedio > mediana + 4 else "aproximadamente simétrica")
+                disp = ("homogénea" if desviacion < 12 else "muy heterogénea" if desviacion > 22 else "heterogénea")
+                forma = disp + ", " + sesgo
+            aprob = sum(1 for x in oc["notas"] if x >= 4.0) if oc["escala"] == "chile_1_7" else None
+            aprob_pct = round(aprob / n * 100, 1) if (aprob is not None and n) else None
+            por_ra = oc["por_seccion"]
+            items_dificiles = [g["clave"] + " (" + str(g["logro_promedio"]) + "% logro)"
+                               for g in por_ra if g.get("logro_promedio", 100) < 60][:10]
+            metricas = {"n": n, "promedio": promedio, "mediana": mediana, "desviacion": desviacion,
+                        "minimo": minimo, "maximo": maximo, "aprobacion_pct": aprob_pct, "forma": forma}
+            rep = briefing_service.briefing_curso(metricas, por_ra, items_dificiles,
+                                                  tipo=tipo, modalidad=modalidad)
+            brechas_ra = [g["clave"] + " (" + str(g["logro_promedio"]) + "%)"
+                          for g in por_ra if g.get("logro_promedio", 100) < 60]
+            rep["resumen"] = {"n": n, "promedio_pct": promedio, "mediana_pct": mediana,
+                              "desviacion": desviacion, "minimo": minimo, "maximo": maximo,
+                              "aprobacion_pct": aprob_pct, "forma": forma, "tipo": tipo,
+                              "modalidad": modalidad, "items_dificiles": items_dificiles,
+                              "brechas_ra": brechas_ra, "por_ra": por_ra}
+            return rep
         res = result_service.list_results_for_assessment(db, assessment_id)
         rows = res.get("results", [])
         pcts = sorted(r["percentage"] for r in rows if r.get("percentage") is not None)
