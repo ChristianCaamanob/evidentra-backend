@@ -282,6 +282,55 @@ def informe_personalizado(db, course_id, rut: str, umbral_brecha: float = 60.0,
     }
 
 
+def _informe_a_secciones(md: str) -> list[dict]:
+    """Convierte el informe (markdown) a secciones del exportador: los encabezados **X** / # X
+    pasan a heading; cada otra línea a un párrafo (limpiando negritas y viñetas)."""
+    import re
+    secs = []
+    for raw in str(md or "").split("\n"):
+        t = raw.strip()
+        if not t:
+            continue
+        h = None
+        if t.startswith("### "):
+            h = t[4:]
+        elif t.startswith("## "):
+            h = t[3:]
+        elif t.startswith("# "):
+            h = t[2:]
+        else:
+            m = re.match(r"^\*\*(.+?)\*\*:?$", t)
+            if m:
+                h = m.group(1)
+        if h:
+            secs.append({"heading": h.strip(), "nivel": 2, "texto": ""})
+        else:
+            linea = re.sub(r"^[-*]\s+", "• ", t).replace("**", "")
+            secs.append({"heading": None, "nivel": 2, "texto": linea})
+    return secs
+
+
+def informe_export_payload(db, course_id, rut: str, umbral_brecha: float = 60.0,
+                           origen: str | None = None) -> dict:
+    """Documento exportable (Word/PDF) del informe personalizado: portada + informe formativo por
+    secciones + tabla de logro por RA. Reutiliza informe_personalizado (con compuerta docente)."""
+    inf = informe_personalizado(db, course_id, rut, umbral_brecha=umbral_brecha, origen=origen)
+    est, datos = inf["estudiante"], inf["datos"]
+    tabla = {"titulo": "Logro por Resultado de Aprendizaje",
+             "headers": ["RA", "Resultado de aprendizaje", "Logro %", "Nivel", "Brecha"],
+             "rows": [[r["code"], r.get("texto") or "—",
+                       ("—" if r.get("logro_pct") is None else r["logro_pct"]),
+                       r["nivel"], ("Sí" if r.get("brecha") else ("—" if r.get("brecha") is None else "No"))]
+                      for r in datos["por_ra"]]}
+    cab = {"heading": "Informe formativo personalizado", "nivel": 1,
+           "texto": f"Estudiante: {est.get('nombre','')} · Curso: {inf['curso'].get('nombre','')}. "
+                    f"Motor: {inf['motor']}. Borrador formativo — revísalo antes de compartir (G1)."}
+    return {"payload": {"titulo": f"Informe · {est.get('nombre','')}",
+                        "secciones": [cab] + _informe_a_secciones(inf["informe"]),
+                        "tablas": [tabla]},
+            "informe": inf}
+
+
 def _plantilla_informe(nombre, datos, fortalezas, brechas) -> str:
     p = [f"**Lo que has logrado.** {nombre}, "]
     if fortalezas:

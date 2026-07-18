@@ -1,7 +1,9 @@
 from uuid import UUID
 
+import re
+
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
@@ -107,6 +109,35 @@ def get_students(course_id: UUID, db: Session = Depends(get_db)):
              "apellido_materno": s.apellido_materno, "nombres": s.nombres} for s in students]
 
 
+@router.get("/{course_id}/curriculo")
+def get_curriculo(course_id: UUID, db: Session = Depends(get_db)):
+    """Tabla de Especificaciones del curso: los RA (LearningOutcome) con su texto literal (C2)."""
+    from app.models.curriculo import LearningOutcome
+    ras = (db.query(LearningOutcome).filter(LearningOutcome.course_id == course_id)
+           .order_by(LearningOutcome.orden).all())
+    return {"ras": [{"code": r.code, "text": r.text, "unidad": r.unidad, "orden": r.orden}
+                    for r in ras], "n": len(ras)}
+
+
+@router.post("/{course_id}/curriculo", dependencies=[Depends(req_profesor)])
+def set_curriculo(course_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    """Carga/actualiza la Tabla de Especificaciones (RA) del curso, preservando el texto literal
+    del programa. payload={"ras":[{"code","text","unidad"?}]}. Idempotente por (curso, code)."""
+    from app.services import curriculo_service
+    limpio = []
+    for r in (payload.get("ras") or []):
+        code = str(r.get("code", "")).strip()
+        text = str(r.get("text", "")).strip()
+        if code and text:
+            limpio.append({"code": code, "text": text,
+                           "unidad": (str(r.get("unidad")).strip() or None) if r.get("unidad") else None})
+    if not limpio:
+        raise HTTPException(status_code=422, detail="Envía al menos un RA con 'code' y 'text'.")
+    out = curriculo_service.import_curriculo(db, course_id, limpio)
+    return {"ras": [{"code": r.code, "text": r.text, "unidad": r.unidad, "orden": r.orden}
+                    for r in out], "n": len(out)}
+
+
 @router.get("/{course_id}/estudiante/{rut}/brechas", dependencies=[Depends(req_profesor)])
 def brechas_estudiante(course_id: UUID, rut: str, umbral: float = 60.0,
                        origen: str | None = None, db: Session = Depends(get_db)):
@@ -131,6 +162,23 @@ def informe_estudiante(course_id: UUID, rut: str, umbral: float = 60.0,
     from app.services import ficha_service
     return ficha_service.informe_personalizado(db, course_id, rut, umbral_brecha=umbral,
                                                origen=(origen or None))
+
+
+@router.post("/{course_id}/estudiante/{rut}/informe/{formato}", dependencies=[Depends(req_profesor)])
+def informe_estudiante_export(course_id: UUID, rut: str, formato: str, umbral: float = 60.0,
+                              origen: str | None = None, db: Session = Depends(get_db)):
+    """Descarga el informe personalizado del estudiante en Word/PDF (borrador, compuerta docente)."""
+    if formato not in ("docx", "pdf"):
+        raise HTTPException(status_code=422, detail="Formato no soportado (docx | pdf).")
+    if origen not in (None, "", "omr", "en_vivo"):
+        raise HTTPException(status_code=422, detail="origen inválido (omr | en_vivo | omitir).")
+    from app.services import ficha_service, exportador_service
+    out = ficha_service.informe_export_payload(db, course_id, rut, umbral_brecha=umbral,
+                                               origen=(origen or None))
+    data, media = exportador_service.exportar(formato, out["payload"])
+    fn = re.sub(r"[^A-Za-z0-9_\-]", "_", f"informe_{rut}")[:80]
+    return Response(content=data, media_type=media,
+                    headers={"Content-Disposition": f'attachment; filename="{fn}.{formato}"'})
 
 
 class StudentIn(BaseModel):

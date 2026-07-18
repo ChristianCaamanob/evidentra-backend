@@ -120,6 +120,19 @@ def test_informe_personalizado_plantilla(engine, monkeypatch):
     assert res["datos"]["resumen"]["n_brechas"] == 1          # anclaje: los hechos van adjuntos
 
 
+def test_informe_export_payload(engine, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    cid = uuid.UUID(_sembrar(engine))
+    with Session(engine) as s:
+        out = ficha_service.informe_export_payload(s, cid, "1-9")
+    pl = out["payload"]
+    assert pl["titulo"].startswith("Informe ·") and pl["secciones"] and pl["tablas"]
+    t = pl["tablas"][0]
+    assert t["headers"][0] == "RA" and len(t["rows"]) == 2   # RA1, RA2
+    # el markdown se limpió: ninguna sección conserva los ** de negrita
+    assert all("**" not in (sec.get("texto") or "") for sec in pl["secciones"])
+
+
 def test_ra_derivados_sin_tabla_formal(engine):
     """Sin Tabla de Especificaciones cargada, los RA se derivan del etiquetado de los ítems
     (así la ficha funciona con la evidencia existente en producción)."""
