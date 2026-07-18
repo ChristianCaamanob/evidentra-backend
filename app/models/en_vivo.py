@@ -72,8 +72,33 @@ class ParticipanteVivo(UUIDMixin, Base):
     layout_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     progreso: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # nº de preguntas respondidas (self-paced)
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Integridad (LV8): el docente puede CERRAR selectivamente la prueba a este alumno (decisión
+    # humana ante evidencia). ultimo_latido_ts = epoch del último heartbeat (para "tiempo sin actividad").
+    bloqueado: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    bloqueado_motivo: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ultimo_latido_ts: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     sesion = relationship("SesionEnVivo", back_populates="participantes")
+
+
+class EventoIntegridad(UUIDMixin, Base):
+    """Telemetría de integridad del modo en vivo (LV8): un registro INMUTABLE por evento de
+    ventana/foco del alumno, con hora de SERVIDOR. Es evidencia objetiva — la interpretación es
+    humana y nunca invalida la evaluación por sí sola (proporcionalidad, Ley 21.719).
+
+    tipo: page_hidden | page_visible | blur | focus | fullscreen_enter | fullscreen_exit |
+          copy | paste | cut | contextmenu | heartbeat | join | sesion_concurrente
+    """
+    __tablename__ = "eventos_integridad"
+
+    sesion_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sesiones_en_vivo.id"), index=True)
+    participante_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("participantes_vivo.id"), index=True)
+    tipo: Mapped[str] = mapped_column(String(30), index=True)
+    question_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)   # p.ej. tiempo oculto
+    sequence: Mapped[int | None] = mapped_column(Integer, nullable=True)      # orden en el cliente
+    meta_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)       # p.ej. {"pegado_len":42,"screens":2}
+    server_time: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
 class RespuestaVivo(UUIDMixin, Base):

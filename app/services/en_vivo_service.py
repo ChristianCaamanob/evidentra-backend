@@ -276,6 +276,8 @@ def responder(db, codigo: str, participante_id, token: str,
     if s.estado != ESTADO_ACTIVA:
         raise conflict("La sesion no esta recibiendo respuestas en este momento.")
     p = _participante(db, s, participante_id, token)
+    if getattr(p, "bloqueado", False):
+        raise conflict("El docente cerró tu evaluación. No puedes seguir respondiendo.")
 
     items = _items_contenido(db, uuid.UUID(s.assessment_id), s.version)
     ordinal = _ordinal_actual(s, p, len(items))
@@ -352,8 +354,13 @@ def estado_participante(db, codigo: str, participante_id, token: str) -> dict:
 
     base = {"estado": s.estado, "modo_ritmo": s.modo_ritmo, "alias": p.alias,
             "n_preguntas": n, "respondidas": respondidas,
-            "progreso_pct": round(respondidas / n * 100) if n else 0}
+            "progreso_pct": round(respondidas / n * 100) if n else 0,
+            "bloqueado": bool(getattr(p, "bloqueado", False)),
+            "bloqueado_motivo": getattr(p, "bloqueado_motivo", None)}
 
+    if getattr(p, "bloqueado", False):
+        base["pregunta"] = None                 # el docente cerró la prueba a este alumno
+        return base
     if s.estado in (ESTADO_LOBBY,) or (s.estado != ESTADO_ACTIVA and s.modo_ritmo == RITMO_DOCENTE):
         base["pregunta"] = None                 # esperando (lobby o pausa en ritmo-docente)
         return base

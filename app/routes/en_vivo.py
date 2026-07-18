@@ -155,3 +155,45 @@ def mi_estado(codigo: str, participante_id: str, token: str, db: Session = Depen
 @router.get("/en-vivo/{codigo}/mi-resultado")
 def mi_resultado(codigo: str, participante_id: str, token: str, db: Session = Depends(get_db)):
     return ev.mi_resultado(db, codigo, participante_id, token)
+
+
+# ── integridad (LV8): telemetría del alumno + panel/cierre del docente ────────────────
+@router.post("/en-vivo/{codigo}/evento")
+def integridad_evento(codigo: str, payload: dict, db: Session = Depends(get_db)):
+    """Ingesta de telemetría del ALUMNO (público, con token del participante). Acepta un lote
+    de eventos de ventana/foco. Hora de servidor; inmutable."""
+    from app.services import integridad_service
+    s = ev._sesion(db, codigo)
+    p = ev._participante(db, s, payload.get("participante_id"), payload.get("token", ""))
+    eventos = payload.get("eventos")
+    if eventos is None:                     # también acepta un evento suelto
+        eventos = [{k: payload.get(k) for k in ("tipo", "question_number", "duration_ms", "sequence", "meta")}]
+    return integridad_service.registrar_eventos(db, s, p, eventos)
+
+
+@router.get("/en-vivo/{codigo}/integridad", dependencies=[Depends(req_profesor)])
+def integridad_panel(codigo: str, db: Session = Depends(get_db)):
+    """Panel de supervisión del DOCENTE: evidencia por alumno + semáforo (en vivo y final)."""
+    from app.services import integridad_service
+    s = ev._sesion(db, codigo)
+    return integridad_service.resumen_participantes(db, s)
+
+
+@router.get("/en-vivo/{codigo}/integridad/{participante_id}", dependencies=[Depends(req_profesor)])
+def integridad_timeline(codigo: str, participante_id: str, db: Session = Depends(get_db)):
+    """Línea temporal de incidencias de un alumno (evidencia detallada para decidir)."""
+    from app.services import integridad_service
+    s = ev._sesion(db, codigo)
+    return integridad_service.timeline_participante(db, s, participante_id)
+
+
+@router.post("/en-vivo/{codigo}/participante/{participante_id}/bloquear", dependencies=[Depends(req_profesor)])
+def integridad_bloquear(codigo: str, participante_id: str, payload: dict | None = None,
+                        db: Session = Depends(get_db)):
+    """El DOCENTE cierra (o reabre) selectivamente la prueba a un alumno. Decisión humana."""
+    from app.services import integridad_service
+    payload = payload or {}
+    s = ev._sesion(db, codigo)
+    return integridad_service.bloquear(db, s, participante_id,
+                                       bool(payload.get("bloquear", True)),
+                                       payload.get("motivo"))

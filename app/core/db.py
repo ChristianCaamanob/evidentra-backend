@@ -10,7 +10,7 @@ from app.models.scan import Scan
 from app.models.student import Student
 from app.models.teacher import Teacher
 from app.models.password_reset import PasswordResetToken
-from app.models.en_vivo import SesionEnVivo, ParticipanteVivo, RespuestaVivo  # noqa: F401
+from app.models.en_vivo import SesionEnVivo, ParticipanteVivo, RespuestaVivo, EventoIntegridad  # noqa: F401
 from app.models.asistencia import (  # noqa: F401
     AsistenciaMatricula, DispositivoWebAuthn, SesionAsistencia, MarcaAsistencia)
 from app.models.suscripcion import Suscripcion, EventoPago  # noqa: F401
@@ -277,6 +277,9 @@ _COLUMNAS_ADITIVAS = {
     "participantes_vivo": {
         "layout_json": "JSON",
         "progreso": "INTEGER NOT NULL DEFAULT 0",
+        "bloqueado": "BOOLEAN NOT NULL DEFAULT false",
+        "bloqueado_motivo": "VARCHAR(255)",
+        "ultimo_latido_ts": "INTEGER",
     },
     "answer_key_items": {
         "opciones_json": "JSON",
