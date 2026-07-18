@@ -707,6 +707,58 @@ def guardar_contenido_items(db, assessment_id, version: str, items: list) -> dic
     return {"actualizados": n}
 
 
+def importar_preguntas(db, assessment_id, version: str, items: list) -> dict:
+    """Crea la PAUTA de alternativas a partir de preguntas estructuradas (enunciado, opciones,
+    letra correcta, justificación) — el módulo de importación de preguntas del modo en vivo.
+
+    A diferencia de guardar_contenido_items (que solo rellena ítems ya existentes), este CREA
+    los ítems con su letra correcta y VALIDA la pauta, de modo que la sala en vivo pueda
+    iniciarse. Reemplaza los ítems de alternativas de esa versión (idempotente al reimportar);
+    no toca las preguntas de desarrollo (open_response) ni sus rúbricas. Compuerta humana (G1):
+    el docente revisó las propuestas antes de confirmar.
+    """
+    from app.models.answer_key import AnswerKeyItem, QUESTION_TYPE_OPEN_RESPONSE
+    items = items or []
+    if not items:
+        raise conflict("No hay preguntas para importar.")
+    version = (version or "A").upper()
+    ak = db.query(AnswerKey).filter(AnswerKey.assessment_id == assessment_id).first()
+    if not ak:
+        ak = AnswerKey(assessment_id=str(assessment_id), is_valid=False, status="draft")
+        db.add(ak); db.flush()
+    # Borra los ítems de alternativas previos de esa versión (conserva open_response/rúbricas).
+    for it in list(ak.items):
+        if it.version.upper() == version and it.question_type == QUESTION_TYPE_MULTIPLE_CHOICE:
+            db.delete(it)
+    db.flush()
+    creadas = 0
+    for i, q in enumerate(items, start=1):
+        correcta = (str(q.get("correcta") or "A").strip().upper()[:1]) or "A"
+        ops = []
+        for o in (q.get("opciones") or []):
+            letra = str(o.get("letra", "")).strip().upper()[:2]
+            if letra:
+                ops.append({"letra": letra, "texto": str(o.get("texto", "")).strip()})
+        db.add(AnswerKeyItem(
+            answer_key_id=ak.id, question_number=i, version=version,
+            correct_answer=correcta, weight=1.0, is_annulled=False,
+            question_type=QUESTION_TYPE_MULTIPLE_CHOICE,
+            enunciado=(str(q.get("enunciado") or "").strip() or None),
+            opciones_json=ops or None,
+            justificacion=(str(q.get("justificacion") or "").strip() or None)))
+        creadas += 1
+    ak.is_valid = True
+    ak.status = "validada"
+    # Mantén n_questions de la evaluación en sincronía con la pauta importada.
+    a = db.query(Assessment).filter(Assessment.id == assessment_id).first()
+    if a is not None:
+        a.n_questions = creadas
+        if getattr(a, "version_count", None) is not None:
+            a.version_count = creadas
+    db.commit()
+    return {"creadas": creadas, "version": version, "pauta_validada": True}
+
+
 def proponer_desde_texto(texto: str, n_alternativas: int = 4, llamar=None) -> dict:
     """Propone ítems estructurados (enunciado/opciones/correcta/justificación) a partir del
     texto de una prueba pegada o extraída del documento. BORRADOR: el docente revisa y

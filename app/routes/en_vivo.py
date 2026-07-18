@@ -120,6 +120,14 @@ def banco_proponer(payload: dict, db: Session = Depends(get_db)):
                                    payload.get("n_alternativas", 4))
 
 
+@router.post("/en-vivo/banco-importar/{assessment_id}", dependencies=[Depends(req_profesor)])
+def banco_importar(assessment_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    """Crea la pauta de alternativas (con letra correcta) desde preguntas estructuradas y la
+    valida, para poder abrir la sala en vivo. Módulo de importación de preguntas."""
+    return ev.importar_preguntas(db, assessment_id,
+                                 payload.get("version", "A"), payload.get("items", []))
+
+
 # ── participantes (publico) ──────────────────────────────────────────────────────────
 @router.post("/en-vivo/{codigo}/unir")
 def unir(codigo: str, payload: dict, db: Session = Depends(get_db)):
