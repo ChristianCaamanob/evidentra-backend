@@ -289,6 +289,9 @@ _COLUMNAS_ADITIVAS = {
     "assessments": {
         "tipo": "VARCHAR(20)",
     },
+    "courses": {
+        "tipo": "VARCHAR(20)",
+    },
 }
 
 

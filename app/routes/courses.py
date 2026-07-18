@@ -1,7 +1,8 @@
 from uuid import UUID
 
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, req_profesor
@@ -9,6 +10,30 @@ from app.schemas.course import ActivateCourseOut, CompleteCourseStructureIn, Cou
 from app.services import course_service
 
 router = APIRouter(prefix="/courses", tags=["courses"])
+
+# Tope de nómina por naturaleza del curso (aviso, no bloqueo): teórico grande, laboratorio chico.
+MAX_POR_TIPO = {"teorico": 110, "laboratorio": 33, "practico": 33}
+CURSOS_SOLO_INVESTIGACION = {"DEMO-Q1", "DEMO-PSICO"}   # cohortes grandes de psicometría
+
+
+def _max_estudiantes(tipo):
+    return MAX_POR_TIPO.get((tipo or "").lower())
+
+
+_bearer_opt = HTTPBearer(auto_error=False)
+
+
+def _rol_opcional(cred: HTTPAuthorizationCredentials = Depends(_bearer_opt),
+                  db: Session = Depends(get_db)):
+    """Rol del usuario si viene token válido; None si no. No exige auth (lista pública tolerante)."""
+    if cred is None or not cred.credentials:
+        return None
+    try:
+        from app.services import auth_service
+        u = auth_service.usuario_desde_token(db, cred.credentials)
+        return u.rol if u else None
+    except Exception:
+        return None
 
 
 @router.get("/{course_id}", response_model=CourseOut)
@@ -110,18 +135,33 @@ def add_student(course_id: UUID, payload: StudentIn, db: Session = Depends(get_d
 
 
 @router.get("/", response_model=list)
-def list_courses(db: Session = Depends(get_db)):
+def list_courses(rol=Depends(_rol_opcional), db: Session = Depends(get_db)):
+    from sqlalchemy import func
     from app.models.course import Course
-    courses = db.query(Course).order_by(Course.created_at.desc()).all()
-    return [{"id": str(c.id), "name": c.name, "code": c.code,
-             "status": c.status, "grading_scale": c.grading_scale,
-             "passing_threshold": c.passing_threshold} for c in courses]
+    from app.models.student import Student
+    from app.models.teacher import ROL_INVESTIGADOR, ROL_CREADOR
+    # Conteo de estudiantes por curso en una sola consulta.
+    counts = dict(db.query(Student.course_id, func.count(Student.id))
+                  .group_by(Student.course_id).all())
+    ve_investigacion = rol in (ROL_INVESTIGADOR, ROL_CREADOR)
+    salida = []
+    for c in db.query(Course).order_by(Course.created_at.desc()).all():
+        # Las cohortes grandes de psicometría solo las ve el Investigador (o el creador).
+        if c.code in CURSOS_SOLO_INVESTIGACION and not ve_investigacion:
+            continue
+        salida.append({"id": str(c.id), "name": c.name, "code": c.code,
+                       "status": c.status, "grading_scale": c.grading_scale,
+                       "passing_threshold": c.passing_threshold,
+                       "tipo": c.tipo, "max_estudiantes": _max_estudiantes(c.tipo),
+                       "n_students": int(counts.get(c.id, 0))})
+    return salida
 
 class CourseIn(BaseModel):
     name: str
     code: str
     grading_scale: str = "chile_1_7"
     passing_threshold: float = 60.0
+    tipo: str | None = None      # 'teorico' | 'laboratorio' | 'practico'
 
 @router.post("/", dependencies=[Depends(req_profesor)])
 def create_course(payload: CourseIn, db: Session = Depends(get_db)):
@@ -129,6 +169,9 @@ def create_course(payload: CourseIn, db: Session = Depends(get_db)):
     existing = db.query(Course).filter(Course.code == payload.code).first()
     if existing:
         raise HTTPException(status_code=400, detail="Ya existe un curso con ese código")
+    tipo = (payload.tipo or "").lower() or None
+    if tipo and tipo not in MAX_POR_TIPO:
+        tipo = None
     course = Course(
         name=payload.name,
         code=payload.code,
@@ -137,10 +180,13 @@ def create_course(payload: CourseIn, db: Session = Depends(get_db)):
         passing_threshold=payload.passing_threshold,
         has_learning_structure=False,
         base_score_type="raw_points",
+        tipo=tipo,
     )
     db.add(course)
     db.commit()
     db.refresh(course)
     return {"id": str(course.id), "name": course.name, "code": course.code,
             "status": course.status, "grading_scale": course.grading_scale,
-            "passing_threshold": course.passing_threshold}
+            "passing_threshold": course.passing_threshold,
+            "tipo": course.tipo, "max_estudiantes": _max_estudiantes(course.tipo),
+            "n_students": 0}
