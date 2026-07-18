@@ -263,6 +263,76 @@ def _seed_desarrollo(db) -> None:
     db.commit()
 
 
+def _seed_ficha_p3(db):
+    """DEMO-FICHA (P3): curso VISIBLE AL DOCENTE con nómina real + Tabla de Especificaciones
+    (LearningOutcome) + 2 pruebas etiquetadas por RA + escaneos ligados por RUT, con brechas
+    variadas por estudiante. Permite exhibir la ficha del alumno (brechas por RA) y el informe
+    personalizado. Idempotente por Course.code == 'DEMO-FICHA'."""
+    from app.models.curriculo import LearningOutcome
+    from app.models.student import Student
+    if db.query(Course).filter(Course.code == "DEMO-FICHA").first():
+        return
+    course = Course(name="Demo · Ficha del estudiante", code="DEMO-FICHA", status="active",
+                    grading_scale="chile_1_7", passing_threshold=60.0)
+    db.add(course); db.flush()
+    for i, (code, text) in enumerate([
+        ("RA1", "Identifica y describe las estructuras anatómicas fundamentales."),
+        ("RA2", "Relaciona estructura y función en los sistemas del cuerpo."),
+        ("RA3", "Integra los conceptos en el análisis de casos clínicos."),
+    ], start=1):
+        db.add(LearningOutcome(course_id=course.id, code=code, text=text, orden=i))
+    estudiantes = [
+        ("11.111.111-1", "Soto", "Vera", "Ana"),
+        ("12.222.222-2", "Lira", "Paz", "Beto"),
+        ("13.333.333-3", "Rojas", "Díaz", "Carolina"),
+        ("14.444.444-4", "Díaz", "Mora", "Darío"),
+        ("15.555.555-5", "Muñoz", "Rey", "Elsa"),
+        ("16.666.666-6", "Vega", "Luna", "Franco"),
+    ]
+    for rut, ap, am, nom in estudiantes:
+        db.add(Student(course_id=course.id, rut=rut, apellido_paterno=ap,
+                       apellido_materno=am, nombres=nom))
+    db.flush()
+    ra_de_q = {1: "RA1", 2: "RA1", 3: "RA2", 4: "RA2", 5: "RA3", 6: "RA3"}  # 2 ítems por RA
+    # Patrones de respuesta (correcta = "A"): crean logros/brechas distintos por RA y por prueba.
+    solemne = {
+        "11.111.111-1": ["A", "A", "A", "B", "B", "B"],   # RA1 alto, RA2 medio, RA3 bajo
+        "12.222.222-2": ["A", "B", "A", "A", "A", "A"],
+        "13.333.333-3": ["B", "B", "B", "A", "A", "A"],
+        "14.444.444-4": ["A", "A", "A", "A", "A", "B"],
+        "15.555.555-5": ["B", "A", "B", "B", "B", "B"],   # brechas amplias
+        "16.666.666-6": ["A", "A", "B", "A", "B", "A"],
+    }
+    control = {
+        "11.111.111-1": ["A", "A", "B", "B", "A", "A"],   # sube RA3 respecto de la solemne
+        "12.222.222-2": ["A", "A", "A", "B", "A", "A"],
+        "13.333.333-3": ["B", "A", "B", "B", "A", "B"],
+        "14.444.444-4": ["A", "A", "A", "A", "B", "A"],
+        "15.555.555-5": ["A", "B", "B", "A", "B", "B"],
+        "16.666.666-6": ["A", "A", "A", "A", "A", "A"],   # domina todo en vivo
+    }
+
+    def _prueba(nombre, tipo, respuestas, origen):
+        a = Assessment(course_id=course.id, name=nombre, tipo=tipo, modalidad="alternativas",
+                       grading_scale="chile_1_7", passing_threshold=60.0)
+        db.add(a); db.flush()
+        ak = AnswerKey(assessment_id=a.id, status="valid", is_valid=True)
+        db.add(ak); db.flush()
+        for q in range(1, 7):
+            db.add(AnswerKeyItem(answer_key_id=ak.id, question_number=q, version="A",
+                                 correct_answer="A", weight=1.0,
+                                 learning_outcome_id=ra_de_q[q], bloom_level="aplicar"))
+        for rut, vec in respuestas.items():
+            db.add(Scan(assessment_id=a.id, student_identifier=rut,
+                        status=("en_vivo" if origen == "en_vivo" else "scored"),
+                        detected_version="A", requires_review=False, origen=origen,
+                        raw_ocr_payload_json={"answers": vec, "origen": origen}))
+
+    _prueba("Solemne 1 · alternativas", "solemne", solemne, "omr")
+    _prueba("Control 2 · en vivo", "control", control, "en_vivo")
+    db.commit()
+
+
 # Columnas ADITIVAS que deben existir aunque Alembic no corra (prod histórico usa
 # create_all, que crea tablas nuevas pero NO altera las existentes). Idempotente: solo
 # añade las que faltan. DDL válido en Postgres (prod) y SQLite (local/tests).
@@ -378,8 +448,10 @@ def create_db_and_seed() -> None:
         _seed_cohorte_psicometria(db)
         _seed_cohorte_showcase(db)        # DEMO-Q1: showcase grande (n=600) del módulo Investigador
         _seed_desarrollo(db)
+        _seed_ficha_p3(db)                # DEMO-FICHA: ficha del estudiante (brechas por RA) + informe
 
-        course = db.query(Course).filter(Course.code.notin_(["DEMO-PSICO", "DEMO-DESA"])).first()
+        course = db.query(Course).filter(
+            Course.code.notin_(["DEMO-PSICO", "DEMO-DESA", "DEMO-FICHA"])).first()
         if course:
             return
 
