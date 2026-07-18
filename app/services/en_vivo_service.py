@@ -709,7 +709,14 @@ def guardar_contenido_items(db, assessment_id, version: str, items: list) -> dic
                 if letra:
                     ops.append({"letra": letra, "texto": texto})
             it.opciones_json = ops or None
+        # Corregir la PAUTA (letra correcta) ante un error involuntario del import. Compuerta docente.
+        if entrada.get("correcta"):
+            c = str(entrada.get("correcta")).strip().upper()[:1]
+            if c:
+                it.correct_answer = c
         n += 1
+    ak.is_valid = True          # sigue validada tras editar contenido/pauta
+    ak.status = "validada"
     db.commit()
     return {"actualizados": n}
 
