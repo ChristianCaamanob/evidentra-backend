@@ -56,10 +56,13 @@ def brechas_estudiante(db, course_id, rut: str, umbral_brecha: float = 60.0,
     if st is None:
         raise not_found("Estudiante no encontrado en el curso.")
 
-    # Tabla de Especificaciones: RA del curso (texto literal preservado, C2).
+    # Tabla de Especificaciones: RA del curso (texto literal preservado, C2). Si el curso aún no
+    # tiene Tabla cargada, los RA se DERIVAN del etiquetado de los ítems (C1) más abajo, para que
+    # la ficha funcione con la evidencia existente; el texto literal enriquece cuando sí está.
     ras = (db.query(LearningOutcome).filter(LearningOutcome.course_id == course_id)
            .order_by(LearningOutcome.orden).all())
-    ra_meta = {r.code: {"code": r.code, "texto": r.text, "unidad": r.unidad} for r in ras}
+    ra_meta = {r.code: {"code": r.code, "texto": r.text, "unidad": r.unidad, "en_tabla": True}
+               for r in ras}
 
     # Acumuladores por RA (ítems enfrentados / aciertos), con desglose por tipo de prueba.
     acc: dict[str, dict] = {}
@@ -108,6 +111,12 @@ def brechas_estudiante(db, course_id, rut: str, umbral_brecha: float = 60.0,
             "logro_pct": round(ok_p / ev_p * 100, 1) if ev_p else None,
         })
 
+    # RA presentes en la evidencia pero AUSENTES de la Tabla: se incluyen igual (no se ocultan),
+    # marcados en_tabla=False. Si el curso no tenía Tabla, así aparecen todos los RA evaluados.
+    for code in sorted(acc):
+        if code not in ra_meta:
+            ra_meta[code] = {"code": code, "texto": None, "unidad": None, "en_tabla": False}
+
     # Cruce con la Tabla de Especificaciones: un renglón por RA del programa (evaluado o no).
     por_ra = []
     for code, meta in ra_meta.items():
@@ -123,8 +132,9 @@ def brechas_estudiante(db, course_id, rut: str, umbral_brecha: float = 60.0,
             por_ra.append({**meta, "items_evaluados": 0, "logro_pct": None,
                            "nivel": "sin evaluar", "brecha": None, "por_tipo": {}})
 
-    # RA etiquetados en ítems pero AUSENTES de la Tabla (trazabilidad honesta del etiquetado C1).
-    fuera_de_tabla = sorted(c for c in acc if c not in ra_meta)
+    # RA etiquetados en ítems pero AUSENTES de la Tabla formal (trazabilidad honesta del C1).
+    fuera_de_tabla = sorted(c for c in acc if not ra_meta.get(c, {}).get("en_tabla"))
+    tabla_cargada = any(m.get("en_tabla") for m in ra_meta.values())
     brechas = [r for r in por_ra if r["brecha"]]
     sin_eval = [r for r in por_ra if r["items_evaluados"] == 0]
 
@@ -137,8 +147,9 @@ def brechas_estudiante(db, course_id, rut: str, umbral_brecha: float = 60.0,
         "pruebas": pruebas,
         "brechas": [{"code": r["code"], "texto": r["texto"], "logro_pct": r["logro_pct"],
                      "por_tipo": r["por_tipo"]} for r in brechas],
+        "tabla_cargada": tabla_cargada,
         "resumen": {
-            "n_ra_programa": len(ra_meta),
+            "n_ra_programa": sum(1 for m in ra_meta.values() if m.get("en_tabla")),
             "n_ra_evaluados": sum(1 for r in por_ra if r["items_evaluados"]),
             "n_brechas": len(brechas),
             "ra_sin_evaluar": [r["code"] for r in sin_eval],

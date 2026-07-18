@@ -118,6 +118,25 @@ def test_informe_personalizado_plantilla(engine, monkeypatch):
     assert res["datos"]["resumen"]["n_brechas"] == 1          # anclaje: los hechos van adjuntos
 
 
+def test_ra_derivados_sin_tabla_formal(engine):
+    """Sin Tabla de Especificaciones cargada, los RA se derivan del etiquetado de los ítems
+    (así la ficha funciona con la evidencia existente en producción)."""
+    cid = _sembrar(engine)
+    with Session(engine) as s:
+        # borrar la Tabla formal, dejando solo el etiquetado C1 de los ítems
+        from app.models.curriculo import LearningOutcome
+        s.query(LearningOutcome).delete()
+        s.commit()
+        res = ficha_service.brechas_estudiante(s, uuid.UUID(cid), "1-9")
+    ra = _por_ra(res)
+    assert res["tabla_cargada"] is False
+    assert set(ra.keys()) == {"RA1", "RA2"}                    # derivados de los ítems
+    assert ra["RA1"]["en_tabla"] is False and ra["RA2"]["en_tabla"] is False
+    assert ra["RA2"]["logro_pct"] == 33.3 and ra["RA2"]["brecha"] is True
+    assert res["resumen"]["n_ra_programa"] == 0                # no hay tabla formal
+    assert set(res["ra_fuera_de_tabla"]) == {"RA1", "RA2"}
+
+
 def test_ra_sin_evaluar_se_reporta(engine):
     """Un RA del programa sin ítems asociados aparece como 'sin evaluar' (cobertura honesta)."""
     cid = _sembrar(engine)
