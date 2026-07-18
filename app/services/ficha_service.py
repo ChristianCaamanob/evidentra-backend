@@ -149,3 +149,104 @@ def brechas_estudiante(db, course_id, rut: str, umbral_brecha: float = 60.0,
                       "deduplicados por estudiante. No altera notas (G1); uso pedagógico del docente. "
                       "El desarrollo por-RA se integrará en un corte siguiente.",
     }
+
+
+def _fortalezas(por_ra: list) -> list:
+    return [r for r in por_ra if r.get("nivel") == "Logrado"]
+
+
+def informe_personalizado(db, course_id, rut: str, umbral_brecha: float = 60.0,
+                          origen: str | None = None) -> dict:
+    """Informe personalizado, EMPÁTICO y PROPOSITIVO, para UN estudiante: reconoce logros,
+    constata las brechas por RA (con el texto literal del programa) y propone ESCENARIOS
+    ESTRATÉGICOS DE APRENDIZAJE por cada brecha, anclado a los datos reales del alumno.
+
+    Con clave de IA redacta con el LLM (compuerta docente: es un BORRADOR a revisar); sin clave
+    cae a una plantilla determinista con los mismos datos. Línea roja: solo usa los datos dados,
+    no inventa notas, %, RA ni contenidos. No altera calificaciones (G1).
+    """
+    from app.services.briefing_service import _llm, MODELO
+
+    datos = brechas_estudiante(db, course_id, rut, umbral_brecha=umbral_brecha, origen=origen)
+    est = datos["estudiante"]
+    brechas = sorted(datos["brechas"], key=lambda b: (b.get("logro_pct") if b.get("logro_pct") is not None else 0))
+    fortalezas = _fortalezas(datos["por_ra"])
+    nombre_pila = (est.get("nombre") or "").split(",")[-1].strip() or "estudiante"
+
+    def _brecha_linea(b):
+        pt = b.get("por_tipo") or {}
+        det = ("; por tipo: " + ", ".join(f"{k} {v}%" for k, v in pt.items())) if pt else ""
+        return f'- {b["code"]} · "{b.get("texto", "")}" — logro {b.get("logro_pct")}%{det}'
+
+    def _fort_linea(r):
+        return f'- {r["code"]} · "{r.get("texto", "")}" — logro {r.get("logro_pct")}%'
+
+    sistema = (
+        "Eres un docente que escribe un informe formativo PERSONALIZADO para UN estudiante, en "
+        "español de Chile, en tono cercano, empático y RESPETUOSO, sin paternalismo. El objetivo "
+        "no es la nota sino el aprendizaje: reconoce lo logrado y acompaña en lo que falta. "
+        "Estructura en Markdown con estos subtítulos en negrita: "
+        "**Lo que has logrado** (nombra los RA dominados citando su % real); "
+        "**Brechas por trabajar** (por cada RA con brecha: constata el vacío con empatía y explica "
+        "POR QUÉ ese resultado de aprendizaje importa para lo que viene); "
+        "**Escenarios estratégicos de aprendizaje** (por cada brecha, propón UN escenario de "
+        "aprendizaje concreto y SITUADO —un caso, un proyecto breve, una simulación, un set de "
+        "práctica con progresión— que ayude a cerrar esa brecha específica, describiendo qué haría "
+        "el estudiante, con qué y cómo sabría que avanzó); "
+        "**Un paso para esta semana** (una sola acción pequeña y realista para empezar). "
+        "Reglas estrictas: usa SOLO los datos entregados; NO inventes notas, porcentajes, RA ni "
+        "contenidos que no estén; no prometas resultados; 250-400 palabras; háblale de tú."
+    )
+    usuario = (
+        f"ESTUDIANTE: {est.get('nombre', '(seudónimo)')} (dirígete a él/ella como «{nombre_pila}»)\n"
+        f"CURSO: {datos['curso'].get('nombre', '')}\n"
+        f"Evaluaciones rendidas: {datos['resumen']['n_pruebas']}. "
+        f"RA del programa: {datos['resumen']['n_ra_programa']}; evaluados: {datos['resumen']['n_ra_evaluados']}.\n"
+        "RA LOGRADOS:\n" + ("\n".join(_fort_linea(r) for r in fortalezas) or "- (ninguno destacado aún)") + "\n"
+        "RA CON BRECHA (ordenados del más urgente):\n"
+        + ("\n".join(_brecha_linea(b) for b in brechas) or "- (sin brechas marcadas)") + "\n"
+    )
+    texto = _llm(sistema, usuario, max_tokens=1400)
+    motor = "IA (" + MODELO + ")" if texto else "plantilla determinista"
+    if not texto:
+        texto = _plantilla_informe(nombre_pila, datos, fortalezas, brechas)
+
+    return {
+        "estudiante": est,
+        "curso": datos["curso"],
+        "informe": texto,
+        "motor": motor,
+        "borrador": True,   # compuerta docente: revisar y ajustar antes de compartir
+        "datos": datos,     # anclaje: los hechos reales que sustentan el texto
+        "gobernanza": "Borrador formativo anclado a los datos reales del estudiante. Revísalo y "
+                      "ajústalo antes de compartir (compuerta docente). No altera la nota (G1).",
+    }
+
+
+def _plantilla_informe(nombre, datos, fortalezas, brechas) -> str:
+    p = [f"**Lo que has logrado.** {nombre}, "]
+    if fortalezas:
+        p.append("has demostrado dominio en: "
+                 + ", ".join(f'{r["code"]} ({r.get("logro_pct")}%)' for r in fortalezas[:5]) + ". "
+                 "Es una base sólida sobre la que seguir construyendo.")
+    else:
+        p.append("aún no hay un RA plenamente consolidado, y eso es completamente trabajable: "
+                 "lo importante es dónde poner el foco ahora.")
+    if brechas:
+        p.append("\n\n**Brechas por trabajar.** Conviene reforzar:")
+        for b in brechas[:6]:
+            p.append(f'\n- **{b["code"]}** — «{b.get("texto", "")}» (logro {b.get("logro_pct")}%). '
+                     "Este resultado de aprendizaje sostiene los contenidos que vienen, por eso "
+                     "vale la pena afianzarlo ahora.")
+        p.append("\n\n**Escenarios estratégicos de aprendizaje.** Para cada brecha:")
+        for b in brechas[:6]:
+            p.append(f'\n- **{b["code"]}**: diseña un escenario situado donde tengas que aplicar '
+                     f'«{b.get("texto", "")}» en un caso o problema real del curso; resuélvelo por '
+                     "pasos, contrasta tu solución con la pauta y repite con una variante hasta "
+                     "resolverla con seguridad.")
+        p.append("\n\n**Un paso para esta semana.** Elige la primera brecha de la lista y dedícale "
+                 "una sesión corta de práctica enfocada; revisa exactamente dónde se produjo el error.")
+    else:
+        p.append("\n\n**Brechas por trabajar.** No se detectaron brechas marcadas: mantén el ritmo "
+                 "y profundiza en lo que más te interese del curso.")
+    return "".join(p)

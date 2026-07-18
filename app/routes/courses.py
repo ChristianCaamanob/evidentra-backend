@@ -120,6 +120,19 @@ def brechas_estudiante(course_id: UUID, rut: str, umbral: float = 60.0,
                                             origen=(origen or None))
 
 
+@router.get("/{course_id}/estudiante/{rut}/informe", dependencies=[Depends(req_profesor)])
+def informe_estudiante(course_id: UUID, rut: str, umbral: float = 60.0,
+                       origen: str | None = None, db: Session = Depends(get_db)):
+    """P3 · Informe personalizado, empático y propositivo, del estudiante: reconoce logros,
+    constata brechas por RA y propone escenarios estratégicos de aprendizaje (BORRADOR con
+    compuerta docente; IA anclada a datos reales o plantilla determinista sin clave)."""
+    if origen not in (None, "", "omr", "en_vivo"):
+        raise HTTPException(status_code=422, detail="origen inválido (omr | en_vivo | omitir).")
+    from app.services import ficha_service
+    return ficha_service.informe_personalizado(db, course_id, rut, umbral_brecha=umbral,
+                                               origen=(origen or None))
+
+
 class StudentIn(BaseModel):
     rut: str
     apellido_paterno: str

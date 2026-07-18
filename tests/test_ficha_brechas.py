@@ -103,6 +103,21 @@ def test_brechas_filtra_por_origen(engine):
     assert vivo["RA2"]["logro_pct"] == 100.0
 
 
+def test_informe_personalizado_plantilla(engine, monkeypatch):
+    """Sin clave IA, el informe cae a plantilla determinista: constata brechas reales y propone
+    escenarios de aprendizaje, anclado a los datos (línea roja: no inventa RA)."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    cid = uuid.UUID(_sembrar(engine))
+    with Session(engine) as s:
+        res = ficha_service.informe_personalizado(s, cid, "1-9")
+    assert res["motor"] == "plantilla determinista" and res["borrador"] is True
+    txt = res["informe"]
+    assert "Escenarios estratégicos de aprendizaje" in txt
+    assert "RA2" in txt and "Integra funciones" in txt        # la brecha real, con su texto literal
+    assert "RA9" not in txt                                    # no inventa RA inexistentes
+    assert res["datos"]["resumen"]["n_brechas"] == 1          # anclaje: los hechos van adjuntos
+
+
 def test_ra_sin_evaluar_se_reporta(engine):
     """Un RA del programa sin ítems asociados aparece como 'sin evaluar' (cobertura honesta)."""
     cid = _sembrar(engine)
