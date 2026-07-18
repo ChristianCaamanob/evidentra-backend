@@ -615,10 +615,134 @@ def _interp_kr20(v):
             else "cuestionable" if v >= 0.6 else "baja")
 
 
-def informe_payload(db, codigo: str, formato: str) -> dict:
-    """Arma el payload para exportador_service según el formato (docx/pdf usan secciones+tablas;
-    xlsx usa hojas)."""
+def _dist_notas(estudiantes, escala):
+    """Histograma de notas por rango (barras de bloques, robusto en PDF/DOCX/XLSX). Devuelve
+    filas [rango, n, barra] + una frase con el rango modal."""
+    import math
+    notas = [e["nota"] for e in estudiantes if e.get("nota") is not None]
+    if not notas:
+        return {"rows": [], "texto": "Sin notas para graficar.", "n": 0}
+    if escala == "chile_1_7":
+        bandas = [("Reprobado (1,0–3,9)", 1.0, 3.95), ("Suficiente (4,0–4,9)", 3.95, 4.95),
+                  ("Bueno (5,0–5,9)", 4.95, 5.95), ("Muy bueno (6,0–7,0)", 5.95, 7.01)]
+    else:
+        lo, hi = min(notas), max(notas)
+        paso = max(1.0, (hi - lo) / 5 or 1.0)
+        bandas, x = [], math.floor(lo)
+        while x < hi + 0.01:
+            bandas.append((f"{x:.0f}–{x + paso:.0f}", float(x), x + paso)); x += paso
+    conteo = [(lbl, sum(1 for v in notas if a <= v < b)) for lbl, a, b in bandas]
+    mx = max((n for _, n in conteo), default=0) or 1
+    rows = [[lbl, n, "█" * round(n / mx * 18)] for lbl, n in conteo]
+    modal = max(conteo, key=lambda x: x[1])
+    return {"rows": rows, "texto": f"La mayoría se ubicó en «{modal[0]}» ({modal[1]} de {len(notas)}).", "n": len(notas)}
+
+
+def _intg_str(pi):
+    """Resumen breve de integridad de un alumno para la tabla del docente."""
+    if not pi:
+        return "—"
+    niv = {"revisar": "Revisar", "aviso": "Aviso", "ok": "OK"}.get(pi["nivel"], pi["nivel"])
+    partes = []
+    if pi.get("salidas_foco"):
+        partes.append(f"{pi['salidas_foco']} salida(s)/{pi['oculto_s']}s")
+    if pi.get("respondidas_tras_ausencia"):
+        partes.append("respondió tras ausentarse")
+    if pi.get("posibles_capturas"):
+        partes.append("posible captura")
+    if pi.get("pegados"):
+        partes.append("pegó texto")
+    if pi.get("otra_ventana_encima"):
+        partes.append("otra ventana")
+    if pi.get("desconexiones"):
+        partes.append(f"conexión {pi['desconexiones']}× (involunt.)")
+    return niv + (": " + ", ".join(partes) if partes else "")
+
+
+def informe_payload(db, codigo: str, formato: str, perfil: str = "docente") -> dict:
+    """Arma el payload para exportador_service. Dos perfiles:
+      - 'docente': bajada pedagógica (interpretación en lenguaje claro), distribución de notas por
+        rango, tabla de estudiantes con puntaje/nota + resumen de integridad por alumno.
+      - 'investigador': el pool psicométrico completo (TCT por ítem, discriminación, KR-20, RA,
+        tabla de integridad detallada) + nota metodológica.
+    """
     inf = informe_en_vivo(db, codigo)
+    perfil = "investigador" if str(perfil).lower().startswith("invest") else "docente"
+
+    # Integridad por alumno (para fusionar con el resultado y para la tabla detallada).
+    _niv = {"revisar": "Revisar", "aviso": "Aviso", "ok": "OK"}
+    intg_por_alias, _intg = {}, {"participantes": []}
+    try:
+        from app.services import integridad_service
+        _intg = integridad_service.resumen_participantes(db, _sesion(db, codigo))
+        for pi in _intg["participantes"]:
+            intg_por_alias[pi["alias"]] = pi
+    except Exception:
+        pass
+
+    nota_intg = (
+        "Evidencia OBJETIVA de actividad de ventana durante la evaluación (Page Visibility, foco, "
+        "pantalla completa, copiar/pegar, menú contextual), con hora de servidor e inmutable. "
+        "IMPORTANTE: se distingue SALIR de la prueba (cambiar de pestaña/app: voluntario) de los "
+        "PROBLEMAS DE CONEXIÓN (caídas de wifi/datos: involuntario, no penaliza). NO constituye por "
+        "sí sola prueba de copia; su interpretación es humana y no invalida la evaluación de forma "
+        "automática (proporcionalidad y debido proceso; Ley 21.719).")
+
+    # ══════════════ PERFIL DOCENTE ══════════════
+    if perfil == "docente":
+        dist = _dist_notas(inf["estudiantes"], inf["escala"])
+        n = inf["n_participantes"] or 0
+        aprob_pct = round(inf["aprobados"] / n * 100) if n else 0
+        dificiles = [it for it in inf["items"] if it["dificultad_p"] <= 0.5]
+        faciles = [it for it in inf["items"] if it["dificultad_p"] >= 0.85]
+        ra_debil = [r for r in inf["por_ra"] if r["logro_pct"] < 60]
+        kr = inf["kr20"]
+        interp = (
+            f"En esta evaluación en vivo respondieron **{n}** estudiante(s). La nota promedio del "
+            f"curso fue **{inf['nota_media']}** (escala {inf['escala']}, aprobación desde {inf['umbral']}% "
+            f"de logro), y **aprobó el {aprob_pct}%** ({inf['aprobados']} de {n}). {dist['texto']}\n"
+            + (f"Las preguntas que más costaron fueron "
+               + ", ".join(f"P{it['n']} ({round(it['dificultad_p'] * 100)}% de acierto)" for it in dificiles[:4])
+               + ". Conviene **reforzar** esos contenidos" +
+               (" — en especial los resultados de aprendizaje: " +
+                ", ".join(f"{r['ra']} ({r['logro_pct']}%)" for r in ra_debil[:3]) if ra_debil else "")
+               + ".\n" if dificiles else "El curso resolvió bien la mayoría de las preguntas.\n")
+            + (f"Dominaron con soltura " + ", ".join(f"P{it['n']}" for it in faciles[:4]) + ".\n" if faciles else "")
+            + (f"La prueba mostró una **consistencia {_interp_kr20(kr)}** (KR-20 = {kr}): "
+               "sus preguntas miden de forma coherente el mismo aprendizaje.\n" if kr is not None else "")
+            + "**Sugerencia pedagógica:** retomar los contenidos débiles con un repaso breve o una "
+            "actividad focalizada antes de avanzar; reservar las preguntas dominadas para consolidación.")
+
+        t_dist = {"titulo": "Distribución de notas por rango",
+                  "headers": ["Rango", "N° estudiantes", "Gráfico"], "rows": dist["rows"]}
+        t_ra_d = {"titulo": "Logro por Resultado de Aprendizaje (RA)",
+                  "headers": ["RA", "Logro de la clase %", "Nivel"],
+                  "rows": [[r["ra"], r["logro_pct"], r["nivel"]] for r in inf["por_ra"]]}
+        t_est_d = {"titulo": "Estudiantes · puntaje, nota e integridad",
+                   "headers": ["Estudiante", "Aciertos", "% logro", "Nota", "Aprobado", "Integridad"],
+                   "rows": [[e["alias"], f"{e['aciertos']}/{e['n_items']}", e["pct"], e["nota"],
+                             "Sí" if e["aprobado"] else "No", _intg_str(intg_por_alias.get(e["alias"]))]
+                            for e in inf["estudiantes"]]}
+        t_ref = {"titulo": "Preguntas a reforzar",
+                 "headers": ["Pregunta", "% de acierto", "RA", "Correcta"],
+                 "rows": [["P" + str(it["n"]), round(it["dificultad_p"] * 100), it["ra"] or "—", it["correcta"]]
+                          for it in dificiles[:8]]}
+
+        if formato == "xlsx":
+            return {"hojas": [
+                {"nombre": "Interpretación", "headers": ["Informe pedagógico"],
+                 "rows": [[interp.replace("**", "")]]},
+                {"nombre": "Distribución notas", "headers": t_dist["headers"], "rows": t_dist["rows"]},
+                {"nombre": "Estudiantes", "headers": t_est_d["headers"], "rows": t_est_d["rows"]},
+                {"nombre": "Por RA", "headers": t_ra_d["headers"], "rows": t_ra_d["rows"]},
+                {"nombre": "A reforzar", "headers": t_ref["headers"], "rows": t_ref["rows"]}]}
+        return {"titulo": f"Informe pedagógico · {inf['evaluacion']} · Sala {inf['codigo']}",
+                "secciones": [
+                    {"heading": "Lectura pedagógica de los resultados", "nivel": 1, "texto": interp},
+                    {"heading": "Integridad · nota de uso", "nivel": 2, "texto": nota_intg}],
+                "tablas": [t_dist, t_est_d, t_ra_d, t_ref]}
+
+    # ══════════════ PERFIL INVESTIGADOR (pool completo) ══════════════
     titulo = f"Informe de resultados · {inf['evaluacion']} · Sala {inf['codigo']}"
     t_items = {"titulo": "Análisis de ítems (TCT)",
                "headers": ["N°", "Correcta", "Dificultad p", "Discriminación", "RA", "Bloom", "Alerta"],

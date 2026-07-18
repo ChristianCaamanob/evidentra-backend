@@ -90,12 +90,13 @@ def informe(codigo: str, db: Session = Depends(get_db)):
 
 
 @router.post("/en-vivo/{codigo}/informe/{formato}", dependencies=[Depends(req_profesor)])
-def informe_export(codigo: str, formato: str, db: Session = Depends(get_db)):
-    """Descarga el informe de la sala en Word/PDF/Excel (psicométrico + por RA)."""
+def informe_export(codigo: str, formato: str, perfil: str = "docente", db: Session = Depends(get_db)):
+    """Descarga el informe de la sala. perfil=docente (bajada pedagógica + distribución de notas +
+    integridad por alumno) | investigador (pool psicométrico completo)."""
     if formato not in ("docx", "pdf", "xlsx"):
         from app.core.errors import unprocessable
         raise unprocessable("Formato no soportado (docx | pdf | xlsx).")
-    payload = ev.informe_payload(db, codigo, formato)
+    payload = ev.informe_payload(db, codigo, formato, perfil=perfil)
     data, media = exportador_service.exportar(formato, payload)
     fn = re.sub(r"[^A-Za-z0-9_\-]", "_", f"informe_en_vivo_{codigo}")[:80]
     return Response(content=data, media_type=media,
