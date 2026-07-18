@@ -255,7 +255,7 @@ def _persistir_scans(db, s: SesionEnVivo) -> int:
         ident = (rut or (_SCAN_PREFIX + s.codigo + ":" + str(p.id)[:8]))[:100]
         db.add(Scan(
             assessment_id=aid,
-            student_identifier=ident,
+            student_identifier=ident, origen="en_vivo",
             status="en_vivo", detected_version=s.version, requires_review=False,
             raw_ocr_payload_json={"answers": answers, "origen": "en_vivo",
                                   "sesion": s.codigo, "alias": p.alias,

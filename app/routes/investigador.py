@@ -53,36 +53,63 @@ def _meta(datos: dict, tecnica: str | None = None) -> dict:
     m = {"n_personas": datos["n_personas"], "n_items": datos["n_items"],
          "omitidas_pct": datos["omitidas_pct"],
          "gobernanza": "Analisis agregado y seudonimizado (G2); no altera notas (G1)."}
+    # Composición de la evidencia (transparencia: la deduplicación por alumno no es silenciosa).
+    if "n_omr" in datos:
+        m["composicion"] = {
+            "origen": datos.get("origen", "todos"),
+            "escaneos_omr": datos.get("n_omr", 0),
+            "escaneos_en_vivo": datos.get("n_en_vivo", 0),
+            "duplicados_colapsados": datos.get("duplicados_colapsados", 0),
+        }
     if tecnica:
         m["poder_muestral"] = poder_muestral_service.evaluar(
             tecnica, datos["n_personas"], datos["n_items"])
     return m
 
 
+def _origen_ok(origen):
+    """Valida el filtro de origen de la evidencia. None/''/'todos' = ambos (deduplicado)."""
+    if origen in (None, "", "todos"):
+        return None
+    if origen not in matriz_service.ORIGENES:
+        from app.core.errors import unprocessable
+        raise unprocessable("origen inválido (usa 'omr' | 'en_vivo', u omite para ambos).")
+    return origen
+
+
+def _ck(clave: str, origen):
+    """Clave de caché que separa por origen (evita servir un origen por otro)."""
+    return clave + (":" + origen if origen else "")
+
+
 @router.get("/{assessment_id}/psicometria/rasch")
-def psicometria_rasch(assessment_id: UUID, db: Session = Depends(get_db)):
-    """I1 - Modelo de Rasch (dificultad, habilidad, ajuste, informacion, fiabilidad)."""
+def psicometria_rasch(assessment_id: UUID, origen: str | None = None, db: Session = Depends(get_db)):
+    """I1 - Modelo de Rasch (dificultad, habilidad, ajuste, informacion, fiabilidad).
+    origen: omr | en_vivo | (omitir = ambos, deduplicado por alumno)."""
+    org = _origen_ok(origen)
     def _c():
-        datos = matriz_service.cargar_matriz_respuestas(db, assessment_id)
+        datos = matriz_service.cargar_matriz_respuestas(db, assessment_id, origen=org)
         rep = irt_service.estimar_rasch(datos["X"])
         for it, num in zip(rep["items"], datos["items"]):
             it["pregunta"] = num                       # numero real de pregunta (no indice)
         rep["_meta"] = _meta(datos, "rasch")
         return rep
     try:
-        return psico_cache.memo(db, assessment_id, "rasch", _c)
+        return psico_cache.memo(db, assessment_id, _ck("rasch", org), _c)
     except Exception:
         logger.error(f"Error en psicometria_rasch {assessment_id}: {traceback.format_exc()}")
         raise
 
 
 @router.get("/{assessment_id}/estadistica/clasica")
-def estadistica_clasica(assessment_id: UUID, db: Session = Depends(get_db)):
+def estadistica_clasica(assessment_id: UUID, origen: str | None = None, db: Session = Depends(get_db)):
     """Fases 1-2 del pipeline: depuracion de datos (descriptivos, supuestos, perdidos) y
     analisis de items en Teoria Clasica (dificultad, discriminacion, fiabilidad: alfa, omega,
-    SEM, Guttman). Numera los items con su pregunta real."""
+    SEM, Guttman). Numera los items con su pregunta real.
+    origen: omr | en_vivo | (omitir = ambos, deduplicado por alumno)."""
+    org = _origen_ok(origen)
     def _c():
-        datos = matriz_service.cargar_matriz_respuestas(db, assessment_id)
+        datos = matriz_service.cargar_matriz_respuestas(db, assessment_id, origen=org)
         rep = estadistica_service.reporte_completo(datos["X"])
         nums = datos["items"]
         for bloque in (rep["descriptivos"]["items"], rep["items_tct"]["items"],
@@ -92,20 +119,22 @@ def estadistica_clasica(assessment_id: UUID, db: Session = Depends(get_db)):
         rep["_meta"] = _meta(datos, "clasica")
         return rep
     try:
-        return psico_cache.memo(db, assessment_id, "clasica", _c)
+        return psico_cache.memo(db, assessment_id, _ck("clasica", org), _c)
     except Exception:
         logger.error(f"Error en estadistica_clasica {assessment_id}: {traceback.format_exc()}")
         raise
 
 
 @router.get("/{assessment_id}/cualitativo")
-def analisis_cualitativo(assessment_id: UUID, db: Session = Depends(get_db),
+def analisis_cualitativo(assessment_id: UUID, origen: str | None = None, db: Session = Depends(get_db),
                          _: object = _Dep(req_investigador)):
     """I4 - Análisis cualitativo: mapa de concepciones erróneas (puente cuanti->cuali).
     Cada distractor con prevalencia >= umbral revela una concepción errónea específica,
-    con severidad y RA afectado. Trabaja sobre respuestas seudonimizadas (G2)."""
+    con severidad y RA afectado. Trabaja sobre respuestas seudonimizadas (G2).
+    origen: omr | en_vivo | (omitir = ambos, deduplicado por alumno)."""
+    org = _origen_ok(origen)
     def _c():
-        datos = matriz_service.cargar_respuestas_letras(db, assessment_id)
+        datos = matriz_service.cargar_respuestas_letras(db, assessment_id, origen=org)
         resultado = curso_stats_service.analizar_evaluacion(
             datos["respuestas_alumnos"], datos["pauta"], te_tags=datos["te_tags"])
         items_ctt = resultado.get("items", [])
@@ -117,7 +146,7 @@ def analisis_cualitativo(assessment_id: UUID, db: Session = Depends(get_db),
                 "_meta": {"n_personas": n_personas,
                           "n_items": resultado["instrumento"]["n_items"]}}
     try:
-        return psico_cache.memo(db, assessment_id, "cualitativo", _c)
+        return psico_cache.memo(db, assessment_id, _ck("cualitativo", org), _c)
     except Exception:
         logger.error(f"Error en analisis_cualitativo {assessment_id}: {traceback.format_exc()}")
         raise
@@ -345,15 +374,17 @@ def corpus(q: str = Query(..., min_length=2),
 
 
 @router.get("/{assessment_id}/psicometria/dimensionalidad")
-def psicometria_dimensionalidad(assessment_id: UUID, db: Session = Depends(get_db)):
-    """I7 - Dimensionalidad (KMO, Bartlett, analisis paralelo, EFA) + fiabilidad ampliada."""
+def psicometria_dimensionalidad(assessment_id: UUID, origen: str | None = None, db: Session = Depends(get_db)):
+    """I7 - Dimensionalidad (KMO, Bartlett, analisis paralelo, EFA) + fiabilidad ampliada.
+    origen: omr | en_vivo | (omitir = ambos, deduplicado por alumno)."""
+    org = _origen_ok(origen)
     def _c():
-        datos = matriz_service.cargar_matriz_respuestas(db, assessment_id)
+        datos = matriz_service.cargar_matriz_respuestas(db, assessment_id, origen=org)
         rep = dimensionalidad_service.analizar_dimensionalidad(datos["X"], dicotomico=True)
         rep["_meta"] = _meta(datos, "dimensionalidad")
         return rep
     try:
-        return psico_cache.memo(db, assessment_id, "dimensionalidad", _c)
+        return psico_cache.memo(db, assessment_id, _ck("dimensionalidad", org), _c)
     except Exception:
         logger.error(f"Error en psicometria_dimensionalidad {assessment_id}: {traceback.format_exc()}")
         raise
@@ -361,11 +392,13 @@ def psicometria_dimensionalidad(assessment_id: UUID, db: Session = Depends(get_d
 
 @router.get("/{assessment_id}/psicometria/dina")
 def psicometria_dina(assessment_id: UUID, base: str = Query("ra", pattern="^(ra|bloom)$"),
-                     db: Session = Depends(get_db)):
+                     origen: str | None = None, db: Session = Depends(get_db)):
     """I9 - Diagnostico cognitivo (DINA). La Q-matrix se deriva del etiquetado C3: cada
-    item carga en su RA (base=ra) o nivel Bloom (base=bloom)."""
+    item carga en su RA (base=ra) o nivel Bloom (base=bloom).
+    origen: omr | en_vivo | (omitir = ambos, deduplicado por alumno)."""
+    org = _origen_ok(origen)
     def _c():
-        d = matriz_service.cargar_dina(db, assessment_id, base=base)
+        d = matriz_service.cargar_dina(db, assessment_id, base=base, origen=org)
         rep = dina_service.estimar_dina(d["X"], d["Q"], atributos=d["atributos"])
         for it, num in zip(rep["items"], d["items"]):
             it["pregunta"] = num                       # numero real de pregunta
@@ -377,7 +410,7 @@ def psicometria_dina(assessment_id: UUID, base: str = Query("ra", pattern="^(ra|
                                       "remediacion, no altera notas (G1). Q-matrix derivada de C3."}
         return rep
     try:
-        return psico_cache.memo(db, assessment_id, "dina:" + base, _c)
+        return psico_cache.memo(db, assessment_id, _ck("dina:" + base, org), _c)
     except Exception:
         logger.error(f"Error en psicometria_dina {assessment_id}: {traceback.format_exc()}")
         raise

@@ -181,3 +181,79 @@ def test_datos_insuficientes_da_conflict():
     with Session(engine) as s:
         with pytest.raises(Exception):
             matriz_service.cargar_matriz_respuestas(s, uuid.UUID(aid))
+
+
+# ── P2 · deduplicación por alumno real + filtro de origen ─────────────────────────────
+def _sembrar_origenes(engine):
+    """Curso con nómina real; escaneos de ambos orígenes, con un alumno duplicado (OMR+vivo)
+    y dos escaneos 'desconocido' que NO deben colapsarse."""
+    from app.models.student import Student
+    with Session(engine) as s:
+        course = Course(name="Fisio", code="DFIS0010",
+                        grading_scale="chile_1_7", passing_threshold=60.0)
+        s.add(course); s.commit(); s.refresh(course)
+        a = Assessment(course_id=course.id, name="Control 1",
+                       grading_scale="chile_1_7", passing_threshold=60.0)
+        s.add(a); s.commit(); s.refresh(a)
+        ak = AnswerKey(assessment_id=a.id, status="valid", is_valid=True)
+        s.add(ak); s.commit(); s.refresh(ak)
+        for q in range(1, 5):
+            s.add(AnswerKeyItem(answer_key_id=ak.id, question_number=q, version="A",
+                                correct_answer="A", weight=1.0,
+                                learning_outcome_id=f"RA{q}", bloom_level="aplicar"))
+        s.add(Student(course_id=course.id, rut="11.111.111-1", nombres="Ana", apellido_paterno="Soto"))
+        s.add(Student(course_id=course.id, rut="22.222.222-2", nombres="Beto", apellido_paterno="Lira"))
+        s.commit()
+        # Ana: OMR completo (4 resp, origen NULL = histórico → omr) + en vivo parcial (2 resp).
+        # Debe sobrevivir SOLO el OMR (más completo).
+        s.add(Scan(assessment_id=a.id, student_identifier="11.111.111-1", status="scored",
+                   detected_version="A", requires_review=False, origen=None,
+                   raw_ocr_payload_json={"answers": ["A", "A", "B", "A"]}))
+        s.add(Scan(assessment_id=a.id, student_identifier="11.111.111-1", status="en_vivo",
+                   detected_version="A", requires_review=False, origen="en_vivo",
+                   raw_ocr_payload_json={"answers": ["A", "B", None, None]}))
+        # Beto: solo en vivo.
+        s.add(Scan(assessment_id=a.id, student_identifier="22.222.222-2", status="en_vivo",
+                   detected_version="A", requires_review=False, origen="en_vivo",
+                   raw_ocr_payload_json={"answers": ["A", "A", "A", "B"]}))
+        # Dos 'desconocido' OMR (origen NULL): personas distintas, NO se colapsan.
+        for _ in range(2):
+            s.add(Scan(assessment_id=a.id, student_identifier="desconocido", status="scored",
+                       detected_version="A", requires_review=False, origen=None,
+                       raw_ocr_payload_json={"answers": ["B", "B", "B", "B"]}))
+        s.commit()
+        return str(a.id)
+
+
+def test_p2_dedup_por_alumno_real_preserva_anonimos():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
+                           poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    aid = uuid.UUID(_sembrar_origenes(engine))
+    with Session(engine) as s:
+        sel = matriz_service.seleccionar_scans(s, aid)      # combinado, deduplicado
+        idents = [sc.student_identifier for sc in sel["scans"]]
+        assert len(sel["scans"]) == 4                       # Ana(1) + Beto(1) + 2 desconocidos
+        assert idents.count("11.111.111-1") == 1            # alumno real colapsado
+        assert idents.count("desconocido") == 2             # anónimos preservados
+        assert sel["duplicados_colapsados"] == 1
+        # de Ana sobrevive el OMR (4 respuestas), no el vivo (2); NULL cuenta como omr
+        ana = next(sc for sc in sel["scans"] if sc.student_identifier == "11.111.111-1")
+        assert matriz_service._origen_de(ana) == "omr"
+        assert sel["n_omr"] == 3 and sel["n_en_vivo"] == 2  # composición antes de dedup
+
+
+def test_p2_filtro_origen():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
+                           poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    aid = uuid.UUID(_sembrar_origenes(engine))
+    with Session(engine) as s:
+        solo_vivo = matriz_service.seleccionar_scans(s, aid, origen="en_vivo")
+        assert len(solo_vivo["scans"]) == 2                 # Ana-vivo + Beto-vivo
+        assert all(matriz_service._origen_de(sc) == "en_vivo" for sc in solo_vivo["scans"])
+        solo_omr = matriz_service.seleccionar_scans(s, aid, origen="omr")
+        assert len(solo_omr["scans"]) == 3                  # Ana-OMR + 2 desconocidos
+        # la matriz combinada refleja la deduplicación
+        datos = matriz_service.cargar_matriz_respuestas(s, aid, min_personas=3, min_items=3)
+        assert datos["n_personas"] == 4 and datos["duplicados_colapsados"] == 1

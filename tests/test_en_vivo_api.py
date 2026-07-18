@@ -390,7 +390,8 @@ def test_informe_psicometrico_y_por_ra(entorno):
     with Session(entorno["engine"]) as db:
         pl = ev.informe_payload(db, cod, "docx")
     assert pl["titulo"] and pl["secciones"] and pl["tablas"]
-    assert any(t["titulo"].startswith("Resultados por Resultado") for t in pl["tablas"])
+    # Hay tabla por RA (el perfil docente la titula "Logro por…"; el investigador "Resultados por…").
+    assert any("Resultado de Aprendizaje" in t["titulo"] for t in pl["tablas"])
 
 
 def test_no_se_puede_iniciar_sin_pauta_valida(entorno):

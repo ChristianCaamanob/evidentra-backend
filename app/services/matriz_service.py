@@ -30,7 +30,78 @@ def _pseudo(valor) -> str:
     return "e:" + hashlib.sha256(str(valor).encode("utf-8")).hexdigest()[:10]
 
 
-def _matriz_cruda(db, assessment_id) -> dict:
+ORIGENES = ("omr", "en_vivo")
+
+
+def _origen_de(scan) -> str:
+    """Origen del escaneo. NULL histórico o sin marca = 'omr' (hoja escaneada)."""
+    o = getattr(scan, "origen", None)
+    if o:
+        return str(o)
+    return str((scan.raw_ocr_payload_json or {}).get("origen") or "omr")
+
+
+def _ruts_de_nomina(db, assessment_id) -> set:
+    """RUTs reales del curso de la evaluación. Se deduplica SOLO por estos: un identificador
+    que no sea un RUT de la nómina ('desconocido', anónimos 'envivo:...') no es una persona
+    conocida y no debe colapsarse con otros."""
+    from app.models.assessment import Assessment
+    from app.models.student import Student
+    asm = db.get(Assessment, assessment_id)
+    if asm is None:
+        return set()
+    return {(st.rut or "").strip() for st in
+            db.query(Student).filter(Student.course_id == asm.course_id).all() if st.rut}
+
+
+def _respondidas(scan) -> int:
+    ans = (scan.raw_ocr_payload_json or {}).get("answers") or []
+    return sum(1 for a in ans if a not in (None, ""))
+
+
+def _ts(scan) -> float:
+    try:
+        return scan.created_at.timestamp() if scan.created_at else 0.0
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+def seleccionar_scans(db, assessment_id, origen: str | None = None) -> dict:
+    """Escaneos NO en revisión de la evaluación, filtrados por `origen` (omr|en_vivo|None=ambos)
+    y DEDUPLICADOS por alumno REAL de la nómina: si un mismo estudiante tiene más de un escaneo
+    del mismo assessment (p.ej. OMR + en vivo, o un re-escaneo), se conserva UNO — el más COMPLETO
+    (más respuestas; desempate por más reciente) — para no contarlo dos veces en la psicometría.
+    Los identificadores que no son un RUT de la nómina NO se colapsan (cada uno es persona
+    distinta). Devuelve {scans, n_omr, n_en_vivo, duplicados_colapsados, origen}."""
+    crudos = [s for s in scan_repo.list_by_assessment(db, assessment_id)
+              if not getattr(s, "requires_review", False)]
+    if origen in ORIGENES:
+        crudos = [s for s in crudos if _origen_de(s) == origen]
+    n_omr = sum(1 for s in crudos if _origen_de(s) == "omr")
+    n_vivo = sum(1 for s in crudos if _origen_de(s) == "en_vivo")
+    ruts = _ruts_de_nomina(db, assessment_id)
+    mejor: dict = {}
+    otros: list = []
+    colapsados = 0
+    for s in crudos:
+        sid = (s.student_identifier or "").strip()
+        if sid and sid in ruts:                       # alumno identificado → deduplicable
+            prev = mejor.get(sid)
+            if prev is None:
+                mejor[sid] = s
+            else:
+                colapsados += 1
+                if (_respondidas(s), _ts(s)) > (_respondidas(prev), _ts(prev)):
+                    mejor[sid] = s                    # se queda el más completo / más reciente
+        else:
+            otros.append(s)                           # 'desconocido' / anónimo: no colapsar
+    elegidos = list(mejor.values()) + otros
+    elegidos.sort(key=lambda s: (_ts(s), str(s.id)))  # orden reproducible
+    return {"scans": elegidos, "n_omr": n_omr, "n_en_vivo": n_vivo,
+            "duplicados_colapsados": colapsados, "origen": origen or "todos"}
+
+
+def _matriz_cruda(db, assessment_id, origen: str | None = None) -> dict:
     """
     Armado comun: pauta por version + una fila de correctitud (0/1, NaN si anulada en esa
     version) por cada escaneo NO en revision, conservando el objeto scan (para el vinculo
@@ -52,10 +123,9 @@ def _matriz_cruda(db, assessment_id) -> dict:
     if not items:
         raise conflict("Todos los items estan anulados; no hay que analizar.")
 
+    sel = seleccionar_scans(db, assessment_id, origen)
     filas_scan = []
-    for scan in scan_repo.list_by_assessment(db, assessment_id):
-        if getattr(scan, "requires_review", False):
-            continue
+    for scan in sel["scans"]:
         respuestas = (scan.raw_ocr_payload_json or {}).get("answers", [])
         clave = por_version.get((scan.detected_version or "A").upper())
         if not clave:
@@ -75,14 +145,17 @@ def _matriz_cruda(db, assessment_id) -> dict:
                 fila.append(1.0 if str(elegida).upper() == str(item.correct_answer).upper() else 0.0)
         filas_scan.append({"scan": scan, "fila": fila, "celdas": celdas, "omit": omit})
 
-    return {"items": items, "tags": tags, "filas_scan": filas_scan}
+    return {"items": items, "tags": tags, "filas_scan": filas_scan,
+            "n_omr": sel["n_omr"], "n_en_vivo": sel["n_en_vivo"],
+            "duplicados_colapsados": sel["duplicados_colapsados"], "origen": sel["origen"]}
 
 
-def cargar_respuestas_letras(db, assessment_id) -> dict:
+def cargar_respuestas_letras(db, assessment_id, origen: str | None = None) -> dict:
     """
     Respuestas a NIVEL DE LETRA (seudonimizadas) para el análisis de distractores / cualitativo.
     Devuelve el insumo de curso_stats_service.analizar_evaluacion:
       {respuestas_alumnos: [{student_id, respuestas:{q->letra|None}}], pauta:{q->letra}, te_tags}.
+    Deduplicado por alumno real y filtrable por `origen` (ver seleccionar_scans).
     """
     answer_key = answer_key_repo.get_by_assessment_id(db, assessment_id)
     if not answer_key or not answer_key.is_valid:
@@ -100,9 +173,7 @@ def cargar_respuestas_letras(db, assessment_id) -> dict:
             pauta[q] = str(it.correct_answer).upper()
             tags[q] = {"ra": it.learning_outcome_id, "bloom": it.bloom_level, "unidad": it.unidad}
     respuestas_alumnos = []
-    for scan in scan_repo.list_by_assessment(db, assessment_id):
-        if getattr(scan, "requires_review", False):
-            continue
+    for scan in seleccionar_scans(db, assessment_id, origen)["scans"]:
         resp_raw = (scan.raw_ocr_payload_json or {}).get("answers", [])
         clave = por_version.get((scan.detected_version or "A").upper())
         if not clave:
@@ -119,9 +190,10 @@ def cargar_respuestas_letras(db, assessment_id) -> dict:
 
 
 def cargar_matriz_respuestas(db, assessment_id, min_personas: int = 3,
-                             min_items: int = 3) -> dict:
-    """Matriz 0/1 (persona x item) SEUDONIMIZADA (G2) de una evaluacion, mas metadatos."""
-    cruda = _matriz_cruda(db, assessment_id)
+                             min_items: int = 3, origen: str | None = None) -> dict:
+    """Matriz 0/1 (persona x item) SEUDONIMIZADA (G2) de una evaluacion, mas metadatos.
+    `origen`: None = ambos orígenes deduplicados por alumno; 'omr' | 'en_vivo' = solo ese."""
+    cruda = _matriz_cruda(db, assessment_id, origen)
     items = cruda["items"]
     filas = [fs["fila"] for fs in cruda["filas_scan"]]
     personas = [_pseudo(fs["scan"].id) for fs in cruda["filas_scan"]]
@@ -138,10 +210,13 @@ def cargar_matriz_respuestas(db, assessment_id, min_personas: int = 3,
         "X": X, "personas": personas, "items": items, "tags": cruda["tags"],
         "n_personas": int(X.shape[0]), "n_items": int(X.shape[1]),
         "omitidas_pct": round(n_omit / n_celdas * 100, 1) if n_celdas else 0.0,
+        "n_omr": cruda["n_omr"], "n_en_vivo": cruda["n_en_vivo"],
+        "duplicados_colapsados": cruda["duplicados_colapsados"], "origen": cruda["origen"],
     }
 
 
-def cargar_matriz_con_grupo(db, assessment_id, grupo: str, min_por_grupo: int = 10) -> dict:
+def cargar_matriz_con_grupo(db, assessment_id, grupo: str, min_por_grupo: int = 10,
+                            origen: str | None = None) -> dict:
     """
     Prepara la matriz 0/1 + la variable de grupo para DIF / invarianza (equidad), aplicando
     las tres salvaguardas de la Ley 21.719:
@@ -158,7 +233,7 @@ def cargar_matriz_con_grupo(db, assessment_id, grupo: str, min_por_grupo: int = 
     from app.models.assessment import Assessment
     from app.models.student import Student
 
-    cruda = _matriz_cruda(db, assessment_id)
+    cruda = _matriz_cruda(db, assessment_id, origen)
     assessment = db.get(Assessment, assessment_id)
     por_rut = {}
     if assessment is not None:
@@ -206,13 +281,14 @@ def cargar_matriz_con_grupo(db, assessment_id, grupo: str, min_por_grupo: int = 
     }
 
 
-def cargar_dina(db, assessment_id, base: str = "ra", min_personas: int = 10) -> dict:
+def cargar_dina(db, assessment_id, base: str = "ra", min_personas: int = 10,
+                origen: str | None = None) -> dict:
     """
     Prepara los insumos de DINA (I9) derivando la Q-matrix del etiquetado C3: cada item
     'carga' en su RA (o nivel Bloom). base in {'ra','bloom'}. Requiere que los items esten
     etiquetados (C3) y al menos 2 atributos distintos.
     """
-    datos = cargar_matriz_respuestas(db, assessment_id)
+    datos = cargar_matriz_respuestas(db, assessment_id, origen=origen)
     X, items, tags = datos["X"], datos["items"], datos["tags"]
     etiqueta = {q: (tags.get(q) or {}).get(base) for q in items}
     usados = [i for i, q in enumerate(items) if etiqueta[q]]

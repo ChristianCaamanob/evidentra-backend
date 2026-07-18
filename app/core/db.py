@@ -297,6 +297,9 @@ _COLUMNAS_ADITIVAS = {
     "courses": {
         "tipo": "VARCHAR(20)",
     },
+    "scans": {
+        "origen": "VARCHAR(20)",
+    },
 }
 
 
