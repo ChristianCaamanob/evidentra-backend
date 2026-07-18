@@ -615,6 +615,56 @@ def _interp_kr20(v):
             else "cuestionable" if v >= 0.6 else "baja")
 
 
+def _grafico_dist_png(rows):
+    """Gráfico de barras REAL (PNG con Pillow) de la distribución de notas. Uniforme en PDF/DOCX/XLSX."""
+    import io as _io
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except Exception:
+        return None
+    if not rows:
+        return None
+    W, H = 640, 340
+    ml, mr, mt, mb = 48, 20, 28, 66
+    img = Image.new("RGB", (W, H), "white")
+    d = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.load_default(size=14); fbold = ImageFont.load_default(size=15)
+    except Exception:
+        font = ImageFont.load_default(); fbold = font
+    labels = [str(r[0]) for r in rows]
+    vals = [int(r[1]) for r in rows]
+    mx = max(vals + [1])
+    pw, ph = W - ml - mr, H - mt - mb
+    n = len(vals) or 1
+    gap = pw / n
+    bw = gap * 0.6
+    # ejes
+    d.line([(ml, mt), (ml, mt + ph)], fill="#cbd5e1", width=1)
+    d.line([(ml, mt + ph), (ml + pw, mt + ph)], fill="#cbd5e1", width=1)
+    # marcas del eje Y (0..mx en enteros, hasta 5 divisiones)
+    div = max(1, mx)
+    paso = 1 if div <= 5 else max(1, round(div / 5))
+    v = 0
+    while v <= mx:
+        y = mt + ph - (v / mx) * ph
+        d.line([(ml - 3, y), (ml + pw, y)], fill="#eef2f7", width=1)
+        d.text((ml - 6, y), str(v), fill="#94a3b8", font=font, anchor="rm")
+        v += paso
+    colores = ["#e0555a", "#d19a2e", "#31D6CC", "#34e5a8", "#6F5BD9", "#0F8B8D"]
+    for i, val in enumerate(vals):
+        x0 = ml + gap * i + (gap - bw) / 2
+        bh = (val / mx) * ph
+        y0 = mt + ph - bh
+        d.rectangle([x0, y0, x0 + bw, mt + ph], fill=colores[i % len(colores)])
+        if val:
+            d.text((x0 + bw / 2, y0 - 15), str(val), fill="#334155", font=fbold, anchor="mm")
+        corta = labels[i].split(" (")[0]
+        d.text((x0 + bw / 2, mt + ph + 8), corta, fill="#475569", font=font, anchor="ma")
+    buf = _io.BytesIO(); img.save(buf, "PNG")
+    return buf.getvalue()
+
+
 def _dist_notas(estudiantes, escala):
     """Histograma de notas por rango (barras de bloques, robusto en PDF/DOCX/XLSX). Devuelve
     filas [rango, n, barra] + una frase con el rango modal."""
@@ -713,8 +763,10 @@ def informe_payload(db, codigo: str, formato: str, perfil: str = "docente") -> d
             + "**Sugerencia pedagógica:** retomar los contenidos débiles con un repaso breve o una "
             "actividad focalizada antes de avanzar; reservar las preguntas dominadas para consolidación.")
 
-        t_dist = {"titulo": "Distribución de notas por rango",
-                  "headers": ["Rango", "N° estudiantes", "Gráfico"], "rows": dist["rows"]}
+        dist_png = _grafico_dist_png(dist["rows"])
+        imagenes = ([{"titulo": "Distribución de notas por rango", "png": dist_png}] if dist_png else [])
+        t_dist = {"titulo": "Distribución de notas por rango (tabla)",
+                  "headers": ["Rango", "N° estudiantes"], "rows": [[r[0], r[1]] for r in dist["rows"]]}
         t_ra_d = {"titulo": "Logro por Resultado de Aprendizaje (RA)",
                   "headers": ["RA", "Logro de la clase %", "Nivel"],
                   "rows": [[r["ra"], r["logro_pct"], r["nivel"]] for r in inf["por_ra"]]}
@@ -729,7 +781,7 @@ def informe_payload(db, codigo: str, formato: str, perfil: str = "docente") -> d
                           for it in dificiles[:8]]}
 
         if formato == "xlsx":
-            return {"hojas": [
+            return {"imagenes": imagenes, "hojas": [
                 {"nombre": "Interpretación", "headers": ["Informe pedagógico"],
                  "rows": [[interp.replace("**", "")]]},
                 {"nombre": "Distribución notas", "headers": t_dist["headers"], "rows": t_dist["rows"]},
@@ -740,6 +792,7 @@ def informe_payload(db, codigo: str, formato: str, perfil: str = "docente") -> d
                 "secciones": [
                     {"heading": "Lectura pedagógica de los resultados", "nivel": 1, "texto": interp},
                     {"heading": "Integridad · nota de uso", "nivel": 2, "texto": nota_intg}],
+                "imagenes": imagenes,
                 "tablas": [t_dist, t_est_d, t_ra_d, t_ref]}
 
     # ══════════════ PERFIL INVESTIGADOR (pool completo) ══════════════

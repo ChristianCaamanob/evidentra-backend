@@ -33,9 +33,13 @@ def _split_bold(texto: str):
 
 
 # ───────────────────────────── XLSX (openpyxl)
-def to_xlsx(hojas: list[dict]) -> bytes:
+def to_xlsx(doc) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
+
+    # Acepta el payload completo ({hojas, imagenes}) o una lista de hojas (compatibilidad).
+    hojas = doc.get("hojas") if isinstance(doc, dict) else doc
+    imagenes = doc.get("imagenes") if isinstance(doc, dict) else None
 
     wb = Workbook()
     wb.remove(wb.active)
@@ -57,6 +61,17 @@ def to_xlsx(hojas: list[dict]) -> bytes:
             ws.column_dimensions[col[0].column_letter].width = min(max(largo + 2, 10), 60)
         if headers:
             ws.freeze_panes = "A2"
+    # Gráficos (PNG) en una hoja aparte.
+    for im in (imagenes or []):
+        if not im.get("png"):
+            continue
+        try:
+            from openpyxl.drawing.image import Image as XLImage
+            ws = wb.create_sheet((im.get("titulo") or "Gráfico")[:31])
+            pic = XLImage(io.BytesIO(im["png"]))
+            ws.add_image(pic, "B2")
+        except Exception:
+            pass
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -80,6 +95,16 @@ def to_docx(doc: dict) -> bytes:
                     run = p.add_run(seg)
                     run.bold = bold
                     run.font.size = Pt(11)
+    for im in (doc.get("imagenes") or []):
+        if not im.get("png"):
+            continue
+        if im.get("titulo"):
+            d.add_heading(im["titulo"], level=2)
+        try:
+            from docx.shared import Inches
+            d.add_picture(io.BytesIO(im["png"]), width=Inches(6))
+        except Exception:
+            pass
     for t in (doc.get("tablas") or []):
         if t.get("titulo"):
             d.add_heading(t["titulo"], level=2)
@@ -128,6 +153,18 @@ def to_pdf(doc: dict) -> bytes:
             for parrafo in str(sec["texto"]).split("\n"):
                 if parrafo.strip():
                     story.append(Paragraph(esc(parrafo), body))
+    for im in (doc.get("imagenes") or []):
+        if not im.get("png"):
+            continue
+        if im.get("titulo"):
+            story.append(Paragraph(esc(im["titulo"]), h1))
+        try:
+            from reportlab.platypus import Image as RLImage
+            iw = 15 * cm
+            story.append(Spacer(1, 4))
+            story.append(RLImage(io.BytesIO(im["png"]), width=iw, height=iw * 340.0 / 640.0))
+        except Exception:
+            pass
     for t in (doc.get("tablas") or []):
         if t.get("titulo"):
             story.append(Paragraph(esc(t["titulo"]), h1))
@@ -160,7 +197,7 @@ MEDIA = {
 
 def exportar(formato: str, payload: dict) -> tuple[bytes, str]:
     if formato == "xlsx":
-        return to_xlsx(payload.get("hojas") or []), MEDIA["xlsx"]
+        return to_xlsx(payload), MEDIA["xlsx"]
     if formato == "docx":
         return to_docx(payload), MEDIA["docx"]
     if formato == "pdf":
