@@ -273,6 +273,8 @@ _COLUMNAS_ADITIVAS = {
         "modo_ritmo": "VARCHAR(20) NOT NULL DEFAULT 'docente'",
         "shuffle_preguntas": "BOOLEAN NOT NULL DEFAULT false",
         "shuffle_opciones": "BOOLEAN NOT NULL DEFAULT false",
+        "requiere_seb": "BOOLEAN NOT NULL DEFAULT false",
+        "seb_config_key": "VARCHAR(80)",
     },
     "participantes_vivo": {
         "layout_json": "JSON",

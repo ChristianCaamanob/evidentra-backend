@@ -126,9 +126,21 @@ def crear_sesion(db, assessment_id, version: str = "A", config: dict | None = No
                      version=version.upper(),
                      retro_alumno=bool(cfg.get("retro_alumno")),
                      revelar_correccion=bool(cfg.get("revelar_correccion", True)),
-                     modo_ritmo=modo, shuffle_preguntas=shuffle_p, shuffle_opciones=shuffle_o)
+                     modo_ritmo=modo, shuffle_preguntas=shuffle_p, shuffle_opciones=shuffle_o,
+                     requiere_seb=bool(cfg.get("requiere_seb")))
     db.add(s); db.commit(); db.refresh(s)
     return s
+
+
+def verificar_seb_o_error(db, s, request):
+    """Si la sala EXIGE Safe Exam Browser, valida que la petición venga de SEB; si no, corta."""
+    if not getattr(s, "requiere_seb", False):
+        return
+    from app.services import seb_service
+    v = seb_service.verificar(request.headers, str(request.url), getattr(s, "seb_config_key", None))
+    if not v["seb"]:
+        raise conflict("Esta evaluación exige Safe Exam Browser. Ábrela con SEB usando el archivo "
+                       ".seb que te compartió el docente.")
 
 
 def avanzar(db, codigo: str) -> SesionEnVivo:
@@ -324,7 +336,8 @@ def responder(db, codigo: str, participante_id, token: str,
 def _config_dict(s) -> dict:
     return {"modo_ritmo": s.modo_ritmo, "retro_alumno": s.retro_alumno,
             "revelar_correccion": s.revelar_correccion,
-            "shuffle_preguntas": s.shuffle_preguntas, "shuffle_opciones": s.shuffle_opciones}
+            "shuffle_preguntas": s.shuffle_preguntas, "shuffle_opciones": s.shuffle_opciones,
+            "requiere_seb": bool(getattr(s, "requiere_seb", False))}
 
 
 # ── lecturas (polling) ───────────────────────────────────────────────────────────────

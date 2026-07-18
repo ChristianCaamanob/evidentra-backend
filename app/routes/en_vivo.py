@@ -131,13 +131,15 @@ def banco_importar(assessment_id: UUID, payload: dict, db: Session = Depends(get
 
 # ── participantes (publico) ──────────────────────────────────────────────────────────
 @router.post("/en-vivo/{codigo}/unir")
-def unir(codigo: str, payload: dict, db: Session = Depends(get_db)):
+def unir(codigo: str, payload: dict, request: Request, db: Session = Depends(get_db)):
+    ev.verificar_seb_o_error(db, ev._sesion(db, codigo), request)   # gate SEB si la sala lo exige
     p = ev.unir(db, codigo, payload.get("alias", ""), payload.get("student_id"))
     return {"participante_id": str(p.id), "token": p.token, "alias": p.alias}
 
 
 @router.post("/en-vivo/{codigo}/responder")
-def responder(codigo: str, payload: dict, db: Session = Depends(get_db)):
+def responder(codigo: str, payload: dict, request: Request, db: Session = Depends(get_db)):
+    ev.verificar_seb_o_error(db, ev._sesion(db, codigo), request)
     return ev.responder(db, codigo, payload.get("participante_id"),
                         payload.get("token", ""), respuesta=payload.get("respuesta"),
                         opcion_idx=payload.get("opcion_idx"))
@@ -149,8 +151,27 @@ def estado(codigo: str, db: Session = Depends(get_db)):
 
 
 @router.get("/en-vivo/{codigo}/mi-estado")
-def mi_estado(codigo: str, participante_id: str, token: str, db: Session = Depends(get_db)):
+def mi_estado(codigo: str, participante_id: str, token: str, request: Request, db: Session = Depends(get_db)):
+    ev.verificar_seb_o_error(db, ev._sesion(db, codigo), request)
     return ev.estado_participante(db, codigo, participante_id, token)
+
+
+@router.get("/en-vivo/{codigo}/seb-config", dependencies=[Depends(req_profesor)])
+def seb_config(codigo: str, request: Request, db: Session = Depends(get_db)):
+    """Genera y descarga el archivo .seb (config de Safe Exam Browser) de la sala; guarda la
+    config key para verificar que las peticiones vengan de SEB."""
+    from app.services import seb_service
+    s = ev._sesion(db, codigo)
+    base = settings.public_app_url or request.headers.get("origin") or ""
+    join_url = ev.join_url(s.codigo, base)
+    xml, key = seb_service.generar_config(join_url)
+    s.seb_config_key = key
+    if not s.requiere_seb:
+        s.requiere_seb = True                       # descargar el .seb activa la exigencia
+    db.commit()
+    fn = re.sub(r"[^A-Za-z0-9_\-]", "_", f"evalys_sala_{s.codigo}")[:60]
+    return Response(content=xml, media_type="application/seb",
+                    headers={"Content-Disposition": f'attachment; filename="{fn}.seb"'})
 
 
 @router.get("/en-vivo/{codigo}/mi-resultado")

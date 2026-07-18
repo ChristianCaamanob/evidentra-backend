@@ -52,6 +52,10 @@ class SesionEnVivo(UUIDMixin, Base):
                                             server_default=RITMO_DOCENTE, nullable=False)
     shuffle_preguntas: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     shuffle_opciones: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    # LV9 · Bloqueo real con Safe Exam Browser (alto impacto). requiere_seb: exige entrar desde SEB;
+    # seb_config_key: hash de la config .seb generada (para verificar que la petición viene de SEB).
+    requiere_seb: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    seb_config_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     participantes = relationship("ParticipanteVivo", back_populates="sesion",
