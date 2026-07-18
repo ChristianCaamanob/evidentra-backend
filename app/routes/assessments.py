@@ -272,11 +272,18 @@ def oral_estudiantes(assessment_id: UUID, db: Session = Depends(get_db)):
         gp = matriz_service._pseudo(g.id)
         for integ in g.integrantes:
             grupo_por_est[integ.student_id] = (gp, g.nombre)
+    # Niveles YA guardados, para que la UI rehidrate los pills al reabrir (grupo/estudiante).
+    niveles_por_grupo: dict[str, dict] = {}
+    for g in db.query(Grupo).filter(Grupo.assessment_id == str(assessment_id)).all():
+        niveles_por_grupo[str(g.id)] = por_pseudo.get(matriz_service._pseudo(g.id), {})
+    niveles_por_estudiante: dict[str, dict] = {}
     students = db.query(Student).filter(Student.course_id == a.course_id).all()
     filas = []
     for st in students:
         p = matriz_service._pseudo(st.id)
         sv_ind = por_pseudo.get(p, {})
+        if sv_ind:
+            niveles_por_estudiante[str(st.id)] = sv_ind
         gp_info = grupo_por_est.get(str(st.id))
         sv_grp = por_pseudo.get(gp_info[0], {}) if gp_info else {}
         nombre = (" ".join(x for x in [st.nombres, st.apellido_paterno, st.apellido_materno] if x)).strip() or st.rut
@@ -308,6 +315,8 @@ def oral_estudiantes(assessment_id: UUID, db: Session = Depends(get_db)):
             "criterios": [{"name": c["name"], "weight": c["weight"], "ambito": c["ambito"],
                            "niveles": c["niveles"], "seccion": c["seccion"],
                            "descriptor": c["descriptor"]} for c in criterios],
+            "niveles_por_grupo": niveles_por_grupo,
+            "niveles_por_estudiante": niveles_por_estudiante,
             "estudiantes": filas}
 
 
