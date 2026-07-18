@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 TIPOS_VALIDOS = {
     "page_hidden", "page_visible", "blur", "focus", "fullscreen_enter", "fullscreen_exit",
     "copy", "paste", "cut", "contextmenu", "heartbeat", "join", "sesion_concurrente",
+    "ventana_otra_encima", "window_resize", "posible_captura",
 }
 
 # Umbrales del semáforo (interpretación sugerida, NO veredicto).
@@ -60,21 +61,26 @@ def registrar_eventos(db, s, p, eventos: list) -> dict:
 
 def _resumen_de(eventos: list) -> dict:
     """Agrega la lista de eventos de UN participante → contadores + nivel de semáforo."""
-    salidas = 0            # nº de veces que la prueba quedó oculta
+    salidas = 0            # nº de veces que la prueba quedó oculta (cambió de pestaña/app)
     oculto_ms = 0          # tiempo total oculto (de los page_hidden con duración)
+    oculto_max_ms = 0      # la ausencia más larga
     pegados = 0
     menus = 0
     salio_fs = 0
     concurrentes = 0
-    ultimo_oculto_qn = None
+    otra_ventana = 0       # blur sin ocultar = otra ventana/app encima (p.ej. ChatGPT al lado)
+    reducciones = 0        # ventana reducida (posible pantalla dividida)
+    capturas = 0           # posible captura de pantalla (best-effort, no fiable)
+    preguntas_ausencia = set()   # nº de pregunta activa cuando se ausentó
     for e in eventos:
         t = e.tipo
         if t == "page_hidden":
             salidas += 1
             if e.duration_ms:
                 oculto_ms += e.duration_ms
+                oculto_max_ms = max(oculto_max_ms, e.duration_ms)
             if e.question_number:
-                ultimo_oculto_qn = e.question_number
+                preguntas_ausencia.add(int(e.question_number))
         elif t == "paste":
             pegados += 1
         elif t == "contextmenu":
@@ -83,42 +89,61 @@ def _resumen_de(eventos: list) -> dict:
             salio_fs += 1
         elif t == "sesion_concurrente":
             concurrentes += 1
+        elif t == "ventana_otra_encima":
+            otra_ventana += 1
+        elif t == "window_resize":
+            if (e.meta_json or {}).get("small"):
+                reducciones += 1
+        elif t == "posible_captura":
+            capturas += 1
     # Nivel (evidencia interpretada, no sentencia): ok / aviso / revisar.
     nivel = "ok"
-    if salidas or salio_fs or menus or pegados:
+    if salidas or salio_fs or menus or pegados or otra_ventana or reducciones or capturas:
         nivel = "aviso"
     if (oculto_ms >= OCULTO_REVISAR_MS or salidas >= SALIDAS_REVISAR
-            or pegados > 0 or concurrentes > 0
-            or any(e.tipo == "page_hidden" and (e.duration_ms or 0) >= OCULTO_AVISO_MS for e in eventos)):
+            or pegados > 0 or concurrentes > 0 or capturas > 0
+            or oculto_max_ms >= OCULTO_AVISO_MS):
         nivel = "revisar"
     return {"salidas_foco": salidas, "oculto_ms": oculto_ms,
-            "oculto_s": round(oculto_ms / 1000, 1), "pegados": pegados,
-            "menus_contextual": menus, "salidas_pantalla_completa": salio_fs,
-            "sesiones_concurrentes": concurrentes, "ultima_pregunta_oculta": ultimo_oculto_qn,
+            "oculto_s": round(oculto_ms / 1000, 1), "oculto_max_s": round(oculto_max_ms / 1000, 1),
+            "pegados": pegados, "menus_contextual": menus, "salidas_pantalla_completa": salio_fs,
+            "sesiones_concurrentes": concurrentes, "otra_ventana_encima": otra_ventana,
+            "ventana_reducida": reducciones, "posibles_capturas": capturas,
+            "preguntas_ausencia": sorted(preguntas_ausencia),
+            "ultima_pregunta_oculta": (sorted(preguntas_ausencia)[-1] if preguntas_ausencia else None),
             "nivel": nivel}
 
 
 def resumen_participantes(db, s) -> dict:
     """Panel de supervisión: una fila por participante con contadores y semáforo, ordenado por
     riesgo (revisar → aviso → ok). Sirve para el informe EN VIVO y el FINAL."""
-    from app.models.en_vivo import ParticipanteVivo, EventoIntegridad
+    from app.models.en_vivo import ParticipanteVivo, EventoIntegridad, RespuestaVivo
     parts = db.query(ParticipanteVivo).filter(ParticipanteVivo.sesion_id == s.id).all()
     evs = db.query(EventoIntegridad).filter(EventoIntegridad.sesion_id == s.id).all()
     por_part: dict = {}
     for e in evs:
         por_part.setdefault(e.participante_id, []).append(e)
+    # Respuestas por participante (para correlacionar la ausencia con la pregunta respondida).
+    resp_por_part: dict = {}
+    for rv in db.query(RespuestaVivo).filter(RespuestaVivo.sesion_id == s.id).all():
+        resp_por_part.setdefault(rv.participante_id, {})[int(rv.question_number)] = bool(rv.correcta)
     ahora = _ahora_epoch()
     orden = {"revisar": 0, "aviso": 1, "ok": 2}
     filas = []
     for p in parts:
         r = _resumen_de(por_part.get(p.id, []))
         sin_latido = (ahora - p.ultimo_latido_ts) if p.ultimo_latido_ts else None
+        # Correlación clave: preguntas durante las cuales se ausentó Y respondió (¿acertó al volver?).
+        resp = resp_por_part.get(p.id, {})
+        respondidas_tras_ausencia = [{"pregunta": q, "correcta": resp[q]}
+                                     for q in r["preguntas_ausencia"] if q in resp]
         filas.append({
             "participante_id": str(p.id), "alias": p.alias, "student_id": p.student_id,
             "progreso": p.progreso, "bloqueado": bool(p.bloqueado),
             "bloqueado_motivo": p.bloqueado_motivo,
             "sin_latido_s": sin_latido,
             "conectado": (sin_latido is not None and sin_latido <= 25),
+            "respondidas_tras_ausencia": respondidas_tras_ausencia,
             **r,
         })
     filas.sort(key=lambda f: (orden.get(f["nivel"], 3), -(f["oculto_ms"] or 0)))

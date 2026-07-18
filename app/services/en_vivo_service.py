@@ -638,10 +638,18 @@ def informe_payload(db, codigo: str, formato: str) -> dict:
         from app.services import integridad_service
         _intg = integridad_service.resumen_participantes(db, _sesion(db, codigo))
         t_intg = {"titulo": "Integridad · evidencia de actividad de ventana",
-                  "headers": ["Participante", "Nivel", "Salidas de foco", "Oculto (s)", "Pegados",
-                              "Salió pant. completa", "Menú contextual", "Cerrada por docente"],
+                  "headers": ["Participante", "Nivel", "Salidas de foco", "Oculto (s)",
+                              "Ausencia en preguntas", "Respondió tras ausentarse",
+                              "Otra ventana encima", "Ventana reducida", "Posible captura",
+                              "Pegados", "Salió pant. completa", "Menú contextual", "Cerrada por docente"],
                   "rows": [[p["alias"], _niv.get(p["nivel"], p["nivel"]), p["salidas_foco"],
-                            p["oculto_s"], p["pegados"], p["salidas_pantalla_completa"],
+                            p["oculto_s"],
+                            ", ".join("P" + str(q) for q in p.get("preguntas_ausencia", [])) or "—",
+                            ", ".join("P" + str(x["pregunta"]) + ("✓" if x["correcta"] else "✗")
+                                      for x in p.get("respondidas_tras_ausencia", [])) or "—",
+                            p.get("otra_ventana_encima", 0), p.get("ventana_reducida", 0),
+                            p.get("posibles_capturas", 0),
+                            p["pegados"], p["salidas_pantalla_completa"],
                             p["menus_contextual"], "Sí" if p["bloqueado"] else "No"]
                            for p in _intg["participantes"]]}
     except Exception:
