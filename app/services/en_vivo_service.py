@@ -204,13 +204,15 @@ def _persistir_scans(db, s: SesionEnVivo) -> int:
 
     Devuelve cuántos escaneos se crearon (0 si ya existían = idempotente, o si nadie jugó).
     """
-    ya = db.query(Scan).filter(
-        Scan.assessment_id == uuid.UUID(s.assessment_id),
-        Scan.student_identifier.like(_SCAN_PREFIX + s.codigo + ":%")).first()
-    if ya:
-        return 0  # ya se volcó este cierre; no duplicar
+    aid = uuid.UUID(s.assessment_id)
+    # Idempotencia por SESIÓN (robusta y portable): el student_identifier ahora puede ser el
+    # RUT del alumno real, así que ya no basta el prefijo; buscamos por la marca de sesión en
+    # el payload de los scans en vivo del assessment (conjunto pequeño, filtrado por status).
+    for sc in db.query(Scan).filter(Scan.assessment_id == aid, Scan.status == "en_vivo").all():
+        if (sc.raw_ocr_payload_json or {}).get("sesion") == s.codigo:
+            return 0  # ya se volcó este cierre; no duplicar
 
-    items = _items_mc(db, uuid.UUID(s.assessment_id), s.version)
+    items = _items_mc(db, aid, s.version)
     if not items:
         return 0
     # ordinal (1..N en vivo) -> nº de pregunta real de la pauta
@@ -223,6 +225,21 @@ def _persistir_scans(db, s: SesionEnVivo) -> int:
     for r in resp:
         por_part.setdefault(r.participante_id, {})[r.question_number] = r.respuesta
 
+    # Resolver student_id (nómina) -> RUT, para que el scan en vivo se IMPUTE al alumno real
+    # y entre al libro de notas / psicometría / equidad con la misma llave que un escaneo OMR.
+    from app.models.student import Student
+    ruts: dict[str, str] = {}
+    sids = [p.student_id for p in parts if p.student_id]
+    if sids:
+        uu = []
+        for sid in set(sids):
+            try: uu.append(uuid.UUID(str(sid)))
+            except (ValueError, TypeError): pass
+        if uu:
+            for st in db.query(Student).filter(Student.id.in_(uu)).all():
+                if st.rut:
+                    ruts[str(st.id)] = st.rut.strip()
+
     creados = 0
     for p in parts:
         elecciones = por_part.get(p.id)
@@ -233,16 +250,60 @@ def _persistir_scans(db, s: SesionEnVivo) -> int:
             real = ordinal_a_real.get(ordinal)
             if real:
                 answers[real - 1] = letra
+        rut = ruts.get(str(p.student_id)) if p.student_id else None
+        # Identificado -> RUT (liga al alumno real); anónimo -> alias seudonimizado por sesión.
+        ident = (rut or (_SCAN_PREFIX + s.codigo + ":" + str(p.id)[:8]))[:100]
         db.add(Scan(
-            assessment_id=uuid.UUID(s.assessment_id),
-            student_identifier=(_SCAN_PREFIX + s.codigo + ":" + str(p.id)[:8])[:100],
+            assessment_id=aid,
+            student_identifier=ident,
             status="en_vivo", detected_version=s.version, requires_review=False,
             raw_ocr_payload_json={"answers": answers, "origen": "en_vivo",
-                                  "sesion": s.codigo, "alias": p.alias},
+                                  "sesion": s.codigo, "alias": p.alias,
+                                  "student_id": str(p.student_id) if p.student_id else None,
+                                  "participante_id": str(p.id),
+                                  "identificado": bool(rut)},
         ))
         creados += 1
     db.commit()
     return creados
+
+
+def historial_sesiones(db, assessment_id) -> dict:
+    """Historial navegable de salas EN VIVO de un assessment: cada sesión pasada con su código,
+    fecha, estado, nº de participantes y cuántos respondieron. Recupera la evidencia que hoy
+    solo era hallable por código: base para consultar resultados por prueba/estudiante.
+    """
+    aid = str(assessment_id)
+    ses = (db.query(SesionEnVivo).filter(SesionEnVivo.assessment_id == aid)
+           .order_by(SesionEnVivo.created_at.desc()).all())
+    if not ses:
+        return {"assessment_id": aid, "sesiones": [], "n": 0}
+    ids = [s.id for s in ses]
+    # conteos por sesión en 2 consultas (evita N+1)
+    n_part: dict = {}
+    for pid, sid in db.query(ParticipanteVivo.id, ParticipanteVivo.sesion_id).filter(
+            ParticipanteVivo.sesion_id.in_(ids)).all():
+        n_part[sid] = n_part.get(sid, 0) + 1
+    respondieron: dict = {}
+    vistos: set = set()
+    for sid, pid in db.query(RespuestaVivo.sesion_id, RespuestaVivo.participante_id).filter(
+            RespuestaVivo.sesion_id.in_(ids)).all():
+        k = (sid, pid)
+        if k in vistos:
+            continue
+        vistos.add(k)
+        respondieron[sid] = respondieron.get(sid, 0) + 1
+    filas = []
+    for s in ses:
+        filas.append({
+            "codigo": s.codigo, "estado": s.estado, "version": s.version,
+            "creada": s.created_at.isoformat() if s.created_at else None,
+            "n_preguntas": s.n_preguntas, "pregunta_actual": s.pregunta_actual,
+            "n_participantes": n_part.get(s.id, 0),
+            "n_respondieron": respondieron.get(s.id, 0),
+            "requiere_seb": bool(s.requiere_seb),
+        })
+    return {"assessment_id": aid, "sesiones": filas, "n": len(filas)}
 
 
 # ── participantes ────────────────────────────────────────────────────────────────────

@@ -53,6 +53,13 @@ def crear_sesion(assessment_id: UUID, request: Request, payload: dict | None = N
             **ev._config_dict(s)}
 
 
+@router.get("/assessments/{assessment_id}/en-vivo/historial", dependencies=[Depends(req_profesor)])
+def historial(assessment_id: UUID, db: Session = Depends(get_db)):
+    """Salas en vivo anteriores de esta evaluación (código, fecha, estado, participantes). Permite
+    volver a una sesión pasada: su informe/integridad se abren con el código."""
+    return ev.historial_sesiones(db, assessment_id)
+
+
 @router.post("/en-vivo/{codigo}/avanzar", dependencies=[Depends(req_profesor)])
 def avanzar(codigo: str, db: Session = Depends(get_db)):
     return _sesion_dict(ev.avanzar(db, codigo))
