@@ -107,6 +107,19 @@ def get_students(course_id: UUID, db: Session = Depends(get_db)):
              "apellido_materno": s.apellido_materno, "nombres": s.nombres} for s in students]
 
 
+@router.get("/{course_id}/estudiante/{rut}/brechas", dependencies=[Depends(req_profesor)])
+def brechas_estudiante(course_id: UUID, rut: str, umbral: float = 60.0,
+                       origen: str | None = None, db: Session = Depends(get_db)):
+    """P3 · Brechas de aprendizaje del estudiante: logro por RA a lo largo del curso (cruce con la
+    Tabla de Especificaciones), diferenciado por tipo de prueba. `umbral`=% bajo el cual el RA es
+    brecha; `origen`=omr|en_vivo|(omitir=toda la evidencia)."""
+    if origen not in (None, "", "omr", "en_vivo"):
+        raise HTTPException(status_code=422, detail="origen inválido (omr | en_vivo | omitir).")
+    from app.services import ficha_service
+    return ficha_service.brechas_estudiante(db, course_id, rut, umbral_brecha=umbral,
+                                            origen=(origen or None))
+
+
 class StudentIn(BaseModel):
     rut: str
     apellido_paterno: str
