@@ -21,6 +21,27 @@ from app.services import matriz_service
 answer_key_repo = AnswerKeyRepository()
 
 
+def _dev_validaciones(db, assessment_id, student_id, scan_id=None):
+    """Niveles de desarrollo VALIDADOS por el docente (G1) para el estudiante en una evaluación:
+    devuelve (individual, grupal). Individual = por seudónimo del escaneo y/o del estudiante;
+    grupal = por seudónimo del grupo del estudiante (criterios de ámbito grupal)."""
+    from app.models.validacion import RegistroValidacion
+    from app.models.grupo import Grupo
+    from app.services.matriz_service import _pseudo
+    val: dict[str, dict[str, str]] = {}
+    for r in db.query(RegistroValidacion).filter(
+            RegistroValidacion.assessment_id == str(assessment_id)).all():
+        val.setdefault(str(r.respuesta_ref).split("#")[0], {})[r.criterio] = r.nivel_docente
+    sv: dict[str, str] = {}
+    for p in (([_pseudo(scan_id)] if scan_id else []) + [_pseudo(student_id)]):
+        sv.update(val.get(p, {}))
+    gp = None
+    for g in db.query(Grupo).filter(Grupo.assessment_id == str(assessment_id)).all():
+        if any(str(getattr(ig, "student_id", "")) == str(student_id) for ig in g.integrantes):
+            gp = _pseudo(g.id); break
+    return sv, (val.get(gp, {}) if gp else {})
+
+
 def _nivel(logro_pct: float) -> str:
     if logro_pct >= 70:
         return "Logrado"
@@ -68,10 +89,12 @@ def brechas_estudiante(db, course_id, rut: str, umbral_brecha: float = 60.0,
     acc: dict[str, dict] = {}
     pruebas: list[dict] = []
 
+    from app.services.rubrica_escala_service import fraccion_logro
+    pendientes_dev = 0
     for a in db.query(Assessment).filter(Assessment.course_id == course_id).all():
         ak = answer_key_repo.get_by_assessment_id(db, a.id)
         if not ak or not ak.is_valid:
-            continue  # sin pauta validada no hay corrección de alternativas
+            continue  # sin pauta validada no hay corrección
         por_version: dict[str, dict[int, object]] = {}
         ra_por_q: dict[int, str] = {}
         for it in ak.items:
@@ -80,22 +103,43 @@ def brechas_estudiante(db, course_id, rut: str, umbral_brecha: float = 60.0,
             por_version.setdefault(it.version.upper(), {})[it.question_number] = it
             if it.learning_outcome_id:
                 ra_por_q[it.question_number] = it.learning_outcome_id  # código del RA (C1)
-        # Escaneo del alumno para esta evaluación (deduplicado por alumno real; filtrable por origen).
+        # Escaneo del alumno (deduplicado por alumno real; filtrable por origen). En oral/desarrollo
+        # directo puede no haber hoja: la evidencia es el nivel de rúbrica VALIDADO por el docente.
         mios = [sc for sc in matriz_service.seleccionar_scans(db, a.id, origen)["scans"]
                 if (sc.student_identifier or "").strip() == rut]
-        if not mios:
-            continue  # el estudiante no rindió (o no está ligado) esta evaluación
-        scan = mios[0]
-        clave = por_version.get((scan.detected_version or "A").upper())
+        scan = mios[0] if mios else None
+        sv, sv_grupo = _dev_validaciones(db, a.id, st.id, scan.id if scan else None)
+        if scan is None:
+            if origen:                    # el filtro de origen es sobre escaneos: sin hoja no aplica
+                continue
+            if not (sv or sv_grupo):      # ni hoja ni desarrollo validado: no rindió / no ligado
+                continue
+        ver = ((scan.detected_version if scan else None) or
+               ("A" if "A" in por_version else (next(iter(por_version), "A"))))
+        clave = por_version.get(ver.upper())
         if not clave:
             continue
-        respuestas = (scan.raw_ocr_payload_json or {}).get("answers", [])
+        respuestas = (scan.raw_ocr_payload_json or {}).get("answers", []) if scan else []
         tipo = a.tipo or "otro"
         ev_p = ok_p = 0
         for q, it in clave.items():
-            elegida = respuestas[q - 1] if (q - 1) < len(respuestas) else None
-            ok = 1.0 if (elegida is not None and
-                         str(elegida).upper() == str(it.correct_answer).upper()) else 0.0
+            crits = list(it.rubric_criteria)
+            if crits:                                    # ── ítem de DESARROLLO (rúbrica, G1) ──
+                obt = [(float(c.weight), c.niveles_json,
+                        (sv_grupo if getattr(c, "ambito", None) == "grupal" else sv)[c.name])
+                       for c in crits
+                       if c.name in (sv_grupo if getattr(c, "ambito", None) == "grupal" else sv)]
+                if not obt:
+                    pendientes_dev += 1
+                    continue                             # sin validar: NO cuenta (no es brecha)
+                tw = sum(w for w, _, _ in obt) or 1.0
+                ok = sum(fraccion_logro(niv, lvl) * w for w, niv, lvl in obt) / tw
+            else:                                        # ── ítem de ALTERNATIVAS (vs pauta) ──
+                if scan is None:
+                    continue                             # sin hoja no hay evidencia de alternativas
+                elegida = respuestas[q - 1] if (q - 1) < len(respuestas) else None
+                ok = 1.0 if (elegida is not None and
+                             str(elegida).upper() == str(it.correct_answer).upper()) else 0.0
             ev_p += 1; ok_p += ok
             racode = ra_por_q.get(q)
             if racode:
@@ -103,10 +147,12 @@ def brechas_estudiante(db, course_id, rut: str, umbral_brecha: float = 60.0,
                 d["ev"] += 1; d["ok"] += ok
                 t = d["por_tipo"].setdefault(tipo, {"ev": 0, "ok": 0.0})
                 t["ev"] += 1; t["ok"] += ok
+        if not ev_p:
+            continue
         pruebas.append({
             "assessment_id": str(a.id), "nombre": a.name, "tipo": tipo,
             "modalidad": getattr(a, "modalidad", None),
-            "origen": matriz_service._origen_de(scan),
+            "origen": matriz_service._origen_de(scan) if scan else "desarrollo",
             "items_evaluados": ev_p,
             "logro_pct": round(ok_p / ev_p * 100, 1) if ev_p else None,
         })
@@ -154,11 +200,13 @@ def brechas_estudiante(db, course_id, rut: str, umbral_brecha: float = 60.0,
             "n_brechas": len(brechas),
             "ra_sin_evaluar": [r["code"] for r in sin_eval],
             "n_pruebas": len(pruebas),
+            "pendientes_desarrollo": pendientes_dev,
         },
         "ra_fuera_de_tabla": fuera_de_tabla,
-        "gobernanza": "Agrega ítems de alternativas (auto-corregidos vs pauta validada), "
-                      "deduplicados por estudiante. No altera notas (G1); uso pedagógico del docente. "
-                      "El desarrollo por-RA se integrará en un corte siguiente.",
+        "gobernanza": "Agrega alternativas (auto-corregidas vs pauta) y desarrollo (nivel de "
+                      "rúbrica VALIDADO por el docente, G1), deduplicado por estudiante. El "
+                      "desarrollo sin validar no cuenta como brecha (queda pendiente). No altera "
+                      "notas (G1); uso pedagógico del docente.",
     }
 
 

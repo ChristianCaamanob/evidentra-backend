@@ -13,6 +13,8 @@ from app.models.answer_key import AnswerKey, AnswerKeyItem
 from app.models.scan import Scan
 from app.models.student import Student
 from app.models.curriculo import LearningOutcome
+from app.models.validacion import RegistroValidacion  # noqa: F401 (registra la tabla para create_all)
+from app.models.grupo import Grupo  # noqa: F401
 from app.services import ficha_service
 
 
@@ -135,6 +137,64 @@ def test_ra_derivados_sin_tabla_formal(engine):
     assert ra["RA2"]["logro_pct"] == 33.3 and ra["RA2"]["brecha"] is True
     assert res["resumen"]["n_ra_programa"] == 0                # no hay tabla formal
     assert set(res["ra_fuera_de_tabla"]) == {"RA1", "RA2"}
+
+
+def _sembrar_desarrollo(engine, validar=True):
+    """Curso con una prueba MIXTA: q1 alternativas (RA1) + q2 desarrollo con rúbrica (RA2)."""
+    from app.models.answer_key import RubricCriterion
+    from app.models.validacion import RegistroValidacion
+    from app.services.matriz_service import _pseudo
+    from app.models.scan import Scan as _Scan
+    with Session(engine) as s:
+        c = Course(name="Fisio", code="DFIS", grading_scale="chile_1_7", passing_threshold=60.0)
+        s.add(c); s.commit(); s.refresh(c)
+        s.add(LearningOutcome(course_id=c.id, code="RA1", text="Alternativas", orden=1))
+        s.add(LearningOutcome(course_id=c.id, code="RA2", text="Desarrollo", orden=2))
+        s.add(Student(course_id=c.id, rut="1-9", nombres="Ana", apellido_paterno="Soto"))
+        a = Assessment(course_id=c.id, name="Prueba mixta", tipo="prueba", modalidad="desarrollo",
+                       grading_scale="chile_1_7", passing_threshold=60.0)
+        s.add(a); s.commit(); s.refresh(a)
+        ak = AnswerKey(assessment_id=a.id, status="valid", is_valid=True)
+        s.add(ak); s.commit(); s.refresh(ak)
+        s.add(AnswerKeyItem(answer_key_id=ak.id, question_number=1, version="A",
+                            correct_answer="A", weight=1.0, learning_outcome_id="RA1"))
+        it2 = AnswerKeyItem(answer_key_id=ak.id, question_number=2, version="A",
+                            correct_answer="", question_type="open_response",
+                            weight=1.0, learning_outcome_id="RA2")
+        s.add(it2); s.commit(); s.refresh(it2)
+        s.add(RubricCriterion(answer_key_item_id=it2.id, name="Argumenta", weight=1.0,
+                              niveles_json=None, ambito="individual"))   # escala 3 por defecto
+        sc = _Scan(assessment_id=a.id, student_identifier="1-9", status="scored",
+                   detected_version="A", requires_review=False, origen=None,
+                   raw_ocr_payload_json={"answers": ["A", None]})        # q1 correcto; q2 sin OMR
+        s.add(sc); s.commit(); s.refresh(sc)
+        if validar:  # el docente validó el nivel de desarrollo "parcial" (G1) → 1/2 = 50%
+            s.add(RegistroValidacion(respuesta_ref=_pseudo(sc.id) + "#Argumenta", criterio="Argumenta",
+                                     assessment_id=str(a.id), nivel_ia="parcial", confianza_ia=0.8,
+                                     nivel_docente="parcial", accion="aprobado", docente="d@e.demo"))
+            s.commit()
+        return str(c.id)
+
+
+def test_desarrollo_por_ra_usa_nivel_validado(engine):
+    cid = uuid.UUID(_sembrar_desarrollo(engine, validar=True))
+    with Session(engine) as s:
+        ra = _por_ra(ficha_service.brechas_estudiante(s, cid, "1-9"))
+    assert ra["RA1"]["logro_pct"] == 100.0 and ra["RA1"]["brecha"] is False   # alternativa correcta
+    # el desarrollo NO se cuenta como alternativa fallida: usa el nivel validado (parcial=50%)
+    assert ra["RA2"]["logro_pct"] == 50.0 and ra["RA2"]["brecha"] is True
+    assert ra["RA2"]["items_evaluados"] == 1
+
+
+def test_desarrollo_sin_validar_no_es_brecha(engine):
+    cid = uuid.UUID(_sembrar_desarrollo(engine, validar=False))
+    with Session(engine) as s:
+        res = ficha_service.brechas_estudiante(s, cid, "1-9")
+    ra = _por_ra(res)
+    assert ra["RA1"]["logro_pct"] == 100.0
+    # sin validar, el ítem de desarrollo queda PENDIENTE, no cuenta como brecha 0%
+    assert ra["RA2"]["items_evaluados"] == 0 and ra["RA2"]["brecha"] is None
+    assert res["resumen"]["pendientes_desarrollo"] == 1
 
 
 def test_ra_sin_evaluar_se_reporta(engine):
