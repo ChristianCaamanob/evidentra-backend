@@ -306,12 +306,50 @@ def historial_sesiones(db, assessment_id) -> dict:
     return {"assessment_id": aid, "sesiones": filas, "n": len(filas)}
 
 
+def nomina_sesion(db, codigo: str) -> dict:
+    """Nómina del curso de la sala para que el ALUMNO se identifique al unirse (público, por
+    código). Devuelve SOLO nombres + id opaco (nunca el RUT: proporcionalidad, Ley 21.719) y
+    marca los ya tomados en esta sala. Impersonar un nombre es posible (seguridad media web v1);
+    el docente ve quién entró y la identidad fuerte es la vía passkey del módulo de Asistencia.
+    """
+    s = _sesion(db, codigo)
+    from app.models.student import Student
+    asm = db.query(Assessment).filter(Assessment.id == uuid.UUID(s.assessment_id)).first()
+    if not asm:
+        return {"codigo": codigo, "alumnos": [], "tomados": []}
+    ests = (db.query(Student).filter(Student.course_id == asm.course_id)
+            .order_by(Student.apellido_paterno, Student.apellido_materno, Student.nombres).all())
+    def _nombre(e):
+        ap = " ".join(x for x in (e.apellido_paterno, e.apellido_materno) if x).strip()
+        n = (e.nombres or "").strip()
+        return (ap + (", " + n if n else "")).strip() or (e.rut or "Alumno")
+    alumnos = [{"id": str(e.id), "nombre": _nombre(e)} for e in ests]
+    tomados = [p.student_id for p in db.query(ParticipanteVivo)
+               .filter(ParticipanteVivo.sesion_id == s.id).all() if p.student_id]
+    return {"codigo": codigo, "alumnos": alumnos, "tomados": tomados, "n": len(alumnos)}
+
+
 # ── participantes ────────────────────────────────────────────────────────────────────
 def unir(db, codigo: str, alias: str, student_id: str | None = None) -> ParticipanteVivo:
     s = _sesion(db, codigo)
     if s.estado == ESTADO_CERRADA:
         raise conflict("La sesion ya esta cerrada; no admite mas participantes.")
     alias = (alias or "").strip()[:80] or "Anonimo"
+    # Identificado: el alias pasa a ser el nombre de la ficha (el docente ve la identidad real,
+    # no un alias tecleado). El vínculo real se hace por student_id -> RUT al cerrar.
+    if student_id:
+        from app.models.student import Student
+        try:
+            st = db.query(Student).filter(Student.id == uuid.UUID(str(student_id))).first()
+        except (ValueError, TypeError):
+            st = None
+        if st:
+            ap = " ".join(x for x in (st.apellido_paterno, st.apellido_materno) if x).strip()
+            nom = ((st.nombres or "").strip() + " " + ap).strip()
+            if nom:
+                alias = nom[:80]
+        else:
+            student_id = None   # id que no existe en la nómina: no lo ligamos
     # Distribución personal (barajado por-alumno) fijada al entrar: estable durante la sesión.
     items = _items_contenido(db, uuid.UUID(s.assessment_id), s.version)
     layout = _gen_layout(items, s.shuffle_preguntas, s.shuffle_opciones, random.Random())

@@ -152,6 +152,12 @@ def responder(codigo: str, payload: dict, request: Request, db: Session = Depend
                         opcion_idx=payload.get("opcion_idx"))
 
 
+@router.get("/en-vivo/{codigo}/nomina")
+def nomina(codigo: str, db: Session = Depends(get_db)):
+    """Nómina del curso (nombres, sin RUT) para que el alumno se identifique al unirse."""
+    return ev.nomina_sesion(db, codigo)
+
+
 @router.get("/en-vivo/{codigo}/estado")
 def estado(codigo: str, db: Session = Depends(get_db)):
     return ev.estado(db, codigo)
