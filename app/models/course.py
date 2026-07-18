@@ -18,6 +18,10 @@ class Course(UUIDMixin, TimestampMixin, Base):
     # Naturaleza del curso: 'teorico' (máx. 110) o 'laboratorio'/'practico' (máx. 33). Etiqueta
     # para la UI y el tope de nómina; no altera notas. Nullable → cursos previos sin tipo.
     tipo: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Unidad organizativa para el agregado del Director (decisiones por Departamento/Facultad).
+    # Nullable/aditivas; no alteran notas ni la vista del docente.
+    departamento: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    facultad: Mapped[str | None] = mapped_column(String(160), nullable=True)
     # F1 (blueprint) - norma terminologica vigente de la disciplina, fijada una vez y
     # heredada por las rubricas. La IA la usa como autoridad (p. ej. "TA2 (IFAA)").
     norma_terminologica: Mapped[str | None] = mapped_column(String(120), nullable=True)
