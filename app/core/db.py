@@ -270,8 +270,6 @@ def _seed_ficha_p3(db):
     el panorama del Director. Idempotente por Course.code == 'DEMO-FICHA'."""
     from app.models.curriculo import LearningOutcome
     from app.models.student import Student
-    if db.query(Course).filter(Course.code == "DEMO-FICHA").first():
-        return
     ra_de_q = {1: "RA1", 2: "RA1", 3: "RA2", 4: "RA2", 5: "RA3", 6: "RA3"}  # 2 ítems por RA
     # Patrones de respuesta (correcta = "A"): logros/brechas distintos por RA y por prueba.
     solemne = [["A", "A", "A", "B", "B", "B"], ["A", "B", "A", "A", "A", "A"],
@@ -284,6 +282,17 @@ def _seed_ficha_p3(db):
                ("Díaz", "Mora", "Darío"), ("Muñoz", "Rey", "Elsa"), ("Vega", "Luna", "Franco")]
 
     def _curso(code, name, ras, fac, dep, rut_pref, patrones_solemne):
+        existing = db.query(Course).filter(Course.code == code).first()
+        if existing is not None:
+            # Base ya sembrada antes del panorama: backfill de facultad/departamento (idempotente).
+            cambio = False
+            if not existing.facultad:
+                existing.facultad = fac; cambio = True
+            if not existing.departamento:
+                existing.departamento = dep; cambio = True
+            if cambio:
+                db.commit()
+            return
         course = Course(name=name, code=code, status="active", facultad=fac, departamento=dep,
                         grading_scale="chile_1_7", passing_threshold=60.0)
         db.add(course); db.flush()
