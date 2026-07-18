@@ -177,11 +177,12 @@ def timeline_participante(db, s, participante_id) -> dict:
            .filter(EventoIntegridad.participante_id == pid)
            .order_by(EventoIntegridad.server_time).all())
     # Solo eventos "de interés" en la línea (el latido se resume aparte).
-    interes = {"page_hidden", "page_visible", "blur", "focus", "fullscreen_exit",
-               "fullscreen_enter", "paste", "copy", "cut", "contextmenu", "sesion_concurrente"}
+    interes = {"page_hidden", "page_visible", "fullscreen_exit", "fullscreen_enter",
+               "paste", "copy", "cut", "contextmenu", "sesion_concurrente",
+               "ventana_otra_encima", "window_resize", "posible_captura", "conexion_perdida", "join"}
     linea = [{
         "tipo": e.tipo, "question_number": e.question_number,
-        "duration_ms": e.duration_ms,
+        "duration_ms": e.duration_ms, "meta": e.meta_json,
         "server_time": e.server_time.isoformat() if e.server_time else None,
     } for e in evs if e.tipo in interes]
     return {"participante_id": str(p.id), "alias": p.alias,
