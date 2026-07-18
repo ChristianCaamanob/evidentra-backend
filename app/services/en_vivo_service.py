@@ -631,6 +631,29 @@ def informe_payload(db, codigo: str, formato: str) -> dict:
              "rows": [[e["alias"], f"{e['aciertos']}/{e['n_items']}", e["pct"], e["nota"],
                        "Sí" if e["aprobado"] else "No"] for e in inf["estudiantes"]]}
 
+    # Integridad (LV8): evidencia de actividad de ventana como MEDIO DE PRUEBA en el informe,
+    # independiente de que el docente cerrara la sala o sancionara. Interpretación humana.
+    _niv = {"revisar": "Revisar", "aviso": "Aviso", "ok": "OK"}
+    try:
+        from app.services import integridad_service
+        _intg = integridad_service.resumen_participantes(db, _sesion(db, codigo))
+        t_intg = {"titulo": "Integridad · evidencia de actividad de ventana",
+                  "headers": ["Participante", "Nivel", "Salidas de foco", "Oculto (s)", "Pegados",
+                              "Salió pant. completa", "Menú contextual", "Cerrada por docente"],
+                  "rows": [[p["alias"], _niv.get(p["nivel"], p["nivel"]), p["salidas_foco"],
+                            p["oculto_s"], p["pegados"], p["salidas_pantalla_completa"],
+                            p["menus_contextual"], "Sí" if p["bloqueado"] else "No"]
+                           for p in _intg["participantes"]]}
+    except Exception:
+        t_intg = {"titulo": "Integridad", "headers": ["Participante"], "rows": []}
+    nota_intg = (
+        "Evidencia OBJETIVA de actividad de ventana durante la evaluación (Page Visibility, foco, "
+        "pantalla completa, copiar/pegar, menú contextual), con hora de servidor e inmutable. "
+        "NO constituye por sí sola prueba de copia; su interpretación es humana y no invalida la "
+        "evaluación de forma automática (proporcionalidad y debido proceso; Ley 21.719). No se "
+        "detecta de forma fiable el screenshot del sistema, la foto con otro dispositivo ni el uso "
+        "de IA en un equipo aparte.")
+
     if formato == "xlsx":
         resumen = {"nombre": "Resumen", "headers": ["Métrica", "Valor"], "rows": [
             ["Evaluación", inf["evaluacion"]], ["Sala", inf["codigo"]],
@@ -641,7 +664,8 @@ def informe_payload(db, codigo: str, formato: str) -> dict:
         return {"hojas": [resumen,
                           {"nombre": "Items", "headers": t_items["headers"], "rows": t_items["rows"]},
                           {"nombre": "Por RA", "headers": t_ra["headers"], "rows": t_ra["rows"]},
-                          {"nombre": "Estudiantes", "headers": t_est["headers"], "rows": t_est["rows"]}]}
+                          {"nombre": "Estudiantes", "headers": t_est["headers"], "rows": t_est["rows"]},
+                          {"nombre": "Integridad", "headers": t_intg["headers"], "rows": t_intg["rows"]}]}
 
     resumen_txt = (
         f"Evaluación: {inf['evaluacion']}. Sala en vivo {inf['codigo']}. "
@@ -657,8 +681,9 @@ def informe_payload(db, codigo: str, formato: str) -> dict:
               "calificaciones oficiales (G1).")
     return {"titulo": titulo, "secciones": [
         {"heading": "Resumen ejecutivo", "nivel": 1, "texto": resumen_txt},
-        {"heading": "Nota metodológica", "nivel": 2, "texto": metodo}],
-        "tablas": [t_ra, t_items, t_est]}
+        {"heading": "Nota metodológica", "nivel": 2, "texto": metodo},
+        {"heading": "Integridad · nota de uso", "nivel": 2, "texto": nota_intg}],
+        "tablas": [t_ra, t_items, t_est, t_intg]}
 
 
 # ── banco de ítems (contenido para el modo en vivo digital) ───────────────────────────
