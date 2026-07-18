@@ -41,6 +41,11 @@ def update_course(db: Session, course_id, payload: dict):
     for field in ("name", "code", "status", "passing_threshold", "grading_scale"):
         if field in payload and payload[field] is not None:
             setattr(course, field, payload[field])
+    # Tipo de curso: acepta '', None (limpiar) o uno de los válidos; ignora valores desconocidos.
+    if "tipo" in payload:
+        t = (payload.get("tipo") or "").strip().lower() or None
+        if t is None or t in ("teorico", "laboratorio", "practico"):
+            course.tipo = t
     repo.save(db, course)
     return course
 

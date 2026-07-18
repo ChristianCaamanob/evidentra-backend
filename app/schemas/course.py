@@ -16,6 +16,7 @@ class CourseOut(ORMBaseSchema):
     grading_scale: str | None
     passing_threshold: float | None
     base_score_type: str | None
+    tipo: str | None = None
     created_at: datetime
     updated_at: datetime
 
