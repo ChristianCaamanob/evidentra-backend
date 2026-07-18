@@ -495,31 +495,35 @@ def reporte_reproducible(assessment_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.get("/{assessment_id}/psicometria/tri")
-def psicometria_tri(assessment_id: UUID, db: Session = Depends(get_db)):
+def psicometria_tri(assessment_id: UUID, origen: str | None = None, db: Session = Depends(get_db)):
     """Fase 3 - TRI: compara 1PL vs 2PL (AIC/BIC), parametros 2PL (discriminacion/dificultad)
-    e independencia local (Q3 de Yen). Estimacion MML con girth."""
+    e independencia local (Q3 de Yen). Estimacion MML con girth.
+    origen: omr | en_vivo | (omitir = ambos, deduplicado por alumno)."""
+    org = _origen_ok(origen)
     def _c():
-        datos = matriz_service.cargar_matriz_respuestas(db, assessment_id)
+        datos = matriz_service.cargar_matriz_respuestas(db, assessment_id, origen=org)
         rep = tri_service.comparar_modelos(datos["X"])
         for it, num in zip(rep["items_2PL"], datos["items"]):
             it["pregunta"] = num
         rep["_meta"] = _meta(datos, "tri")
         return rep
     try:
-        return psico_cache.memo(db, assessment_id, "tri", _c)
+        return psico_cache.memo(db, assessment_id, _ck("tri", org), _c)
     except Exception:
         logger.error(f"Error en psicometria_tri {assessment_id}: {traceback.format_exc()}")
         raise
 
 
 @router.get("/{assessment_id}/estructura/cfa")
-def estructura_cfa(assessment_id: UUID, db: Session = Depends(get_db)):
+def estructura_cfa(assessment_id: UUID, origen: str | None = None, db: Session = Depends(get_db)):
     """Fase 4 - CFA de 1 factor: indices de ajuste (chi2/gl, CFI, TLI, RMSEA, SRMR),
-    cargas estandarizadas, AVE y fiabilidad compuesta."""
+    cargas estandarizadas, AVE y fiabilidad compuesta.
+    origen: omr | en_vivo | (omitir = ambos, deduplicado por alumno)."""
+    org = _origen_ok(origen)
     def _c():
         from app.models.assessment import Assessment
         from app.models.course import Course
-        datos = matriz_service.cargar_matriz_respuestas(db, assessment_id)
+        datos = matriz_service.cargar_matriz_respuestas(db, assessment_id, origen=org)
         a = db.get(Assessment, assessment_id)
         c = db.get(Course, a.course_id) if a else None
         es_demo = bool(c and getattr(c, "code", None) == "DEMO-PSICO")
@@ -529,7 +533,7 @@ def estructura_cfa(assessment_id: UUID, db: Session = Depends(get_db)):
         rep["_meta"] = _meta(datos, "cfa")
         return rep
     try:
-        return psico_cache.memo(db, assessment_id, "cfa", _c)
+        return psico_cache.memo(db, assessment_id, _ck("cfa", org), _c)
     except Exception:
         logger.error(f"Error en estructura_cfa {assessment_id}: {traceback.format_exc()}")
         raise
@@ -537,16 +541,17 @@ def estructura_cfa(assessment_id: UUID, db: Session = Depends(get_db)):
 
 @router.get("/{assessment_id}/estructura/invarianza-cfa")
 def estructura_invarianza_cfa(assessment_id: UUID, grupo: str = Query(..., pattern="^(sexo|dependencia)$"),
-                              db: Session = Depends(get_db)):
+                              origen: str | None = None, db: Session = Depends(get_db)):
     """Fase 5 - Invarianza configural entre 2 grupos consentidos: CFA por grupo + congruencia
-    de Tucker de las cargas."""
+    de Tucker de las cargas. origen: omr | en_vivo | (omitir = ambos)."""
+    org = _origen_ok(origen)
     def _c():
-        d = matriz_service.cargar_matriz_con_grupo(db, assessment_id, grupo)
+        d = matriz_service.cargar_matriz_con_grupo(db, assessment_id, grupo, origen=org)
         rep = cfa_service.invarianza_configural(np.asarray(d["X"], dtype=float), d["grupo"])
         rep["_meta"] = _meta_equidad(d)
         return rep
     try:
-        return psico_cache.memo(db, assessment_id, "invcfa:" + grupo, _c)
+        return psico_cache.memo(db, assessment_id, _ck("invcfa:" + grupo, org), _c)
     except Exception:
         logger.error(f"Error en estructura_invarianza_cfa {assessment_id}: {traceback.format_exc()}")
         raise
@@ -554,12 +559,14 @@ def estructura_invarianza_cfa(assessment_id: UUID, grupo: str = Query(..., patte
 
 @router.get("/{assessment_id}/efectos")
 def efectos_grupo(assessment_id: UUID, grupo: str = Query(..., pattern="^(sexo|dependencia)$"),
-                  db: Session = Depends(get_db)):
+                  origen: str | None = None, db: Session = Depends(get_db)):
     """Fase 7 - Comparacion del puntaje total entre 2 grupos consentidos: t de Welch,
     Mann-Whitney, tamanos de efecto (d de Cohen, g de Hedges) con IC95%, y resumen de
-    correlaciones inter-item. Reusa las salvaguardas de equidad (consentimiento, minimo por grupo)."""
+    correlaciones inter-item. Reusa las salvaguardas de equidad (consentimiento, minimo por grupo).
+    origen: omr | en_vivo | (omitir = ambos)."""
+    org = _origen_ok(origen)
     def _c():
-        d = matriz_service.cargar_matriz_con_grupo(db, assessment_id, grupo)
+        d = matriz_service.cargar_matriz_con_grupo(db, assessment_id, grupo, origen=org)
         X = np.asarray(d["X"], dtype=float)
         total = np.nansum(X, axis=1)
         rep = efectos_service.comparar_grupos(total, d["grupo"], d.get("referencia"), d.get("focal"))
@@ -567,7 +574,7 @@ def efectos_grupo(assessment_id: UUID, grupo: str = Query(..., pattern="^(sexo|d
         rep["_meta"] = _meta_equidad(d)
         return rep
     try:
-        return psico_cache.memo(db, assessment_id, "efectos:" + grupo, _c)
+        return psico_cache.memo(db, assessment_id, _ck("efectos:" + grupo, org), _c)
     except Exception:
         logger.error(f"Error en efectos_grupo {assessment_id}: {traceback.format_exc()}")
         raise
@@ -575,17 +582,19 @@ def efectos_grupo(assessment_id: UUID, grupo: str = Query(..., pattern="^(sexo|d
 
 @router.get("/{assessment_id}/psicometria/dif")
 def psicometria_dif(assessment_id: UUID, grupo: str = Query(..., pattern="^(sexo|dependencia)$"),
-                    db: Session = Depends(get_db)):
-    """I2 - DIF (Mantel-Haenszel + logistica) entre 2 grupos consentidos. Equidad del item."""
+                    origen: str | None = None, db: Session = Depends(get_db)):
+    """I2 - DIF (Mantel-Haenszel + logistica) entre 2 grupos consentidos. Equidad del item.
+    origen: omr | en_vivo | (omitir = ambos)."""
+    org = _origen_ok(origen)
     def _c():
-        d = matriz_service.cargar_matriz_con_grupo(db, assessment_id, grupo)
+        d = matriz_service.cargar_matriz_con_grupo(db, assessment_id, grupo, origen=org)
         X = np.asarray(d["X"], dtype=float)
         matching = np.nansum(X, axis=1)                # puntaje total como variable de igualacion
         rep = dif_service.analizar_dif(X, d["grupo"], matching, etiqueta_focal=d["focal"])
         rep["_meta"] = _meta_equidad(d)
         return rep
     try:
-        return psico_cache.memo(db, assessment_id, "dif:" + grupo, _c)
+        return psico_cache.memo(db, assessment_id, _ck("dif:" + grupo, org), _c)
     except Exception:
         logger.error(f"Error en psicometria_dif {assessment_id}: {traceback.format_exc()}")
         raise
@@ -593,10 +602,12 @@ def psicometria_dif(assessment_id: UUID, grupo: str = Query(..., pattern="^(sexo
 
 @router.get("/{assessment_id}/psicometria/invarianza")
 def psicometria_invarianza(assessment_id: UUID, grupo: str = Query(..., pattern="^(sexo|dependencia)$"),
-                           db: Session = Depends(get_db)):
-    """I8b - Invarianza de medicion de Rasch entre 2 grupos consentidos."""
+                           origen: str | None = None, db: Session = Depends(get_db)):
+    """I8b - Invarianza de medicion de Rasch entre 2 grupos consentidos.
+    origen: omr | en_vivo | (omitir = ambos)."""
+    org = _origen_ok(origen)
     try:
-        d = matriz_service.cargar_matriz_con_grupo(db, assessment_id, grupo)
+        d = matriz_service.cargar_matriz_con_grupo(db, assessment_id, grupo, origen=org)
         rep = invarianza_service.invarianza_rasch(np.asarray(d["X"], dtype=float), d["grupo"])
         rep["_meta"] = _meta_equidad(d)
         return rep
