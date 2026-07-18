@@ -159,7 +159,13 @@ def qwk(a: list, b: list, categorias: list | None = None) -> float:
     Kappa de Cohen ponderado cuadraticamente (QWK): el estandar de acuerdo IA<->docente.
     a, b: listas de niveles (mismos casos). >=0.70 aceptable, >=0.80 operativo.
     """
-    cats = categorias or [LOGRO_NO, LOGRO_PARCIAL, LOGRO_LOGRADO]
+    cats = list(categorias or [LOGRO_NO, LOGRO_PARCIAL, LOGRO_LOGRADO])
+    # Tolerancia a rúbricas con niveles PERSONALIZADOS (Excelente/Bueno/…): cualquier nivel
+    # presente que no esté en las categorías por defecto se agrega (evita KeyError). Con
+    # acuerdo perfecto (a==b, típico del oral sin IA) la matriz es diagonal → QWK=1.0.
+    for v in list(a) + list(b):
+        if v not in cats:
+            cats.append(v)
     idx = {c: i for i, c in enumerate(cats)}
     K = len(cats)
     n = len(a)
