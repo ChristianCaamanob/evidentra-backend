@@ -57,8 +57,9 @@ def _nombre(st) -> str:
 
 
 def brechas_estudiante(db, course_id, rut: str, umbral_brecha: float = 60.0,
-                       origen: str | None = None) -> dict:
+                       origen: str | None = None, assessment_id=None) -> dict:
     """Logro por RA de un estudiante a lo largo del curso + brechas (RA bajo el umbral).
+    `assessment_id`: si se indica, acota el cálculo a ESA evaluación (logro por RA de la prueba).
 
     `origen`: None = toda la evidencia (deduplicada por alumno); 'omr' | 'en_vivo' para acotar
     a un tipo de instrumento. `umbral_brecha`: % de logro bajo el cual el RA se marca como brecha.
@@ -91,7 +92,10 @@ def brechas_estudiante(db, course_id, rut: str, umbral_brecha: float = 60.0,
 
     from app.services.rubrica_escala_service import fraccion_logro
     pendientes_dev = 0
-    for a in db.query(Assessment).filter(Assessment.course_id == course_id).all():
+    _q = db.query(Assessment).filter(Assessment.course_id == course_id)
+    if assessment_id is not None:
+        _q = _q.filter(Assessment.id == assessment_id)
+    for a in _q.all():
         ak = answer_key_repo.get_by_assessment_id(db, a.id)
         if not ak or not ak.is_valid:
             continue  # sin pauta validada no hay corrección
