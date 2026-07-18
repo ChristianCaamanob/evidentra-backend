@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 TIPOS_VALIDOS = {
     "page_hidden", "page_visible", "blur", "focus", "fullscreen_enter", "fullscreen_exit",
     "copy", "paste", "cut", "contextmenu", "heartbeat", "join", "sesion_concurrente",
-    "ventana_otra_encima", "window_resize", "posible_captura",
+    "ventana_otra_encima", "window_resize", "posible_captura", "conexion_perdida",
 }
 
 # Umbrales del semáforo (interpretación sugerida, NO veredicto).
@@ -71,9 +71,16 @@ def _resumen_de(eventos: list) -> dict:
     otra_ventana = 0       # blur sin ocultar = otra ventana/app encima (p.ej. ChatGPT al lado)
     reducciones = 0        # ventana reducida (posible pantalla dividida)
     capturas = 0           # posible captura de pantalla (best-effort, no fiable)
+    desconexiones = 0      # caídas de red (wifi/datos) — INVOLUNTARIO, no penaliza
+    offline_ms = 0
     preguntas_ausencia = set()   # nº de pregunta activa cuando se ausentó
     for e in eventos:
         t = e.tipo
+        if t == "conexion_perdida":
+            desconexiones += 1
+            if e.duration_ms:
+                offline_ms += e.duration_ms
+            continue
         if t == "page_hidden":
             salidas += 1
             if e.duration_ms:
@@ -109,6 +116,7 @@ def _resumen_de(eventos: list) -> dict:
             "pegados": pegados, "menus_contextual": menus, "salidas_pantalla_completa": salio_fs,
             "sesiones_concurrentes": concurrentes, "otra_ventana_encima": otra_ventana,
             "ventana_reducida": reducciones, "posibles_capturas": capturas,
+            "desconexiones": desconexiones, "offline_s": round(offline_ms / 1000, 1),
             "preguntas_ausencia": sorted(preguntas_ausencia),
             "ultima_pregunta_oculta": (sorted(preguntas_ausencia)[-1] if preguntas_ausencia else None),
             "nivel": nivel}

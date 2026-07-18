@@ -638,10 +638,11 @@ def informe_payload(db, codigo: str, formato: str) -> dict:
         from app.services import integridad_service
         _intg = integridad_service.resumen_participantes(db, _sesion(db, codigo))
         t_intg = {"titulo": "Integridad · evidencia de actividad de ventana",
-                  "headers": ["Participante", "Nivel", "Salidas de foco", "Oculto (s)",
+                  "headers": ["Participante", "Nivel", "Salió de la prueba (veces)", "Oculto (s)",
                               "Ausencia en preguntas", "Respondió tras ausentarse",
                               "Otra ventana encima", "Ventana reducida", "Posible captura",
-                              "Pegados", "Salió pant. completa", "Menú contextual", "Cerrada por docente"],
+                              "Pegados", "Salió pant. completa", "Menú contextual",
+                              "Problemas de conexión", "Sin red (s)", "Cerrada por docente"],
                   "rows": [[p["alias"], _niv.get(p["nivel"], p["nivel"]), p["salidas_foco"],
                             p["oculto_s"],
                             ", ".join("P" + str(q) for q in p.get("preguntas_ausencia", [])) or "—",
@@ -649,14 +650,17 @@ def informe_payload(db, codigo: str, formato: str) -> dict:
                                       for x in p.get("respondidas_tras_ausencia", [])) or "—",
                             p.get("otra_ventana_encima", 0), p.get("ventana_reducida", 0),
                             p.get("posibles_capturas", 0),
-                            p["pegados"], p["salidas_pantalla_completa"],
-                            p["menus_contextual"], "Sí" if p["bloqueado"] else "No"]
+                            p["pegados"], p["salidas_pantalla_completa"], p["menus_contextual"],
+                            p.get("desconexiones", 0), p.get("offline_s", 0),
+                            "Sí" if p["bloqueado"] else "No"]
                            for p in _intg["participantes"]]}
     except Exception:
         t_intg = {"titulo": "Integridad", "headers": ["Participante"], "rows": []}
     nota_intg = (
         "Evidencia OBJETIVA de actividad de ventana durante la evaluación (Page Visibility, foco, "
         "pantalla completa, copiar/pegar, menú contextual), con hora de servidor e inmutable. "
+        "IMPORTANTE: se distingue SALIR de la prueba (cambiar de pestaña/app: voluntario) de los "
+        "PROBLEMAS DE CONEXIÓN (caídas de wifi/datos: involuntario, columna aparte, no penaliza). "
         "NO constituye por sí sola prueba de copia; su interpretación es humana y no invalida la "
         "evaluación de forma automática (proporcionalidad y debido proceso; Ley 21.719). No se "
         "detecta de forma fiable el screenshot del sistema, la foto con otro dispositivo ni el uso "
