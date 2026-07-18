@@ -281,20 +281,28 @@ def _seed_ficha_p3(db):
     nombres = [("Soto", "Vera", "Ana"), ("Lira", "Paz", "Beto"), ("Rojas", "Díaz", "Carolina"),
                ("Díaz", "Mora", "Darío"), ("Muñoz", "Rey", "Elsa"), ("Vega", "Luna", "Franco")]
 
-    def _curso(code, name, ras, fac, dep, rut_pref, patrones_solemne):
+    def _backfill(existing, name, tipo, fac, dep):
+        cambio = False
+        if existing.name and existing.name.startswith("Demo"):
+            existing.name = name; cambio = True
+        if not existing.tipo:
+            existing.tipo = tipo; cambio = True
+        if existing.status != "active":
+            existing.status = "active"; cambio = True
+        if not existing.facultad:
+            existing.facultad = fac; cambio = True
+        if not existing.departamento:
+            existing.departamento = dep; cambio = True
+        if cambio:
+            db.commit()
+
+    def _curso(code, name, tipo, ras, fac, dep, rut_pref, patrones_solemne):
         existing = db.query(Course).filter(Course.code == code).first()
         if existing is not None:
-            # Base ya sembrada antes del panorama: backfill de facultad/departamento (idempotente).
-            cambio = False
-            if not existing.facultad:
-                existing.facultad = fac; cambio = True
-            if not existing.departamento:
-                existing.departamento = dep; cambio = True
-            if cambio:
-                db.commit()
+            _backfill(existing, name, tipo, fac, dep)
             return
-        course = Course(name=name, code=code, status="active", facultad=fac, departamento=dep,
-                        grading_scale="chile_1_7", passing_threshold=60.0)
+        course = Course(name=name, code=code, status="active", tipo=tipo, facultad=fac,
+                        departamento=dep, grading_scale="chile_1_7", passing_threshold=60.0)
         db.add(course); db.flush()
         for i, (rcode, text) in enumerate(ras, start=1):
             db.add(LearningOutcome(course_id=course.id, code=rcode, text=text, orden=i))
@@ -304,8 +312,8 @@ def _seed_ficha_p3(db):
                            apellido_materno=am, nombres=nom))
         db.flush()
 
-        def _prueba(pn, tipo, vectores, origen):
-            a = Assessment(course_id=course.id, name=pn, tipo=tipo, modalidad="alternativas",
+        def _prueba(pn, tp, vectores, origen):
+            a = Assessment(course_id=course.id, name=pn, tipo=tp, modalidad="alternativas",
                            grading_scale="chile_1_7", passing_threshold=60.0)
             db.add(a); db.flush()
             ak = AnswerKey(assessment_id=a.id, status="valid", is_valid=True)
@@ -323,13 +331,75 @@ def _seed_ficha_p3(db):
         _prueba("Solemne 1 · alternativas", "solemne", patrones_solemne, "omr")
         _prueba("Control 2 · en vivo", "control", control, "en_vivo")
 
-    _curso("DEMO-FICHA", "Demo · Ficha del estudiante",
+    # ── Curso insignia GRANDE y realista (nómina abundante + distribución de notas creíble) ──
+    def _curso_grande(code, name, tipo, ras, fac, dep, n_est, seed):
+        existing = db.query(Course).filter(Course.code == code).first()
+        if existing is not None:
+            _backfill(existing, name, tipo, fac, dep)
+            return
+        import random
+        rng = random.Random(seed)
+        APE = ["Soto", "Rojas", "Muñoz", "Díaz", "Vega", "Fuentes", "Contreras", "Morales", "Silva",
+               "Araya", "Castro", "Reyes", "Espinoza", "Tapia", "Núñez", "Fernández", "Gutiérrez",
+               "Pizarro", "Sepúlveda", "Cortés", "Riquelme", "Valdés", "Bravo", "Cárdenas"]
+        NOM = ["Ana", "Benjamín", "Catalina", "Diego", "Elisa", "Felipe", "Gabriela", "Hugo",
+               "Isidora", "Joaquín", "Karina", "Lucas", "Martina", "Nicolás", "Olivia", "Pablo",
+               "Renata", "Sebastián", "Trinidad", "Vicente", "Amanda", "Emilio", "Josefa", "Matías"]
+        course = Course(name=name, code=code, status="active", tipo=tipo, facultad=fac,
+                        departamento=dep, grading_scale="chile_1_7", passing_threshold=60.0)
+        db.add(course); db.flush()
+        n_ra = len(ras)
+        for i, (rcode, text) in enumerate(ras, start=1):
+            db.add(LearningOutcome(course_id=course.id, code=rcode, text=text, orden=i))
+        n_items = n_ra * 3                                   # 3 ítems por RA
+        ra_q = {q: "RA%d" % (((q - 1) // 3) + 1) for q in range(1, n_items + 1)}
+        letras = ["A", "B", "C", "D"]
+        correcta = {(q, v): rng.choice(letras) for q in range(1, n_items + 1) for v in ("A", "B")}
+        ruts, hab = [], {}
+        for k in range(n_est):
+            n = 18000000 + seed * 100000 + k * 373
+            rut = f"{n // 1000000}.{(n // 1000) % 1000:03d}.{n % 1000:03d}-{k % 10}"
+            ruts.append(rut)
+            db.add(Student(course_id=course.id, rut=rut, apellido_paterno=APE[(seed + k) % len(APE)],
+                           apellido_materno=APE[(seed + k * 3 + 5) % len(APE)],
+                           nombres=NOM[(seed + k * 2) % len(NOM)]))
+            # habilidad por RA (0.2–0.95): genera brechas y una distribución de notas realista
+            hab[rut] = {("RA%d" % r): rng.uniform(0.2, 0.95) for r in range(1, n_ra + 1)}
+        db.flush()
+
+        def _prueba(pn, tp):
+            a = Assessment(course_id=course.id, name=pn, tipo=tp, modalidad="alternativas",
+                           grading_scale="chile_1_7", passing_threshold=60.0)
+            db.add(a); db.flush()
+            ak = AnswerKey(assessment_id=a.id, status="valid", is_valid=True)
+            db.add(ak); db.flush()
+            for q in range(1, n_items + 1):
+                for v in ("A", "B"):
+                    db.add(AnswerKeyItem(answer_key_id=ak.id, question_number=q, version=v,
+                                         correct_answer=correcta[(q, v)], weight=1.0,
+                                         learning_outcome_id=ra_q[q], bloom_level="aplicar"))
+            for rut in ruts:
+                v = rng.choice(("A", "B"))
+                ans = []
+                for q in range(1, n_items + 1):
+                    p = hab[rut][ra_q[q]]
+                    if rng.random() < p:
+                        ans.append(correcta[(q, v)])
+                    else:
+                        ans.append(rng.choice([l for l in letras if l != correcta[(q, v)]]))
+                db.add(Scan(assessment_id=a.id, student_identifier=rut, status="scored",
+                            detected_version=v, requires_review=False, origen="omr",
+                            raw_ocr_payload_json={"answers": ans, "origen": "omr"}))
+
+        _prueba("Solemne 1", "solemne")
+        _prueba("Certamen", "certamen")
+
+    _curso("DEMO-FICHA", "Histología", "teorico",
            [("RA1", "Identifica y describe las estructuras anatómicas fundamentales."),
             ("RA2", "Relaciona estructura y función en los sistemas del cuerpo."),
             ("RA3", "Integra los conceptos en el análisis de casos clínicos.")],
            "Facultad de Medicina", "Departamento de Anatomía", "1", solemne)
-    # Segundo curso, OTRO departamento de la misma facultad → el panorama del Director agrupa.
-    _curso("DEMO-FICHA2", "Demo · Fisiología",
+    _curso("DEMO-FICHA2", "Fisiología Humana", "teorico",
            [("RA1", "Explica los mecanismos fisiológicos básicos."),
             ("RA2", "Interpreta parámetros funcionales en distintos sistemas."),
             ("RA3", "Aplica el razonamiento fisiológico a casos clínicos.")],
@@ -337,6 +407,12 @@ def _seed_ficha_p3(db):
            [["A", "B", "A", "B", "A", "A"], ["A", "A", "A", "A", "B", "B"],
             ["B", "B", "A", "A", "A", "A"], ["A", "A", "B", "B", "B", "A"],
             ["A", "A", "A", "A", "A", "A"], ["B", "A", "B", "A", "B", "B"]])
+    _curso_grande("DEMO-MORFO", "Morfología Humana", "teorico",
+                  [("RA1", "Identifica las estructuras y niveles de organización del cuerpo humano."),
+                   ("RA2", "Relaciona la estructura de los tejidos con su función."),
+                   ("RA3", "Analiza la organización de los sistemas y aparatos."),
+                   ("RA4", "Integra los conceptos morfológicos en el razonamiento clínico.")],
+                  "Facultad de Medicina", "Departamento de Anatomía", 24, 7)
     db.commit()
 
 

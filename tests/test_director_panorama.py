@@ -30,11 +30,12 @@ def db():
 
 def test_panorama_agrupa_por_facultad_departamento(db):
     p = director_service.panorama(db)
-    assert p["global"]["n_cursos"] == 2 and p["global"]["n_estudiantes"] == 12
+    # 3 cursos: Histología + Morfología Humana (Anatomía) + Fisiología Humana (Fisiología)
+    assert p["global"]["n_cursos"] == 3 and p["global"]["n_estudiantes"] == 36
     assert p["global"]["logro_promedio"] is not None
     assert len(p["facultades"]) == 1                                   # una facultad
     fac = p["facultades"][0]
-    assert fac["facultad"] == "Facultad de Medicina" and fac["n_cursos"] == 2
+    assert fac["facultad"] == "Facultad de Medicina" and fac["n_cursos"] == 3
     deps = {d["departamento"] for d in fac["departamentos"]}
     assert deps == {"Departamento de Anatomía", "Departamento de Fisiología"}
     assert p["global"]["top_brechas"] and p["global"]["top_brechas"][0]["n"] >= 1
@@ -45,7 +46,7 @@ def test_panorama_filtra_por_departamento(db):
     assert p["global"]["n_cursos"] == 1
     assert len(p["facultades"]) == 1
     cursos = p["facultades"][0]["departamentos"][0]["cursos"]
-    assert len(cursos) == 1 and cursos[0]["curso"] == "Demo · Fisiología"
+    assert len(cursos) == 1 and cursos[0]["curso"] == "Fisiología Humana"
 
 
 def test_panorama_export_payload(db):
@@ -54,5 +55,5 @@ def test_panorama_export_payload(db):
     assert pl["titulo"] and pl["tablas"] and pl["hojas"]
     t = pl["tablas"][0]
     assert t["headers"][0] == "Unidad"
-    # facultad + 2 deptos + 2 cursos + TOTAL = 6 filas
-    assert len(t["rows"]) == 6 and t["rows"][-1][0] == "TOTAL"
+    # facultad + 2 deptos + 3 cursos + TOTAL = 7 filas
+    assert len(t["rows"]) == 7 and t["rows"][-1][0] == "TOTAL"
