@@ -160,28 +160,32 @@ def brechas_estudiante(course_id: UUID, rut: str, umbral: float = 60.0,
 
 @router.get("/{course_id}/estudiante/{rut}/informe", dependencies=[Depends(req_profesor)])
 def informe_estudiante(course_id: UUID, rut: str, umbral: float = 60.0,
-                       origen: str | None = None, db: Session = Depends(get_db)):
+                       origen: str | None = None, assessment_id: UUID | None = None,
+                       db: Session = Depends(get_db)):
     """P3 · Informe personalizado, empático y propositivo, del estudiante: reconoce logros,
     constata brechas por RA y propone escenarios estratégicos de aprendizaje (BORRADOR con
-    compuerta docente; IA anclada a datos reales o plantilla determinista sin clave)."""
+    compuerta docente; IA anclada a datos reales o plantilla determinista sin clave).
+    assessment_id opcional → informe DINÁMICO acotado a esa prueba; omitir → consolidado del curso."""
     if origen not in (None, "", "omr", "en_vivo"):
         raise HTTPException(status_code=422, detail="origen inválido (omr | en_vivo | omitir).")
     from app.services import ficha_service
     return ficha_service.informe_personalizado(db, course_id, rut, umbral_brecha=umbral,
-                                               origen=(origen or None))
+                                               origen=(origen or None), assessment_id=assessment_id)
 
 
 @router.post("/{course_id}/estudiante/{rut}/informe/{formato}", dependencies=[Depends(req_profesor)])
 def informe_estudiante_export(course_id: UUID, rut: str, formato: str, umbral: float = 60.0,
-                              origen: str | None = None, db: Session = Depends(get_db)):
-    """Descarga el informe personalizado del estudiante en Word/PDF (borrador, compuerta docente)."""
+                              origen: str | None = None, assessment_id: UUID | None = None,
+                              db: Session = Depends(get_db)):
+    """Descarga el informe personalizado del estudiante en Word/PDF (borrador, compuerta docente).
+    assessment_id opcional → acota a una prueba; omitir → consolidado del curso."""
     if formato not in ("docx", "pdf"):
         raise HTTPException(status_code=422, detail="Formato no soportado (docx | pdf).")
     if origen not in (None, "", "omr", "en_vivo"):
         raise HTTPException(status_code=422, detail="origen inválido (omr | en_vivo | omitir).")
     from app.services import ficha_service, exportador_service
     out = ficha_service.informe_export_payload(db, course_id, rut, umbral_brecha=umbral,
-                                               origen=(origen or None))
+                                               origen=(origen or None), assessment_id=assessment_id)
     data, media = exportador_service.exportar(formato, out["payload"])
     fn = re.sub(r"[^A-Za-z0-9_\-]", "_", f"informe_{rut}")[:80]
     return Response(content=data, media_type=media,

@@ -398,10 +398,13 @@ def _fortalezas(por_ra: list) -> list:
 
 
 def informe_personalizado(db, course_id, rut: str, umbral_brecha: float = 60.0,
-                          origen: str | None = None) -> dict:
+                          origen: str | None = None, assessment_id=None) -> dict:
     """Informe personalizado, EMPÁTICO y PROPOSITIVO, para UN estudiante: reconoce logros,
     constata las brechas por RA (con el texto literal del programa) y propone ESCENARIOS
     ESTRATÉGICOS DE APRENDIZAJE por cada brecha, anclado a los datos reales del alumno.
+
+    Ámbito DINÁMICO: sin assessment_id → consolida TODA la evidencia del curso (todas las
+    pruebas rendidas, deduplicadas por RA). Con assessment_id → se acota a ESA evaluación.
 
     Con clave de IA redacta con el LLM (compuerta docente: es un BORRADOR a revisar); sin clave
     cae a una plantilla determinista con los mismos datos. Línea roja: solo usa los datos dados,
@@ -409,7 +412,8 @@ def informe_personalizado(db, course_id, rut: str, umbral_brecha: float = 60.0,
     """
     from app.services.briefing_service import _llm, MODELO
 
-    datos = brechas_estudiante(db, course_id, rut, umbral_brecha=umbral_brecha, origen=origen)
+    datos = brechas_estudiante(db, course_id, rut, umbral_brecha=umbral_brecha,
+                               origen=origen, assessment_id=assessment_id)
     est = datos["estudiante"]
     brechas = sorted(datos["brechas"], key=lambda b: (b.get("logro_pct") if b.get("logro_pct") is not None else 0))
     fortalezas = _fortalezas(datos["por_ra"])
@@ -425,10 +429,11 @@ def informe_personalizado(db, course_id, rut: str, umbral_brecha: float = 60.0,
 
     sistema = (
         "Eres un docente que escribe un informe formativo PERSONALIZADO para UN estudiante, en "
-        "español de Chile, en tono cercano, empático y RESPETUOSO, sin paternalismo. El objetivo "
+        "español de Chile, en tono cercano, empático y RESPETUOSO, sin paternalismo. Trato formal: "
+        "háblale SIEMPRE de USTED (nunca de tú); conjuga en tercera persona formal. El objetivo "
         "no es la nota sino el aprendizaje: reconoce lo logrado y acompaña en lo que falta. "
         "Estructura en Markdown con estos subtítulos en negrita: "
-        "**Lo que has logrado** (nombra los RA dominados citando su % real); "
+        "**Lo que ha logrado** (nombra los RA dominados citando su % real); "
         "**Brechas por trabajar** (por cada RA con brecha: constata el vacío con empatía y explica "
         "POR QUÉ ese resultado de aprendizaje importa para lo que viene); "
         "**Escenarios estratégicos de aprendizaje** (por cada brecha, propón UN escenario de "
@@ -437,10 +442,10 @@ def informe_personalizado(db, course_id, rut: str, umbral_brecha: float = 60.0,
         "el estudiante, con qué y cómo sabría que avanzó); "
         "**Un paso para esta semana** (una sola acción pequeña y realista para empezar). "
         "Reglas estrictas: usa SOLO los datos entregados; NO inventes notas, porcentajes, RA ni "
-        "contenidos que no estén; no prometas resultados; 250-400 palabras; háblale de tú."
+        "contenidos que no estén; no prometas resultados; 250-400 palabras; trato de USTED en todo."
     )
     usuario = (
-        f"ESTUDIANTE: {est.get('nombre', '(seudónimo)')} (dirígete a él/ella como «{nombre_pila}»)\n"
+        f"ESTUDIANTE: {est.get('nombre', '(seudónimo)')} (diríjase con USTED, usando su nombre «{nombre_pila}»)\n"
         f"CURSO: {datos['curso'].get('nombre', '')}\n"
         f"Evaluaciones rendidas: {datos['resumen']['n_pruebas']}. "
         f"RA del programa: {datos['resumen']['n_ra_programa']}; evaluados: {datos['resumen']['n_ra_evaluados']}.\n"
@@ -453,15 +458,24 @@ def informe_personalizado(db, course_id, rut: str, umbral_brecha: float = 60.0,
     if not texto:
         texto = _plantilla_informe(nombre_pila, datos, fortalezas, brechas)
 
+    # Ámbito del informe: prueba puntual (si se acotó) o consolidado del curso.
+    ambito = {"prueba": None, "consolidado": True}
+    if assessment_id is not None:
+        from app.models.assessment import Assessment
+        asm = db.get(Assessment, assessment_id)
+        ambito = {"prueba": (asm.name if asm else None),
+                  "tipo": getattr(asm, "tipo", None) if asm else None, "consolidado": False}
+
     return {
         "estudiante": est,
         "curso": datos["curso"],
         "informe": texto,
-        "motor": motor,
-        "borrador": True,   # compuerta docente: revisar y ajustar antes de compartir
-        "datos": datos,     # anclaje: los hechos reales que sustentan el texto
-        "gobernanza": "Borrador formativo anclado a los datos reales del estudiante. Revísalo y "
-                      "ajústalo antes de compartir (compuerta docente). No altera la nota (G1).",
+        "motor": motor,          # sólo para el docente (gobernanza); NO se muestra al estudiante
+        "borrador": True,        # compuerta docente: revisar y ajustar antes de compartir
+        "ambito": ambito,        # consolidado del curso vs. una prueba específica
+        "datos": datos,          # anclaje: los hechos reales que sustentan el texto
+        "gobernanza": "Borrador formativo anclado a los datos reales del estudiante. Revíselo y "
+                      "ajústelo antes de compartir (compuerta docente). No altera la nota (G1).",
     }
 
 
@@ -494,10 +508,12 @@ def _informe_a_secciones(md: str) -> list[dict]:
 
 
 def informe_export_payload(db, course_id, rut: str, umbral_brecha: float = 60.0,
-                           origen: str | None = None) -> dict:
+                           origen: str | None = None, assessment_id=None) -> dict:
     """Documento exportable (Word/PDF) del informe personalizado: portada + informe formativo por
-    secciones + tabla de logro por RA. Reutiliza informe_personalizado (con compuerta docente)."""
-    inf = informe_personalizado(db, course_id, rut, umbral_brecha=umbral_brecha, origen=origen)
+    secciones + tabla de logro por RA. Reutiliza informe_personalizado (con compuerta docente).
+    El documento del estudiante NO expone el motor de IA ni notas internas de gobernanza."""
+    inf = informe_personalizado(db, course_id, rut, umbral_brecha=umbral_brecha,
+                                origen=origen, assessment_id=assessment_id)
     est, datos = inf["estudiante"], inf["datos"]
     tabla = {"titulo": "Logro por Resultado de Aprendizaje",
              "headers": ["RA", "Resultado de aprendizaje", "Logro %", "Nivel", "Brecha"],
@@ -505,9 +521,10 @@ def informe_export_payload(db, course_id, rut: str, umbral_brecha: float = 60.0,
                        ("—" if r.get("logro_pct") is None else r["logro_pct"]),
                        r["nivel"], ("Sí" if r.get("brecha") else ("—" if r.get("brecha") is None else "No"))]
                       for r in datos["por_ra"]]}
+    ambito = inf.get("ambito") or {}
+    sub = ("Evaluación: " + ambito["prueba"]) if ambito.get("prueba") else "Consolidado de todas las evaluaciones del curso"
     cab = {"heading": "Informe formativo personalizado", "nivel": 1,
-           "texto": f"Estudiante: {est.get('nombre','')} · Curso: {inf['curso'].get('nombre','')}. "
-                    f"Motor: {inf['motor']}. Borrador formativo — revísalo antes de compartir (G1)."}
+           "texto": f"Estudiante: {est.get('nombre','')} · Curso: {inf['curso'].get('nombre','')} · {sub}."}
     return {"payload": {"titulo": f"Informe · {est.get('nombre','')}",
                         "secciones": [cab] + _informe_a_secciones(inf["informe"]),
                         "tablas": [tabla]},
@@ -515,9 +532,9 @@ def informe_export_payload(db, course_id, rut: str, umbral_brecha: float = 60.0,
 
 
 def _plantilla_informe(nombre, datos, fortalezas, brechas) -> str:
-    p = [f"**Lo que has logrado.** {nombre}, "]
+    p = [f"**Lo que ha logrado.** {nombre}, "]
     if fortalezas:
-        p.append("has demostrado dominio en: "
+        p.append("ha demostrado dominio en: "
                  + ", ".join(f'{r["code"]} ({r.get("logro_pct")}%)' for r in fortalezas[:5]) + ". "
                  "Es una base sólida sobre la que seguir construyendo.")
     else:
@@ -531,13 +548,13 @@ def _plantilla_informe(nombre, datos, fortalezas, brechas) -> str:
                      "vale la pena afianzarlo ahora.")
         p.append("\n\n**Escenarios estratégicos de aprendizaje.** Para cada brecha:")
         for b in brechas[:6]:
-            p.append(f'\n- **{b["code"]}**: diseña un escenario situado donde tengas que aplicar '
-                     f'«{b.get("texto", "")}» en un caso o problema real del curso; resuélvelo por '
-                     "pasos, contrasta tu solución con la pauta y repite con una variante hasta "
+            p.append(f'\n- **{b["code"]}**: diseñe un escenario situado donde tenga que aplicar '
+                     f'«{b.get("texto", "")}» en un caso o problema real del curso; resuélvalo por '
+                     "pasos, contraste su solución con la pauta y repita con una variante hasta "
                      "resolverla con seguridad.")
-        p.append("\n\n**Un paso para esta semana.** Elige la primera brecha de la lista y dedícale "
-                 "una sesión corta de práctica enfocada; revisa exactamente dónde se produjo el error.")
+        p.append("\n\n**Un paso para esta semana.** Elija la primera brecha de la lista y dedíquele "
+                 "una sesión corta de práctica enfocada; revise exactamente dónde se produjo el error.")
     else:
-        p.append("\n\n**Brechas por trabajar.** No se detectaron brechas marcadas: mantén el ritmo "
-                 "y profundiza en lo que más te interese del curso.")
+        p.append("\n\n**Brechas por trabajar.** No se detectaron brechas marcadas: mantenga el ritmo "
+                 "y profundice en lo que más le interese del curso.")
     return "".join(p)
