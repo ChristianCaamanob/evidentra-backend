@@ -76,7 +76,13 @@ def guardar_parametrizacion(db, course_id, payload: dict) -> dict:
         "lab_pct": _num(asis.get("lab_pct"), 100),
         "modo": ("informativa" if asis.get("modo") == "informativa" else "gate"),
     }
-    c.parametrizacion = {"activa": True, "componentes": limpios, "asistencia": asistencia}
+    sem = payload.get("semaforo") or {}
+    semaforo = {
+        "nota_verde": _num(sem.get("nota_verde"), 5.0),
+        "nota_amarillo": _num(sem.get("nota_amarillo"), 4.0),
+        "asist_amarillo_min": _num(sem.get("asist_amarillo_min"), 50),
+    }
+    c.parametrizacion = {"activa": True, "componentes": limpios, "asistencia": asistencia, "semaforo": semaforo}
     from sqlalchemy.orm.attributes import flag_modified
     flag_modified(c, "parametrizacion")
     db.commit()
@@ -172,6 +178,35 @@ def asistencia_pct(db, course_id, rut) -> dict:
 
 
 # ────────────────────────────── Pronóstico ──────────────────────────────
+def _semaforo(nota, asist_pct, requerido, cfg, asist_libre):
+    """Traffic light por estudiante (homologable a cualquier escala): banda de NOTA + banda de
+    ASISTENCIA; el color final es la PEOR de las dos. Umbrales configurables."""
+    nv = float(cfg.get("nota_verde", 5.0))
+    na = float(cfg.get("nota_amarillo", 4.0))
+    am_min = float(cfg.get("asist_amarillo_min", 50))
+    if nota is None:
+        nb = None
+    elif nota + 1e-9 >= nv:
+        nb = "verde"
+    elif nota + 1e-9 >= na:
+        nb = "amarillo"
+    else:
+        nb = "rojo"
+    if asist_libre or asist_pct is None:
+        ab = None
+    elif asist_pct + 1e-9 >= requerido:
+        ab = "verde"
+    elif asist_pct + 1e-9 >= am_min:
+        ab = "amarillo"
+    else:
+        ab = "rojo"
+    orden = {"rojo": 0, "amarillo": 1, "verde": 2}
+    bandas = [b for b in (nb, ab) if b]
+    color = "sin_datos" if not bandas else min(bandas, key=lambda b: orden[b])
+    return {"color": color, "nota_banda": nb, "asistencia_banda": ab,
+            "umbrales": {"nota_verde": nv, "nota_amarillo": na, "asist_verde": requerido, "asist_amarillo_min": am_min}}
+
+
 def _estado_por_necesaria(necesaria, peso_restante):
     if peso_restante <= 0:
         return None
@@ -287,6 +322,9 @@ def pronostico_estudiante(db, course_id, rut, escala="chile_1_7", exigencia=60.0
         prob = round(100.0 / (1.0 + math.exp(-2.4 * (proj - 4.0))))
         prob = max(1, min(99, prob))
 
+    # Semáforo de éxito (verde/amarillo/rojo) = peor entre banda de nota y banda de asistencia.
+    semaforo = _semaforo(nota_parcial, asis["pct"], requerido, param.get("semaforo") or {}, libre)
+
     return {
         "course_id": str(course_id), "rut": rut, "nombre": nombre, "parametrizado": True,
         "tipo_curso": c.tipo, "peso_total": round(peso_total, 1),
@@ -299,6 +337,7 @@ def pronostico_estudiante(db, course_id, rut, escala="chile_1_7", exigencia=60.0
                        "libre": bool(libre), "modo": modo, "reprueba": reprueba_asistencia},
         "estado": estado,
         "probabilidad_aprobar": prob,
+        "semaforo": semaforo,
         "detalle": detalle,
     }
 
@@ -319,23 +358,25 @@ def pronostico_curso(db, course_id, escala="chile_1_7", exigencia=60.0) -> dict:
     ests = db.query(Student).filter(Student.course_id == course_id).order_by(Student.apellido_paterno).all()
     filas = []
     conteo = {}
+    semaforo = {"verde": 0, "amarillo": 0, "rojo": 0, "sin_datos": 0}
     probs = []
     for st in ests:
         p = pronostico_estudiante(db, course_id, st.rut, escala, exigencia)
         estado = p.get("estado", "Sin evidencia aún")
         conteo[estado] = conteo.get(estado, 0) + 1
+        color = (p.get("semaforo") or {}).get("color", "sin_datos")
+        semaforo[color] = semaforo.get(color, 0) + 1
         if p.get("probabilidad_aprobar") is not None:
             probs.append(p["probabilidad_aprobar"])
         filas.append({"rut": st.rut, "nombre": p.get("nombre"), "estado": estado,
-                      "probabilidad": p.get("probabilidad_aprobar"),
+                      "color": color, "probabilidad": p.get("probabilidad_aprobar"),
                       "nota_acumulada": p.get("nota_acumulada"),
                       "proyeccion": (p.get("escenarios") or {}).get("ritmo_actual"),
                       "necesita": p.get("nota_necesaria_resto"),
                       "asistencia_pct": p["asistencia"].get("pct"),
                       "reprueba_asistencia": p["asistencia"].get("reprueba")})
-    en_riesgo = sum(v for k, v in conteo.items() if k in ("En riesgo", "Crítico", "Muy difícil",
-                                                          "Reprueba por asistencia", "Reprobado proyectado"))
+    en_riesgo = semaforo["amarillo"] + semaforo["rojo"]
     return {"course_id": str(course_id), "curso": c.name, "tipo": c.tipo, "parametrizado": True,
-            "n_estudiantes": len(ests), "conteo_estados": conteo,
+            "n_estudiantes": len(ests), "conteo_estados": conteo, "semaforo": semaforo,
             "prob_promedio": round(sum(probs) / len(probs)) if probs else None,
             "en_riesgo": en_riesgo, "estudiantes": filas}
