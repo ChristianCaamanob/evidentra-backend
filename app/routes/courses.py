@@ -192,6 +192,50 @@ def informe_estudiante_export(course_id: UUID, rut: str, formato: str, umbral: f
                     headers={"Content-Disposition": f'attachment; filename="{fn}.{formato}"'})
 
 
+# ── Parametrización del curso + Ciclos + Pronóstico de aprobación (proactivo) ──
+@router.get("/{course_id}/parametrizacion", dependencies=[Depends(req_profesor)])
+def get_parametrizacion(course_id: UUID, db: Session = Depends(get_db)):
+    from app.services import prediccion_service
+    return prediccion_service.obtener_parametrizacion(db, course_id)
+
+
+@router.put("/{course_id}/parametrizacion", dependencies=[Depends(req_profesor)])
+def put_parametrizacion(course_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    """Guarda la estructura de evaluación del curso (componentes con peso %=100 + asistencia).
+    Habilita el pronóstico. No altera notas (G1)."""
+    from app.services import prediccion_service
+    return prediccion_service.guardar_parametrizacion(db, course_id, payload)
+
+
+@router.get("/{course_id}/ciclos", dependencies=[Depends(req_profesor)])
+def get_ciclos(course_id: UUID, db: Session = Depends(get_db)):
+    """Ciclos automáticos: cada certamen/solemne cierra un ciclo (controles previos + ese certamen)."""
+    from app.services import prediccion_service
+    return prediccion_service.ciclos(db, course_id)
+
+
+@router.get("/{course_id}/estudiante/{rut}/pronostico", dependencies=[Depends(req_profesor)])
+def get_pronostico_estudiante(course_id: UUID, rut: str, db: Session = Depends(get_db)):
+    """Proyección de aprobación del estudiante (escenarios + nota necesaria + compuerta de asistencia)."""
+    from app.services import prediccion_service
+    from app.models.course import Course
+    c = db.get(Course, course_id)
+    escala = (c.grading_scale if c else None) or "chile_1_7"
+    exig = (c.passing_threshold if c else None) or 60.0
+    return prediccion_service.pronostico_estudiante(db, course_id, rut, escala=escala, exigencia=exig)
+
+
+@router.get("/{course_id}/pronostico", dependencies=[Depends(req_profesor)])
+def get_pronostico_curso(course_id: UUID, db: Session = Depends(get_db)):
+    """Pronóstico agregado del curso: por estudiante + conteo por estado (tablero proactivo)."""
+    from app.services import prediccion_service
+    from app.models.course import Course
+    c = db.get(Course, course_id)
+    escala = (c.grading_scale if c else None) or "chile_1_7"
+    exig = (c.passing_threshold if c else None) or 60.0
+    return prediccion_service.pronostico_curso(db, course_id, escala=escala, exigencia=exig)
+
+
 class StudentIn(BaseModel):
     rut: str
     apellido_paterno: str

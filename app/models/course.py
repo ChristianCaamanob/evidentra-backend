@@ -1,4 +1,4 @@
-from sqlalchemy import String, Float, Boolean
+from sqlalchemy import String, Float, Boolean, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDMixin
@@ -25,6 +25,10 @@ class Course(UUIDMixin, TimestampMixin, Base):
     # F1 (blueprint) - norma terminologica vigente de la disciplina, fijada una vez y
     # heredada por las rubricas. La IA la usa como autoridad (p. ej. "TA2 (IFAA)").
     norma_terminologica: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # Parametrización de la estructura de evaluación (componentes con peso %=100, ciclos y reglas
+    # de asistencia). La define el profesor OPCIONALMENTE; habilita el pronóstico de aprobación.
+    # No altera notas (G1); es un plan de ponderación declarado.
+    parametrizacion: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     assessments = relationship("Assessment", back_populates="course", cascade="all, delete-orphan")
     students = relationship("Student", back_populates="course", cascade="all, delete-orphan")

@@ -441,6 +441,24 @@ def _seed_ficha_p3(db):
         _prueba("Quiz en vivo Nº1", "control", "en_vivo", 0.09)
         db.flush()
 
+        # Parametrización demo (pesos que suman 100% + asistencia) → habilita el pronóstico de una.
+        if not course.parametrizacion:
+            asm_by_name = {a.name: str(a.id) for a in
+                           db.query(Assessment).filter(Assessment.course_id == course.id).all()}
+            pesos = [("Solemne 1", "solemne", 25), ("Solemne 2", "solemne", 25),
+                     ("Certamen", "certamen", 30), ("Control 1", "control", 10),
+                     ("Quiz en vivo Nº1", "lab_envivo", 10)]
+            comps = [{"id": "d%d" % i, "nombre": nm, "categoria": cat, "peso_pct": pw,
+                      "assessment_id": asm_by_name.get(nm)}
+                     for i, (nm, cat, pw) in enumerate(pesos, start=1) if asm_by_name.get(nm)]
+            if comps:
+                course.parametrizacion = {"activa": True, "componentes": comps,
+                                          "asistencia": {"teorico_pct": 75, "teorico_libre": False,
+                                                         "lab_pct": 100, "modo": "gate"}}
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(course, "parametrizacion")
+                db.flush()
+
     _curso("DEMO-FICHA", "Histología", "teorico",
            [("RA1", "Identifica y describe las estructuras anatómicas fundamentales."),
             ("RA2", "Relaciona estructura y función en los sistemas del cuerpo."),
@@ -498,6 +516,8 @@ _COLUMNAS_ADITIVAS = {
         "tipo": "VARCHAR(20)",
         "departamento": "VARCHAR(160)",
         "facultad": "VARCHAR(160)",
+        "norma_terminologica": "VARCHAR(120)",
+        "parametrizacion": "JSON",
     },
     "scans": {
         "origen": "VARCHAR(20)",
