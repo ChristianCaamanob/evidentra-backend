@@ -122,7 +122,7 @@ def ciclos(db, course_id) -> dict:
 def _nota_en_evaluacion(db, assessment_id, rut, escala, exigencia):
     """Nota (1-7) de UN estudiante en UNA evaluación de alternativas, por RUT. None si no rindió
     o si es una evaluación de desarrollo (sin clave MC). Transparente, no altera notas."""
-    from app.repositories import answer_key_repo, scan_repo
+    from app.services.matriz_service import answer_key_repo, scan_repo
     from app.services.result_service import calculate_grade
     ak = answer_key_repo.get_by_assessment_id(db, assessment_id)
     if not ak or not ak.is_valid:
