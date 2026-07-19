@@ -81,12 +81,17 @@ from app.models.student import Student
 async def upload_nomina(course_id: UUID, file: UploadFile = File(...), db: Session = Depends(get_db)):
     file_bytes = await file.read()
     result = parse_nomina_excel(file_bytes)
-    if "error" in result and result["error"]:
+    if result.get("error"):
         raise HTTPException(status_code=400, detail=result["error"])
-    # Eliminar nómina anterior del curso
+    # NO borrar la nómina existente si el Excel no aportó estudiantes válidos (evita vaciar el curso).
+    if not result["students"]:
+        muestra = "; ".join((e.get("error") or "") for e in (result.get("errors") or [])[:3])
+        raise HTTPException(status_code=400, detail=(
+            "No se importó ningún estudiante: el Excel no tiene RUT válidos."
+            + (" Ejemplos: " + muestra if muestra else "")))
+    # Reemplazar la nómina: eliminar la anterior e insertar la nueva.
     db.query(Student).filter(Student.course_id == course_id).delete()
     db.commit()
-    # Insertar nuevos estudiantes
     for s in result["students"]:
         db.add(Student(
             course_id=course_id,
@@ -99,7 +104,8 @@ async def upload_nomina(course_id: UUID, file: UploadFile = File(...), db: Sessi
     return {
         "imported": result["valid_count"],
         "errors": result["error_count"],
-        "error_details": result["errors"],
+        "dv_advertencias": result.get("dv_advertencias", 0),
+        "error_details": result["errors"][:20],
     }
 
 @router.get("/{course_id}/students")
