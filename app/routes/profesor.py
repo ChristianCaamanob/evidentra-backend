@@ -27,3 +27,18 @@ def libro_notas(assessment_id: UUID, db: Session = Depends(get_db)):
     except Exception:
         logger.error(f"Error en libro_notas {assessment_id}: {traceback.format_exc()}")
         raise
+
+
+@router.get("/assessments/{assessment_id}/analisis", dependencies=[Depends(req_profesor)])
+def analisis(assessment_id: UUID, origen: str | None = None, db: Session = Depends(get_db)):
+    """Centro de Análisis · agregado de la evaluación: KPIs, logro por RA, distribución de notas
+    y trazabilidad de la evidencia (origen/escaneos). origen=omr|en_vivo|(omitir=ambos)."""
+    if origen not in (None, "", "omr", "en_vivo"):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail="origen inválido (omr | en_vivo | omitir).")
+    from app.services import ficha_service
+    try:
+        return ficha_service.analisis_evaluacion(db, assessment_id, origen=(origen or None))
+    except Exception:
+        logger.error(f"Error en analisis {assessment_id}: {traceback.format_exc()}")
+        raise

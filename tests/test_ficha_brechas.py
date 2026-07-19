@@ -120,6 +120,20 @@ def test_informe_personalizado_plantilla(engine, monkeypatch):
     assert res["datos"]["resumen"]["n_brechas"] == 1          # anclaje: los hechos van adjuntos
 
 
+def test_analisis_evaluacion(engine):
+    """Centro de Análisis: agregado de la evaluación (KPIs + por RA + distribución + trazabilidad)."""
+    from app.models.assessment import Assessment
+    cid = uuid.UUID(_sembrar(engine))
+    with Session(engine) as s:
+        a = s.query(Assessment).filter(Assessment.course_id == cid, Assessment.name == "Solemne 1").first()
+        r = ficha_service.analisis_evaluacion(s, a.id)
+    assert r["prueba"] == "Solemne 1" and r["tipo"] == "solemne"
+    assert r["kpis"]["n_estudiantes"] == 1 and r["kpis"]["logro_pct"] is not None
+    assert {x["code"] for x in r["por_ra"]} == {"RA1", "RA2"}
+    assert sum(d["n"] for d in r["distribucion"]) == 1
+    assert r["trazabilidad"]["n_scans"] == 1 and r["trazabilidad"]["escaneos_omr"] == 1
+
+
 def test_informe_export_payload(engine, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     cid = uuid.UUID(_sembrar(engine))

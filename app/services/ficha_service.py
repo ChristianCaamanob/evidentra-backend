@@ -214,6 +214,100 @@ def brechas_estudiante(db, course_id, rut: str, umbral_brecha: float = 60.0,
     }
 
 
+def analisis_evaluacion(db, assessment_id, origen: str | None = None,
+                        umbral_brecha: float = 60.0) -> dict:
+    """Análisis AGREGADO de una evaluación (Centro de Análisis): KPIs del curso, logro por RA
+    (cruce con la Tabla de Especificaciones), distribución de notas y TRAZABILIDAD de la evidencia
+    (origen OMR/en vivo, nº de escaneos, duplicados colapsados). Segmenta por prueba; sirve la
+    vista por-RA y por-estudiante. Alternativas (auto vs pauta); el desarrollo por-RA agregado
+    llega en un corte siguiente."""
+    from app.models.assessment import Assessment
+    from app.models.course import Course
+    from app.models.curriculo import LearningOutcome
+    from app.services.result_service import calculate_grade
+
+    ak = answer_key_repo.get_by_assessment_id(db, assessment_id)
+    if not ak or not ak.is_valid:
+        raise conflict("La pauta no está validada; no hay análisis para esta evaluación.")
+    asm = db.get(Assessment, assessment_id)
+    course = db.get(Course, asm.course_id) if asm else None
+    escala = (course.grading_scale if course else None) or "chile_1_7"
+    exig = (course.passing_threshold if course else None)
+    exig = 60.0 if exig is None else exig
+
+    por_version: dict[str, dict[int, object]] = {}
+    ra_por_q: dict[int, str] = {}
+    for it in ak.items:
+        if it.is_annulled:
+            continue
+        por_version.setdefault(it.version.upper(), {})[it.question_number] = it
+        if it.learning_outcome_id:
+            ra_por_q[it.question_number] = it.learning_outcome_id
+    ra_meta = {r.code: {"code": r.code, "texto": r.text, "en_tabla": True}
+               for r in (db.query(LearningOutcome).filter(LearningOutcome.course_id == asm.course_id)
+                         .order_by(LearningOutcome.orden).all() if asm else [])}
+
+    sel = matriz_service.seleccionar_scans(db, assessment_id, origen)
+    ra_acc: dict[str, dict] = {}
+    notas: list[float] = []
+    logros: list[float] = []
+    for scan in sel["scans"]:
+        clave = por_version.get((scan.detected_version or "A").upper())
+        if not clave:
+            continue
+        respuestas = (scan.raw_ocr_payload_json or {}).get("answers", [])
+        ev = ok = 0
+        for q, it in clave.items():
+            if list(it.rubric_criteria):
+                continue  # desarrollo: no entra al agregado por-RA de alternativas
+            elegida = respuestas[q - 1] if (q - 1) < len(respuestas) else None
+            c = 1.0 if (elegida is not None and str(elegida).upper() == str(it.correct_answer).upper()) else 0.0
+            ev += 1; ok += c
+            rc = ra_por_q.get(q)
+            if rc:
+                d = ra_acc.setdefault(rc, {"ev": 0, "ok": 0.0}); d["ev"] += 1; d["ok"] += c
+        if not ev:
+            continue
+        pct = round(ok / ev * 100, 1)
+        nota, _, _ = calculate_grade(pct, escala, exig, banda_movil=bool(getattr(asm, "bandas_moviles", False)))
+        notas.append(round(nota, 1)); logros.append(pct)
+
+    for code in sorted(ra_acc):
+        if code not in ra_meta:
+            ra_meta[code] = {"code": code, "texto": None, "en_tabla": False}
+    por_ra = []
+    for code, meta in ra_meta.items():
+        d = ra_acc.get(code)
+        if d and d["ev"]:
+            logro = round(d["ok"] / d["ev"] * 100, 1)
+            por_ra.append({**meta, "logro_pct": logro, "nivel": _nivel(logro), "brecha": logro < umbral_brecha})
+        else:
+            por_ra.append({**meta, "logro_pct": None, "nivel": "sin evaluar", "brecha": None})
+
+    n = len(notas)
+    bandas = [("1.0–3.9", 1.0, 3.95), ("4.0–4.9", 3.95, 4.95), ("5.0–5.9", 4.95, 5.95), ("6.0–7.0", 5.95, 7.01)]
+    return {
+        "assessment_id": str(assessment_id),
+        "prueba": (asm.name if asm else ""), "tipo": getattr(asm, "tipo", None),
+        "modalidad": getattr(asm, "modalidad", None),
+        "curso": (course.name if course else ""), "curso_code": (course.code if course else ""),
+        "kpis": {
+            "n_estudiantes": n,
+            "promedio": round(sum(notas) / n, 1) if n else None,
+            "aprobacion_pct": round(sum(1 for x in notas if x >= 4.0) / n * 100) if n else None,
+            "logro_pct": round(sum(logros) / len(logros)) if logros else None,
+        },
+        "por_ra": por_ra,
+        "distribucion": [{"rango": b[0], "n": sum(1 for x in notas if b[1] <= x < b[2])} for b in bandas],
+        "trazabilidad": {
+            "origen": sel["origen"], "escaneos_omr": sel["n_omr"], "escaneos_en_vivo": sel["n_en_vivo"],
+            "duplicados_colapsados": sel["duplicados_colapsados"], "n_scans": len(sel["scans"]),
+        },
+        "umbral_brecha": umbral_brecha,
+        "tabla_cargada": any(m.get("en_tabla") for m in ra_meta.values()),
+    }
+
+
 def _fortalezas(por_ra: list) -> list:
     return [r for r in por_ra if r.get("nivel") == "Logrado"]
 
