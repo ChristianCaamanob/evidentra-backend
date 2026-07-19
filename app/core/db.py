@@ -331,44 +331,80 @@ def _seed_ficha_p3(db):
         _prueba("Solemne 1 · alternativas", "solemne", patrones_solemne, "omr")
         _prueba("Control 2 · en vivo", "control", control, "en_vivo")
 
-    # ── Curso insignia GRANDE y realista (nómina abundante + distribución de notas creíble) ──
+    # ── Curso insignia GRANDE y realista — SHOWCASE del demo ──────────────────────────────────
+    # Aditivo e idempotente: crea el curso/nómina/RA si faltan y AGREGA cada evaluación por nombre
+    # si aún no existe (así un DEMO-MORFO ya sembrado recibe los nuevos tipos de prueba en el
+    # próximo arranque, sin borrar nada). Determinista por hash → estable entre reinicios.
     def _curso_grande(code, name, tipo, ras, fac, dep, n_est, seed):
-        existing = db.query(Course).filter(Course.code == code).first()
-        if existing is not None:
-            _backfill(existing, name, tipo, fac, dep)
-            return
-        import random
-        rng = random.Random(seed)
+        import hashlib
+        letras = ["A", "B", "C", "D"]
+
+        def _h(*parts):
+            return int(hashlib.md5(("|".join(map(str, parts)) + "|" + str(seed)).encode()).hexdigest(), 16)
+
+        def _u(*parts):                       # uniforme 0..1 determinista
+            return (_h(*parts) % 1_000_000) / 1_000_000
+
+        def _codigo_sesion(h):                # código de sala tipo "26PZVT"
+            alf = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            s = ""
+            for _ in range(6):
+                s += alf[h % 36]; h //= 36
+            return s
+
         APE = ["Soto", "Rojas", "Muñoz", "Díaz", "Vega", "Fuentes", "Contreras", "Morales", "Silva",
                "Araya", "Castro", "Reyes", "Espinoza", "Tapia", "Núñez", "Fernández", "Gutiérrez",
                "Pizarro", "Sepúlveda", "Cortés", "Riquelme", "Valdés", "Bravo", "Cárdenas"]
         NOM = ["Ana", "Benjamín", "Catalina", "Diego", "Elisa", "Felipe", "Gabriela", "Hugo",
                "Isidora", "Joaquín", "Karina", "Lucas", "Martina", "Nicolás", "Olivia", "Pablo",
                "Renata", "Sebastián", "Trinidad", "Vicente", "Amanda", "Emilio", "Josefa", "Matías"]
-        course = Course(name=name, code=code, status="active", tipo=tipo, facultad=fac,
-                        departamento=dep, grading_scale="chile_1_7", passing_threshold=60.0)
-        db.add(course); db.flush()
+
+        course = db.query(Course).filter(Course.code == code).first()
+        if course is None:
+            course = Course(name=name, code=code, status="active", tipo=tipo, facultad=fac,
+                            departamento=dep, grading_scale="chile_1_7", passing_threshold=60.0)
+            db.add(course); db.flush()
+        else:
+            _backfill(course, name, tipo, fac, dep)
+
         n_ra = len(ras)
+        # Tabla de Especificaciones (RA): agrega los que falten.
+        ya_ra = {r.code for r in db.query(LearningOutcome).filter(LearningOutcome.course_id == course.id).all()}
         for i, (rcode, text) in enumerate(ras, start=1):
-            db.add(LearningOutcome(course_id=course.id, code=rcode, text=text, orden=i))
-        n_items = n_ra * 3                                   # 3 ítems por RA
-        ra_q = {q: "RA%d" % (((q - 1) // 3) + 1) for q in range(1, n_items + 1)}
-        letras = ["A", "B", "C", "D"]
-        correcta = {(q, v): rng.choice(letras) for q in range(1, n_items + 1) for v in ("A", "B")}
-        ruts, hab = [], {}
-        for k in range(n_est):
-            n = 18000000 + seed * 100000 + k * 373
-            rut = f"{n // 1000000}.{(n // 1000) % 1000:03d}.{n % 1000:03d}-{k % 10}"
-            ruts.append(rut)
-            db.add(Student(course_id=course.id, rut=rut, apellido_paterno=APE[(seed + k) % len(APE)],
-                           apellido_materno=APE[(seed + k * 3 + 5) % len(APE)],
-                           nombres=NOM[(seed + k * 2) % len(NOM)]))
-            # habilidad por RA (0.2–0.95): genera brechas y una distribución de notas realista
-            hab[rut] = {("RA%d" % r): rng.uniform(0.2, 0.95) for r in range(1, n_ra + 1)}
+            if rcode not in ya_ra:
+                db.add(LearningOutcome(course_id=course.id, code=rcode, text=text, orden=i))
         db.flush()
 
-        def _prueba(pn, tp):
-            a = Assessment(course_id=course.id, name=pn, tipo=tp, modalidad="alternativas",
+        # Nómina: reusa la existente; si no hay, la crea.
+        existentes = db.query(Student).filter(Student.course_id == course.id).all()
+        if existentes:
+            ruts = [s.rut for s in existentes]
+        else:
+            ruts = []
+            for k in range(n_est):
+                nn = 18000000 + seed * 100000 + k * 373
+                rut = f"{nn // 1000000}.{(nn // 1000) % 1000:03d}.{nn % 1000:03d}-{k % 10}"
+                ruts.append(rut)
+                db.add(Student(course_id=course.id, rut=rut, apellido_paterno=APE[(seed + k) % len(APE)],
+                               apellido_materno=APE[(seed + k * 3 + 5) % len(APE)],
+                               nombres=NOM[(seed + k * 2) % len(NOM)]))
+            db.flush()
+
+        n_items = n_ra * 3                                   # 3 ítems por RA
+        ra_q = {q: "RA%d" % (((q - 1) // 3) + 1) for q in range(1, n_items + 1)}
+
+        def correcta(q, v):
+            return letras[_h("key", q, v) % 4]
+
+        def abil(rut, ra, boost):                            # habilidad 0.05–0.98 (brechas + tendencia)
+            return max(0.05, min(0.98, 0.2 + _u("abil", rut, ra) * 0.72 + boost))
+
+        def _prueba(pn, tp, origen="omr", boost=0.0):
+            # Idempotente por nombre: si ya existe esa evaluación en el curso, no la re-crea.
+            if db.query(Assessment).filter(Assessment.course_id == course.id, Assessment.name == pn).first():
+                return
+            a = Assessment(course_id=course.id, name=pn, tipo=tp,
+                           modalidad=("en_vivo" if origen == "en_vivo" else "alternativas"),
                            grading_scale="chile_1_7", passing_threshold=60.0)
             db.add(a); db.flush()
             ak = AnswerKey(assessment_id=a.id, status="valid", is_valid=True)
@@ -376,23 +412,34 @@ def _seed_ficha_p3(db):
             for q in range(1, n_items + 1):
                 for v in ("A", "B"):
                     db.add(AnswerKeyItem(answer_key_id=ak.id, question_number=q, version=v,
-                                         correct_answer=correcta[(q, v)], weight=1.0,
+                                         correct_answer=correcta(q, v), weight=1.0,
                                          learning_outcome_id=ra_q[q], bloom_level="aplicar"))
-            for rut in ruts:
-                v = rng.choice(("A", "B"))
+            sesiones = [_codigo_sesion(_h("ses", pn, i)) for i in range(2)] if origen == "en_vivo" else None
+            for idx, rut in enumerate(ruts):
+                v = "A" if _h("ver", pn, rut) % 2 == 0 else "B"
                 ans = []
                 for q in range(1, n_items + 1):
-                    p = hab[rut][ra_q[q]]
-                    if rng.random() < p:
-                        ans.append(correcta[(q, v)])
+                    if _u("ans", pn, rut, q) < abil(rut, ra_q[q], boost):
+                        ans.append(correcta(q, v))
                     else:
-                        ans.append(rng.choice([l for l in letras if l != correcta[(q, v)]]))
-                db.add(Scan(assessment_id=a.id, student_identifier=rut, status="scored",
-                            detected_version=v, requires_review=False, origen="omr",
-                            raw_ocr_payload_json={"answers": ans, "origen": "omr"}))
+                        wrong = [l for l in letras if l != correcta(q, v)]
+                        ans.append(wrong[_h("w", pn, rut, q) % len(wrong)])
+                payload = {"answers": ans, "origen": origen}
+                if sesiones:
+                    payload["sesion"] = sesiones[idx % len(sesiones)]
+                db.add(Scan(assessment_id=a.id, student_identifier=rut,
+                            status=("en_vivo" if origen == "en_vivo" else "scored"),
+                            detected_version=v, requires_review=False, origen=origen,
+                            raw_ocr_payload_json=payload))
 
-        _prueba("Solemne 1", "solemne")
-        _prueba("Certamen", "certamen")
+        # Varios TIPOS de prueba → el demo explota: filtros por tipo/origen, comparativa multi-eval
+        # con tendencia (los boosts crean mejora visible) y trazabilidad de sesión en vivo.
+        _prueba("Solemne 1", "solemne", "omr", 0.00)
+        _prueba("Solemne 2", "solemne", "omr", 0.11)
+        _prueba("Certamen", "certamen", "omr", 0.06)
+        _prueba("Control 1", "control", "omr", -0.05)
+        _prueba("Quiz en vivo Nº1", "control", "en_vivo", 0.09)
+        db.flush()
 
     _curso("DEMO-FICHA", "Histología", "teorico",
            [("RA1", "Identifica y describe las estructuras anatómicas fundamentales."),

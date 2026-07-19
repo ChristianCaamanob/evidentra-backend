@@ -325,6 +325,18 @@ def analisis_evaluacion(db, assessment_id, origen: str | None = None,
             if r is not None:
                 discriminacion.append({"q": q, "ra": ra_por_q.get(q), "r": round(r, 2)})
 
+    # Dificultad por ítem: % de acierto de cada pregunta (sirve como análisis SIEMPRE, aun sin RA
+    # cargados en la Tabla de Especificaciones → el panel nunca queda hueco).
+    disc_map = {d["q"]: d["r"] for d in discriminacion}
+    por_item = []
+    if filas:
+        qs_all = sorted({q for f in filas for q in f["fila"].keys()})
+        for q in qs_all:
+            vals = [f["fila"][q] for f in filas if q in f["fila"]]
+            if vals:
+                por_item.append({"q": q, "pct": round(sum(vals) / len(vals) * 100, 1),
+                                 "ra": ra_por_q.get(q), "discriminacion": disc_map.get(q)})
+
     # Alertas accionables: RA bajo umbral + ítems de baja/negativa discriminación.
     alertas = []
     for r in por_ra:
@@ -367,6 +379,7 @@ def analisis_evaluacion(db, assessment_id, origen: str | None = None,
             "logro_pct": round(sum(logros) / len(logros)) if logros else None,
         },
         "por_ra": por_ra,
+        "por_item": por_item,
         "distribucion": [{"rango": b[0], "n": sum(1 for x in notas if b[1] <= x < b[2])} for b in bandas],
         "discriminacion": discriminacion,
         "alertas": alertas,

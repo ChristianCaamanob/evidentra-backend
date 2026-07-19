@@ -220,10 +220,13 @@ def list_courses(rol=Depends(_rol_opcional), db: Session = Depends(get_db)):
     from sqlalchemy import func
     from app.models.course import Course
     from app.models.student import Student
+    from app.models.assessment import Assessment
     from app.models.teacher import ROL_INVESTIGADOR, ROL_CREADOR
-    # Conteo de estudiantes por curso en una sola consulta.
+    # Conteo de estudiantes y de evaluaciones por curso, cada uno en una sola consulta.
     counts = dict(db.query(Student.course_id, func.count(Student.id))
                   .group_by(Student.course_id).all())
+    asm_counts = dict(db.query(Assessment.course_id, func.count(Assessment.id))
+                      .group_by(Assessment.course_id).all())
     ve_investigacion = rol in (ROL_INVESTIGADOR, ROL_CREADOR)
     salida = []
     for c in db.query(Course).order_by(Course.created_at.desc()).all():
@@ -234,7 +237,8 @@ def list_courses(rol=Depends(_rol_opcional), db: Session = Depends(get_db)):
                        "status": c.status, "grading_scale": c.grading_scale,
                        "passing_threshold": c.passing_threshold,
                        "tipo": c.tipo, "max_estudiantes": _max_estudiantes(c.tipo),
-                       "n_students": int(counts.get(c.id, 0))})
+                       "n_students": int(counts.get(c.id, 0)),
+                       "n_assessments": int(asm_counts.get(c.id, 0))})
     return salida
 
 class CourseIn(BaseModel):
