@@ -214,6 +214,21 @@ def brechas_estudiante(db, course_id, rut: str, umbral_brecha: float = 60.0,
     }
 
 
+def _pearson(xs: list, ys: list):
+    """Correlación de Pearson; None si n<3 o alguna serie sin varianza (ítem trivial)."""
+    n = len(xs)
+    if n < 3:
+        return None
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    sxx = sum((x - mx) ** 2 for x in xs)
+    syy = sum((y - my) ** 2 for y in ys)
+    if sxx <= 0 or syy <= 0:
+        return None
+    sxy = sum((xs[i] - mx) * (ys[i] - my) for i in range(n))
+    return sxy / (sxx ** 0.5 * syy ** 0.5)
+
+
 def analisis_evaluacion(db, assessment_id, origen: str | None = None,
                         umbral_brecha: float = 60.0) -> dict:
     """Análisis AGREGADO de una evaluación (Centro de Análisis): KPIs del curso, logro por RA
@@ -251,18 +266,29 @@ def analisis_evaluacion(db, assessment_id, origen: str | None = None,
     ra_acc: dict[str, dict] = {}
     notas: list[float] = []
     logros: list[float] = []
+    filas: list[dict] = []          # por scan: {q: c} de ítems MC + total (para discriminación)
+    sesiones: set[str] = set()      # códigos de sesión en vivo (trazabilidad)
+    fechas: list = []               # created_at de los escaneos
     for scan in sel["scans"]:
         clave = por_version.get((scan.detected_version or "A").upper())
         if not clave:
             continue
-        respuestas = (scan.raw_ocr_payload_json or {}).get("answers", [])
+        payload = (scan.raw_ocr_payload_json or {})
+        respuestas = payload.get("answers", [])
+        ses = payload.get("sesion")
+        if ses:
+            sesiones.add(str(ses))
+        if getattr(scan, "created_at", None):
+            fechas.append(scan.created_at)
         ev = ok = 0
+        fila: dict[int, float] = {}
         for q, it in clave.items():
             if list(it.rubric_criteria):
                 continue  # desarrollo: no entra al agregado por-RA de alternativas
             elegida = respuestas[q - 1] if (q - 1) < len(respuestas) else None
             c = 1.0 if (elegida is not None and str(elegida).upper() == str(it.correct_answer).upper()) else 0.0
             ev += 1; ok += c
+            fila[q] = c
             rc = ra_por_q.get(q)
             if rc:
                 d = ra_acc.setdefault(rc, {"ev": 0, "ok": 0.0}); d["ev"] += 1; d["ok"] += c
@@ -271,6 +297,7 @@ def analisis_evaluacion(db, assessment_id, origen: str | None = None,
         pct = round(ok / ev * 100, 1)
         nota, _, _ = calculate_grade(pct, escala, exig, banda_movil=bool(getattr(asm, "bandas_moviles", False)))
         notas.append(round(nota, 1)); logros.append(pct)
+        filas.append({"fila": fila, "ok": ok})
 
     for code in sorted(ra_acc):
         if code not in ra_meta:
@@ -283,6 +310,48 @@ def analisis_evaluacion(db, assessment_id, origen: str | None = None,
             por_ra.append({**meta, "logro_pct": logro, "nivel": _nivel(logro), "brecha": logro < umbral_brecha})
         else:
             por_ra.append({**meta, "logro_pct": None, "nivel": "sin evaluar", "brecha": None})
+
+    # Discriminación por ítem: correlación ítem–total CORREGIDA (punto-biserial), para alertas de calidad.
+    discriminacion = []
+    if len(filas) >= 5:
+        qs = sorted({q for f in filas for q in f["fila"].keys()})
+        for q in qs:
+            xs, ts = [], []
+            for f in filas:
+                if q in f["fila"]:
+                    xi = f["fila"][q]
+                    xs.append(xi); ts.append(f["ok"] - xi)   # total corregido (excluye el propio ítem)
+            r = _pearson(xs, ts)
+            if r is not None:
+                discriminacion.append({"q": q, "ra": ra_por_q.get(q), "r": round(r, 2)})
+
+    # Alertas accionables: RA bajo umbral + ítems de baja/negativa discriminación.
+    alertas = []
+    for r in por_ra:
+        if r.get("brecha"):
+            lg = r.get("logro_pct") or 0
+            alertas.append({"tipo": "ra_brecha", "severidad": ("critica" if lg < 40 else "media"),
+                            "titulo": f'{r["code"]} bajo el umbral ({lg}%)',
+                            "detalle": (f'{r.get("texto") or "Resultado de aprendizaje sin descripción"} · umbral {int(umbral_brecha)}%')})
+    for d in discriminacion:
+        ra_txt = f' · {d["ra"]}' if d["ra"] else ''
+        if d["r"] < 0:
+            alertas.append({"tipo": "item_discriminacion", "severidad": "critica",
+                            "titulo": f'P{d["q"]} discrimina al revés (r={d["r"]})',
+                            "detalle": f'Los estudiantes de mejor desempeño tienden a fallarla{ra_txt}. Revisar clave o enunciado.'})
+        elif d["r"] < 0.15:
+            alertas.append({"tipo": "item_discriminacion", "severidad": "media",
+                            "titulo": f'P{d["q"]} discrimina poco (r={d["r"]})',
+                            "detalle": f'Distingue mal entre quienes dominan y quienes no{ra_txt}.'})
+    _sev = {"critica": 0, "media": 1, "baja": 2}
+    alertas.sort(key=lambda a: _sev.get(a["severidad"], 3))
+
+    fecha_ult = None
+    if fechas:
+        try:
+            fecha_ult = max(fechas).date().isoformat()
+        except Exception:
+            fecha_ult = None
 
     n = len(notas)
     bandas = [("1.0–3.9", 1.0, 3.95), ("4.0–4.9", 3.95, 4.95), ("5.0–5.9", 4.95, 5.95), ("6.0–7.0", 5.95, 7.01)]
@@ -299,9 +368,12 @@ def analisis_evaluacion(db, assessment_id, origen: str | None = None,
         },
         "por_ra": por_ra,
         "distribucion": [{"rango": b[0], "n": sum(1 for x in notas if b[1] <= x < b[2])} for b in bandas],
+        "discriminacion": discriminacion,
+        "alertas": alertas,
         "trazabilidad": {
             "origen": sel["origen"], "escaneos_omr": sel["n_omr"], "escaneos_en_vivo": sel["n_en_vivo"],
             "duplicados_colapsados": sel["duplicados_colapsados"], "n_scans": len(sel["scans"]),
+            "sesiones": sorted(sesiones), "n_sesiones": len(sesiones), "fecha_ultima": fecha_ult,
         },
         "umbral_brecha": umbral_brecha,
         "tabla_cargada": any(m.get("en_tabla") for m in ra_meta.values()),
