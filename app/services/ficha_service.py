@@ -91,6 +91,9 @@ def brechas_estudiante(db, course_id, rut: str, umbral_brecha: float = 60.0,
     pruebas: list[dict] = []
 
     from app.services.rubrica_escala_service import fraccion_logro
+    from app.services.result_service import calculate_grade
+    _escala = (course.grading_scale or "chile_1_7")
+    _exig = 60.0 if course.passing_threshold is None else course.passing_threshold
     pendientes_dev = 0
     _q = db.query(Assessment).filter(Assessment.course_id == course_id)
     if assessment_id is not None:
@@ -153,12 +156,27 @@ def brechas_estudiante(db, course_id, rut: str, umbral_brecha: float = 60.0,
                 t["ev"] += 1; t["ok"] += ok
         if not ev_p:
             continue
+        _pct = round(ok_p / ev_p * 100, 1)
+        try:
+            _nota, _, _ = calculate_grade(_pct, _escala, _exig,
+                                          banda_movil=bool(getattr(a, "bandas_moviles", False)))
+            _nota = round(_nota, 1)
+        except Exception:
+            _nota = None
+        _fecha = None
+        if scan is not None and getattr(scan, "created_at", None):
+            try:
+                _fecha = scan.created_at.date().isoformat()
+            except Exception:
+                _fecha = None
         pruebas.append({
             "assessment_id": str(a.id), "nombre": a.name, "tipo": tipo,
             "modalidad": getattr(a, "modalidad", None),
             "origen": matriz_service._origen_de(scan) if scan else "desarrollo",
             "items_evaluados": ev_p,
-            "logro_pct": round(ok_p / ev_p * 100, 1) if ev_p else None,
+            "logro_pct": _pct,
+            "nota": _nota,
+            "fecha": _fecha,
         })
 
     # RA presentes en la evidencia pero AUSENTES de la Tabla: se incluyen igual (no se ocultan),
