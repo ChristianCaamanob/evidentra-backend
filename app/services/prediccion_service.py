@@ -236,7 +236,8 @@ def pronostico_estudiante(db, course_id, rut, escala="chile_1_7", exigencia=60.0
     est = db.query(Student).filter(Student.course_id == course_id, Student.rut == rut).first()
     nombre = None
     if est:
-        nombre = f"{est.apellido_paterno}, {est.nombres}".strip(", ")
+        apellidos = " ".join(x for x in [est.apellido_paterno, est.apellido_materno] if x).strip()
+        nombre = (f"{apellidos}, {est.nombres}" if apellidos else (est.nombres or rut)).strip(", ")
 
     if not comps:
         return {"course_id": str(course_id), "rut": rut, "nombre": nombre,
