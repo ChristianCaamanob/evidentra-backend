@@ -140,8 +140,15 @@ def banco_importar(assessment_id: UUID, payload: dict, db: Session = Depends(get
 @router.post("/en-vivo/{codigo}/unir")
 def unir(codigo: str, payload: dict, request: Request, db: Session = Depends(get_db)):
     ev.verificar_seb_o_error(db, ev._sesion(db, codigo), request)   # gate SEB si la sala lo exige
-    p = ev.unir(db, codigo, payload.get("alias", ""), payload.get("student_id"))
-    return {"participante_id": str(p.id), "token": p.token, "alias": p.alias}
+    dev = (payload.get("device_id") or "").strip()[:64] or None
+    p = ev.unir(db, codigo, payload.get("alias", ""), payload.get("student_id"), device_id=dev)
+    # reanudado: el candado por dispositivo retomo un participante ya existente (no se creo otro).
+    reanudado = bool(dev and getattr(p, "device_id", None) == dev
+                     and payload.get("alias") and (payload.get("alias") or "").strip()[:80] != p.alias)
+    n_preg = int(getattr(p.sesion, "n_preguntas", 0) or 0)
+    ya_rindio = bool(getattr(p, "bloqueado", False)) or (n_preg > 0 and int(getattr(p, "progreso", 0) or 0) >= n_preg)
+    return {"participante_id": str(p.id), "token": p.token, "alias": p.alias,
+            "reanudado": reanudado, "ya_rindio": ya_rindio}
 
 
 @router.post("/en-vivo/{codigo}/responder")

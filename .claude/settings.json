@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(**)", "Write(**)", "Edit(**)",
+      "Bash(python3 *)", "Bash(python *)",
+      "Bash(pytest *)", "Bash(python3 -m pytest *)", "Bash(python -m pytest *)",
+      "Bash(pip install *)", "Bash(pip3 install *)", "Bash(python3 -m pip install *)",
+      "Bash(alembic upgrade *)", "Bash(alembic revision *)", "Bash(alembic stamp *)",
+      "Bash(alembic current*)", "Bash(alembic history*)", "Bash(alembic heads*)",
+      "Bash(git status*)", "Bash(git diff*)", "Bash(git log*)", "Bash(git show*)",
+      "Bash(git add *)", "Bash(git commit *)", "Bash(git branch*)",
+      "Bash(git checkout *)", "Bash(git switch *)", "Bash(git restore *)",
+      "Bash(git stash*)", "Bash(git fetch*)", "Bash(git pull*)",
+      "Bash(git merge *)", "Bash(git rebase *)", "Bash(git tag*)",
+      "Bash(git remote*)", "Bash(git config *)", "Bash(git init*)", "Bash(git mv *)",
+      "Bash(git reset HEAD*)", "Bash(git reset --soft *)", "Bash(git reset --mixed *)"
+    ],
+    "ask": [
+      "Bash(git push*)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean -f*)", "Bash(git clean -d*)", "Bash(git clean -x*)",
+      "Bash(gh pr merge*)", "Bash(gh pr create*)", "Bash(gh release *)",
+      "Bash(alembic downgrade *)",
+      "Bash(railway *)", "Bash(vercel *)", "Bash(fly deploy*)", "Bash(docker push*)",
+      "Bash(curl *)", "Bash(wget *)"
+    ],
+    "deny": [
+      "Bash(rm *)", "Bash(rm -rf *)", "Bash(sudo *)"
+    ]
+  }
+}

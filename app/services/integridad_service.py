@@ -73,9 +73,13 @@ def _resumen_de(eventos: list) -> dict:
     capturas = 0           # posible captura de pantalla (best-effort, no fiable)
     desconexiones = 0      # caídas de red (wifi/datos) — INVOLUNTARIO, no penaliza
     offline_ms = 0
+    reingresos = 0         # este equipo intentó re-entrar como OTRA persona (candado LV10)
     preguntas_ausencia = set()   # nº de pregunta activa cuando se ausentó
     for e in eventos:
         t = e.tipo
+        if t == "reingreso_bloqueado":
+            reingresos += 1
+            continue
         if t == "conexion_perdida":
             desconexiones += 1
             if e.duration_ms:
@@ -105,10 +109,10 @@ def _resumen_de(eventos: list) -> dict:
             capturas += 1
     # Nivel (evidencia interpretada, no sentencia): ok / aviso / revisar.
     nivel = "ok"
-    if salidas or salio_fs or menus or pegados or otra_ventana or reducciones or capturas:
+    if salidas or salio_fs or menus or pegados or otra_ventana or reducciones or capturas or reingresos:
         nivel = "aviso"
     if (oculto_ms >= OCULTO_REVISAR_MS or salidas >= SALIDAS_REVISAR
-            or pegados > 0 or concurrentes > 0 or capturas > 0
+            or pegados > 0 or concurrentes > 0 or capturas > 0 or reingresos > 0
             or oculto_max_ms >= OCULTO_AVISO_MS):
         nivel = "revisar"
     return {"salidas_foco": salidas, "oculto_ms": oculto_ms,
@@ -116,6 +120,7 @@ def _resumen_de(eventos: list) -> dict:
             "pegados": pegados, "menus_contextual": menus, "salidas_pantalla_completa": salio_fs,
             "sesiones_concurrentes": concurrentes, "otra_ventana_encima": otra_ventana,
             "ventana_reducida": reducciones, "posibles_capturas": capturas,
+            "reingresos_bloqueados": reingresos,
             "desconexiones": desconexiones, "offline_s": round(offline_ms / 1000, 1),
             "preguntas_ausencia": sorted(preguntas_ausencia),
             "ultima_pregunta_oculta": (sorted(preguntas_ausencia)[-1] if preguntas_ausencia else None),
@@ -179,7 +184,8 @@ def timeline_participante(db, s, participante_id) -> dict:
     # Solo eventos "de interés" en la línea (el latido se resume aparte).
     interes = {"page_hidden", "page_visible", "fullscreen_exit", "fullscreen_enter",
                "paste", "copy", "cut", "contextmenu", "sesion_concurrente",
-               "ventana_otra_encima", "window_resize", "posible_captura", "conexion_perdida", "join"}
+               "ventana_otra_encima", "window_resize", "posible_captura", "conexion_perdida",
+               "reingreso_bloqueado", "join"}
     linea = [{
         "tipo": e.tipo, "question_number": e.question_number,
         "duration_ms": e.duration_ms, "meta": e.meta_json,

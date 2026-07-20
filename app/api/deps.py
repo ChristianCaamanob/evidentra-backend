@@ -57,3 +57,20 @@ req_profesor = requiere_rol(ROL_PROFESOR, ROL_INVESTIGADOR)
 req_investigador = requiere_rol(ROL_INVESTIGADOR)
 req_lectura_datos = requiere_rol(ROL_PROFESOR, ROL_INVESTIGADOR, ROL_DIRECTOR)
 req_creador = requiere_rol()
+
+
+def requiere_plan(feature: str):
+    """Dependencia-guarda por ENTITLEMENT: pasa si el plan de la cuenta incluye `feature`.
+
+    Ortogonal a requiere_rol (rol = quien eres; plan = que pagaste). El creador pasa
+    siempre. 402 Payment Required cuando el plan no alcanza (se necesita upgrade)."""
+    def _guarda(usuario: Teacher = Depends(usuario_actual),
+                db: Session = Depends(get_db)) -> Teacher:
+        from app.services import pagos_service
+        if not pagos_service.tiene_feature(db, str(usuario.id), feature, usuario.rol):
+            raise HTTPException(
+                status.HTTP_402_PAYMENT_REQUIRED,
+                f"Tu plan no incluye '{feature}'. Actualiza tu suscripcion para acceder.")
+        return usuario
+
+    return _guarda

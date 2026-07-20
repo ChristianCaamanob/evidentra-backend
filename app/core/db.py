@@ -510,6 +510,7 @@ _COLUMNAS_ADITIVAS = {
         "bloqueado": "BOOLEAN NOT NULL DEFAULT false",
         "bloqueado_motivo": "VARCHAR(255)",
         "ultimo_latido_ts": "INTEGER",
+        "device_id": "VARCHAR(64)",
     },
     "answer_key_items": {
         "opciones_json": "JSON",

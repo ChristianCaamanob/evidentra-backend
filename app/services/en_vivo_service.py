@@ -14,7 +14,7 @@ from app.core.errors import conflict, not_found
 from app.models.answer_key import AnswerKey, QUESTION_TYPE_MULTIPLE_CHOICE
 from app.models.assessment import Assessment
 from app.models.en_vivo import (
-    SesionEnVivo, ParticipanteVivo, RespuestaVivo,
+    SesionEnVivo, ParticipanteVivo, RespuestaVivo, EventoIntegridad,
     ESTADO_LOBBY, ESTADO_ACTIVA, ESTADO_PAUSADA, ESTADO_CERRADA,
     RITMO_DOCENTE, RITMO_ALUMNO,
 )
@@ -331,10 +331,40 @@ def nomina_sesion(db, codigo: str) -> dict:
 
 
 # ── participantes ────────────────────────────────────────────────────────────────────
-def unir(db, codigo: str, alias: str, student_id: str | None = None) -> ParticipanteVivo:
+def unir(db, codigo: str, alias: str, student_id: str | None = None,
+         device_id: str | None = None) -> ParticipanteVivo:
     s = _sesion(db, codigo)
     if s.estado == ESTADO_CERRADA:
         raise conflict("La sesion ya esta cerrada; no admite mas participantes.")
+    # LV10 · Candado por dispositivo: si este navegador YA tiene un participante en la sala,
+    # se RETOMA ese mismo (no se crea otro). Asi un alumno no puede volver a entrar y rendir
+    # por un companero desde el mismo equipo (evita el doble registro). Es honesto: no frena
+    # incognito/otro dispositivo; para blindaje fuerte esta el passkey de Asistencia.
+    device_id = (device_id or "").strip()[:64] or None
+    if device_id:
+        existente = (db.query(ParticipanteVivo)
+                     .filter(ParticipanteVivo.sesion_id == s.id,
+                             ParticipanteVivo.device_id == device_id)
+                     .order_by(ParticipanteVivo.created_at.asc())
+                     .first())
+        if existente:
+            # Trazabilidad: si el mismo equipo re-entra intentando ser OTRA persona (otro
+            # student_id, o un alias distinto sin nomina), queda registrado como evidencia.
+            nuevo_sid = str(student_id) if student_id else None
+            distinto = (nuevo_sid and existente.student_id and nuevo_sid != existente.student_id) \
+                or (not nuevo_sid and not existente.student_id
+                    and (alias or "").strip()[:80] and (alias or "").strip()[:80] != existente.alias)
+            if distinto:
+                try:
+                    db.add(EventoIntegridad(
+                        sesion_id=s.id, participante_id=existente.id, tipo="reingreso_bloqueado",
+                        meta_json={"alias_intentado": (alias or "").strip()[:80],
+                                   "student_id_intentado": nuevo_sid,
+                                   "device_id": device_id}))
+                    db.commit()
+                except Exception:
+                    db.rollback()
+            return existente
     alias = (alias or "").strip()[:80] or "Anonimo"
     # Identificado: el alias pasa a ser el nombre de la ficha (el docente ve la identidad real,
     # no un alias tecleado). El vínculo real se hace por student_id -> RUT al cerrar.
@@ -356,6 +386,7 @@ def unir(db, codigo: str, alias: str, student_id: str | None = None) -> Particip
     layout = _gen_layout(items, s.shuffle_preguntas, s.shuffle_opciones, random.Random())
     p = ParticipanteVivo(sesion_id=s.id, alias=alias,
                          student_id=str(student_id) if student_id else None,
+                         device_id=device_id,
                          token=secrets.token_urlsafe(24), layout_json=layout, progreso=0)
     db.add(p); db.commit(); db.refresh(p)
     return p

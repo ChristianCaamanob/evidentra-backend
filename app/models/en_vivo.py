@@ -73,6 +73,10 @@ class ParticipanteVivo(UUIDMixin, Base):
     alias: Mapped[str] = mapped_column(String(80))
     student_id: Mapped[str | None] = mapped_column(String(64), nullable=True)  # si es un alumno de la nomina
     token: Mapped[str] = mapped_column(String(48))     # autoriza a responder sin login
+    # Vinculo al dispositivo (LV10): huella estable del navegador guardada al unirse. Un dispositivo
+    # que ya tiene participante en la sala NO puede crear otro (evita rendir por un companero / doble
+    # registro). Es un candado honesto: corta el abuso casual, no el determinado (incognito/otro equipo).
+    device_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     # Distribución personal del quiz (barajado por-alumno): {"q_order":[...], "opt_map":{"1":["C","A",...]}}.
     # q_order = orden de los ordinales de pregunta; opt_map[qn][posición_mostrada] = letra canónica.
     layout_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
