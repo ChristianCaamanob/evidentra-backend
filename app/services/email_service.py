@@ -3,12 +3,15 @@ import urllib.error
 import json
 import os
 
-APP_URL = os.getenv("APP_URL", "https://web-production-098402.up.railway.app")
+# URL del FRONTEND (SPA app.html). El enlace de recuperación abre la app con ?reset=<token>,
+# que la SPA detecta para mostrar el formulario de nueva contraseña.
+APP_URL = os.getenv("APP_URL", "https://evalys-web.vercel.app")
 
 def send_reset_email(to_email: str, token: str, teacher_name: str):
     RESEND_API_KEY = os.getenv("RESEND_API_KEY")
     print(f"[RESEND KEY] {RESEND_API_KEY[:10] if RESEND_API_KEY else 'NONE'}", flush=True)
-    reset_link = f"{APP_URL}/reset-password?token={token}"
+    base = APP_URL.rstrip("/")
+    reset_link = f"{base}/app.html?reset={token}"
     html = f"""
     <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:32px;background:#f9f9f9;border-radius:8px;">
       <h2 style="color:#0f4c75;">Evalys — Recuperar contraseña</h2>

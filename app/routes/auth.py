@@ -1,11 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from app.api.deps import get_db
+from app.api.deps import get_db, usuario_actual
 from app.core.ratelimit import limit
 from app.services.auth_service import register_teacher, login_teacher
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _origin(request: Request) -> str | None:
+    return request.headers.get("origin") or request.headers.get("Origin")
 
 class RegisterIn(BaseModel):
     email: str
@@ -57,3 +61,44 @@ def reset_pwd(request: Request, payload: ResetIn, db: Session = Depends(get_db))
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
+
+
+# ── Passkeys (WebAuthn) del staff: entrar con huella / rostro ──────────────────────────
+from app.services import teacher_webauthn as _twa   # noqa: E402
+
+
+@router.post("/passkey/register/options")
+def passkey_reg_options(request: Request, db: Session = Depends(get_db),
+                        teacher=Depends(usuario_actual)):
+    return _twa.opciones_registro(db, teacher, _origin(request))
+
+
+@router.post("/passkey/register/verify")
+def passkey_reg_verify(request: Request, payload: dict, db: Session = Depends(get_db),
+                       teacher=Depends(usuario_actual)):
+    return _twa.verificar_registro(db, teacher, payload.get("credential"),
+                                   payload.get("challenge_token"), _origin(request),
+                                   label=payload.get("label"))
+
+
+@router.post("/passkey/login/options")
+@limit("20/minute")
+def passkey_login_options(request: Request, db: Session = Depends(get_db)):
+    return _twa.opciones_login(db, _origin(request))
+
+
+@router.post("/passkey/login/verify")
+@limit("12/minute")
+def passkey_login_verify(request: Request, payload: dict, db: Session = Depends(get_db)):
+    return _twa.verificar_login(db, payload.get("credential"),
+                                payload.get("challenge_token"), _origin(request))
+
+
+@router.get("/passkey/list")
+def passkey_list(db: Session = Depends(get_db), teacher=Depends(usuario_actual)):
+    return _twa.listar(db, teacher)
+
+
+@router.delete("/passkey/{passkey_id}")
+def passkey_del(passkey_id: str, db: Session = Depends(get_db), teacher=Depends(usuario_actual)):
+    return _twa.revocar(db, teacher, passkey_id)
