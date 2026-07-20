@@ -25,12 +25,17 @@ def _agg(rows: list[dict]) -> dict:
     rc: Counter = Counter()
     for r in rows:
         rc.update(r["ra_brechas"])
+    sem = {"verde": 0, "amarillo": 0, "rojo": 0}
+    for r in rows:
+        for k in sem:
+            sem[k] += (r.get("semaforo") or {}).get(k, 0)
     return {
         "n_cursos": len(rows),
         "n_estudiantes": sum(r["n_estudiantes"] for r in rows),
         "n_evaluados": n_ev,
         "logro_promedio": round(num / n_ev, 1) if n_ev else None,
         "estudiantes_con_brecha": sum(r["estudiantes_con_brecha"] for r in rows),
+        "semaforo": sem,
         "top_brechas": [{"code": k, "n": v} for k, v in rc.most_common(6)],
     }
 
@@ -53,6 +58,7 @@ def panorama(db, facultad: str | None = None, departamento: str | None = None,
         logros: list[float] = []
         con_brecha = 0
         ra_ct: Counter = Counter()
+        sem = {"verde": 0, "amarillo": 0, "rojo": 0}   # semáforo por LOGRO del alumno (≥70/50-69/<50)
         for st in estudiantes:
             try:
                 b = ficha_service.brechas_estudiante(db, c.id, st.rut, umbral_brecha=umbral_brecha)
@@ -61,7 +67,9 @@ def panorama(db, facultad: str | None = None, departamento: str | None = None,
             evaluados = [r for r in b["por_ra"] if r["items_evaluados"]]
             if not evaluados:
                 continue
-            logros.append(sum(r["logro_pct"] for r in evaluados) / len(evaluados))
+            avg = sum(r["logro_pct"] for r in evaluados) / len(evaluados)
+            logros.append(avg)
+            sem["verde" if avg >= 70 else "amarillo" if avg >= 50 else "rojo"] += 1
             if b["brechas"]:
                 con_brecha += 1
             for br in b["brechas"]:
@@ -72,6 +80,7 @@ def panorama(db, facultad: str | None = None, departamento: str | None = None,
             "n_estudiantes": len(estudiantes), "n_evaluados": len(logros),
             "logro_promedio": round(sum(logros) / len(logros), 1) if logros else None,
             "estudiantes_con_brecha": con_brecha,
+            "semaforo": sem,
             "ra_brechas": dict(ra_ct),
             "top_brechas": [{"code": k, "n": v} for k, v in ra_ct.most_common(3)],
         })

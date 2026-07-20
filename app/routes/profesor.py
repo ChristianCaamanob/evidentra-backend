@@ -42,3 +42,31 @@ def analisis(assessment_id: UUID, origen: str | None = None, db: Session = Depen
     except Exception:
         logger.error(f"Error en analisis {assessment_id}: {traceback.format_exc()}")
         raise
+
+
+# ── Cortes históricos (snapshots) del análisis: congelar / listar / ver / borrar ──
+@router.post("/assessments/{assessment_id}/analisis/snapshot", dependencies=[Depends(req_profesor)])
+def crear_snapshot(assessment_id: UUID, payload: dict | None = None, db: Session = Depends(get_db)):
+    """Congela el análisis actual como corte inmutable (auditoría / serie de tiempo)."""
+    from app.services import ficha_service
+    payload = payload or {}
+    return ficha_service.crear_snapshot(db, assessment_id, payload.get("etiqueta", "Corte"),
+                                        origen=(payload.get("origen") or None))
+
+
+@router.get("/assessments/{assessment_id}/analisis/snapshots", dependencies=[Depends(req_profesor)])
+def listar_snapshots(assessment_id: UUID, db: Session = Depends(get_db)):
+    from app.services import ficha_service
+    return ficha_service.listar_snapshots(db, assessment_id)
+
+
+@router.get("/analisis/snapshot/{snapshot_id}", dependencies=[Depends(req_profesor)])
+def ver_snapshot(snapshot_id: UUID, db: Session = Depends(get_db)):
+    from app.services import ficha_service
+    return ficha_service.obtener_snapshot(db, snapshot_id)
+
+
+@router.delete("/analisis/snapshot/{snapshot_id}", dependencies=[Depends(req_profesor)])
+def borrar_snapshot(snapshot_id: UUID, db: Session = Depends(get_db)):
+    from app.services import ficha_service
+    return ficha_service.eliminar_snapshot(db, snapshot_id)

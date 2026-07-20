@@ -469,6 +469,73 @@ def analisis_evaluacion(db, assessment_id, origen: str | None = None,
     }
 
 
+# ── Cortes históricos (snapshots) del Centro de Análisis: congelar el análisis en un instante ──
+def crear_snapshot(db, assessment_id, etiqueta: str, origen: str | None = None) -> dict:
+    """Congela el análisis actual de una evaluación como corte INMUTABLE (auditoría/serie de tiempo)."""
+    from app.models.snapshot import AnalisisSnapshot
+    from app.models.assessment import Assessment
+    d = analisis_evaluacion(db, assessment_id, origen=origen)
+    k = d.get("kpis") or {}
+    asm = db.get(Assessment, assessment_id)
+    snap = AnalisisSnapshot(
+        assessment_id=str(assessment_id),
+        course_id=str(asm.course_id) if asm and asm.course_id else None,
+        etiqueta=(str(etiqueta or "").strip()[:160] or "Corte"),
+        origen=(origen or None),
+        n_estudiantes=int(k.get("n_estudiantes") or 0),
+        promedio=k.get("promedio"), aprobacion_pct=k.get("aprobacion_pct"), logro_pct=k.get("logro_pct"),
+        payload_json=d)
+    db.add(snap); db.commit(); db.refresh(snap)
+    return {"id": str(snap.id), "etiqueta": snap.etiqueta,
+            "tomado_at": snap.tomado_at.isoformat() if snap.tomado_at else None,
+            "n_estudiantes": snap.n_estudiantes, "promedio": snap.promedio,
+            "aprobacion_pct": snap.aprobacion_pct, "logro_pct": snap.logro_pct}
+
+
+def listar_snapshots(db, assessment_id) -> dict:
+    """Lista los cortes congelados de una evaluación (sin el payload completo), más recientes primero."""
+    from app.models.snapshot import AnalisisSnapshot
+    q = (db.query(AnalisisSnapshot)
+         .filter(AnalisisSnapshot.assessment_id == str(assessment_id))
+         .order_by(AnalisisSnapshot.tomado_at.desc()).all())
+    return {"assessment_id": str(assessment_id), "n": len(q), "snapshots": [
+        {"id": str(s.id), "etiqueta": s.etiqueta, "origen": s.origen or "",
+         "tomado_at": s.tomado_at.isoformat() if s.tomado_at else None,
+         "n_estudiantes": s.n_estudiantes, "promedio": s.promedio,
+         "aprobacion_pct": s.aprobacion_pct, "logro_pct": s.logro_pct} for s in q]}
+
+
+def obtener_snapshot(db, snapshot_id) -> dict:
+    """Devuelve el payload COMPLETO congelado de un corte (para verlo o comparar)."""
+    from app.models.snapshot import AnalisisSnapshot
+    import uuid as _uuid
+    try:
+        sid = _uuid.UUID(str(snapshot_id))
+    except (ValueError, TypeError):
+        raise not_found("Corte no válido.")
+    s = db.get(AnalisisSnapshot, sid)
+    if not s:
+        raise not_found("Corte no encontrado.")
+    d = dict(s.payload_json or {})
+    d["_snapshot"] = {"id": str(s.id), "etiqueta": s.etiqueta,
+                      "tomado_at": s.tomado_at.isoformat() if s.tomado_at else None, "origen": s.origen or ""}
+    return d
+
+
+def eliminar_snapshot(db, snapshot_id) -> dict:
+    from app.models.snapshot import AnalisisSnapshot
+    import uuid as _uuid
+    try:
+        sid = _uuid.UUID(str(snapshot_id))
+    except (ValueError, TypeError):
+        raise not_found("Corte no válido.")
+    s = db.get(AnalisisSnapshot, sid)
+    if not s:
+        raise not_found("Corte no encontrado.")
+    db.delete(s); db.commit()
+    return {"eliminado": True}
+
+
 def _fortalezas(por_ra: list) -> list:
     return [r for r in por_ra if r.get("nivel") == "Logrado"]
 
