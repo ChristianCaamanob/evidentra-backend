@@ -519,3 +519,19 @@ def test_import_con_imagen_y_pauta(entorno):
     c.post(f"/api/v1/en-vivo/{cod}/avanzar")
     me = c.get(f"/api/v1/en-vivo/{cod}/mi-estado", params={"participante_id": pid, "token": tk}).json()
     assert me["pregunta"]["imagen"] == IMG
+
+
+def test_eliminar_pregunta_renumera(entorno):
+    """LV12b · Eliminar una pregunta de la pauta renumera las restantes 1..N contiguas."""
+    aid, c = entorno["aid"], entorno["client"]
+    items = [{"enunciado": "P" + str(i), "opciones": [{"letra": "A", "texto": "a"}, {"letra": "B", "texto": "b"}],
+              "correcta": "A"} for i in range(1, 5)]
+    c.post(f"/api/v1/en-vivo/banco-importar/{aid}", json={"version": "A", "items": items})
+    # elimina la P2 → deben quedar 3, renumeradas 1..3
+    r = c.post(f"/api/v1/en-vivo/banco/{aid}/eliminar", json={"version": "A", "question_number": 2})
+    assert r.status_code == 200 and r.json()["restantes"] == 3
+    cont = c.get(f"/api/v1/en-vivo/banco/{aid}", params={"version": "A"}).json()
+    qns = [it["question_number"] for it in cont["items"]]
+    assert qns == [1, 2, 3]
+    # el contenido de la antigua P3 ("P3") ahora es la P2
+    assert cont["items"][1]["enunciado"] == "P3"

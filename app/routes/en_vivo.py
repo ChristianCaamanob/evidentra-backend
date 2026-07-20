@@ -128,6 +128,13 @@ def banco_proponer(payload: dict, db: Session = Depends(get_db)):
                                    payload.get("n_alternativas", 4))
 
 
+@router.post("/en-vivo/banco/{assessment_id}/eliminar", dependencies=[Depends(req_profesor)])
+def banco_eliminar_item(assessment_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    """Elimina una pregunta de alternativas de la pauta y renumera las restantes."""
+    return ev.eliminar_item(db, assessment_id, payload.get("version", "A"),
+                            int(payload.get("question_number", 0)))
+
+
 @router.post("/en-vivo/banco-importar/{assessment_id}", dependencies=[Depends(req_profesor)])
 def banco_importar(assessment_id: UUID, payload: dict, db: Session = Depends(get_db)):
     """Crea la pauta de alternativas (con letra correcta) desde preguntas estructuradas y la

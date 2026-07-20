@@ -1184,6 +1184,37 @@ def guardar_contenido_items(db, assessment_id, version: str, items: list) -> dic
     return {"actualizados": n}
 
 
+def eliminar_item(db, assessment_id, version: str, question_number: int) -> dict:
+    """Elimina UNA pregunta de alternativas de la pauta y RENUMERA las restantes 1..N
+    (los ordinales deben quedar contiguos). Mantiene sincronizado n_questions. Compuerta docente."""
+    from app.models.answer_key import QUESTION_TYPE_OPEN_RESPONSE
+    version = (version or "A").upper()
+    ak = db.query(AnswerKey).filter(AnswerKey.assessment_id == assessment_id).first()
+    if not ak:
+        raise not_found("La evaluación no tiene pauta.")
+    mc = sorted([it for it in ak.items
+                 if it.version.upper() == version and it.question_type == QUESTION_TYPE_MULTIPLE_CHOICE],
+                key=lambda x: int(x.question_number))
+    objetivo = next((it for it in mc if int(it.question_number) == int(question_number)), None)
+    if not objetivo:
+        raise not_found("No existe esa pregunta.")
+    db.delete(objetivo)
+    db.flush()
+    # renumerar contiguo 1..N conservando el orden
+    restantes = [it for it in mc if it is not objetivo]
+    for i, it in enumerate(restantes, start=1):
+        it.question_number = i
+    a = db.query(Assessment).filter(Assessment.id == assessment_id).first()
+    if a is not None:
+        a.n_questions = len(restantes)
+        if getattr(a, "version_count", None) is not None:
+            a.version_count = len(restantes)
+    ak.is_valid = bool(restantes)
+    ak.status = "validada" if restantes else "draft"
+    db.commit()
+    return {"eliminados": 1, "restantes": len(restantes)}
+
+
 def importar_preguntas(db, assessment_id, version: str, items: list) -> dict:
     """Crea la PAUTA de alternativas a partir de preguntas estructuradas (enunciado, opciones,
     letra correcta, justificación) — el módulo de importación de preguntas del modo en vivo.
