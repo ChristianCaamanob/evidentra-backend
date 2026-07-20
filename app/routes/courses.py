@@ -236,6 +236,23 @@ def get_pronostico_curso(course_id: UUID, db: Session = Depends(get_db)):
     return prediccion_service.pronostico_curso(db, course_id, escala=escala, exigencia=exig)
 
 
+@router.post("/{course_id}/pronostico/{formato}", dependencies=[Depends(req_profesor)])
+def export_pronostico_curso(course_id: UUID, formato: str, db: Session = Depends(get_db)):
+    """Descarga el pronóstico del curso en Word/PDF/Excel (semáforo + tabla por estudiante)."""
+    if formato not in ("docx", "pdf", "xlsx"):
+        raise HTTPException(status_code=422, detail="Formato no soportado (docx | pdf | xlsx).")
+    from app.services import prediccion_service, exportador_service
+    from app.models.course import Course
+    c = db.get(Course, course_id)
+    escala = (c.grading_scale if c else None) or "chile_1_7"
+    exig = (c.passing_threshold if c else None) or 60.0
+    out = prediccion_service.pronostico_export_payload(db, course_id, escala=escala, exigencia=exig)
+    data, media = exportador_service.exportar(formato, out["payload"])
+    fn = re.sub(r"[^A-Za-z0-9_\-]", "_", f"pronostico_{(c.code if c else '')}")[:80] or "pronostico"
+    return Response(content=data, media_type=media,
+                    headers={"Content-Disposition": f'attachment; filename="{fn}.{formato}"'})
+
+
 class StudentIn(BaseModel):
     rut: str
     apellido_paterno: str

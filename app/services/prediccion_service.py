@@ -381,3 +381,41 @@ def pronostico_curso(db, course_id, escala="chile_1_7", exigencia=60.0) -> dict:
             "n_estudiantes": len(ests), "conteo_estados": conteo, "semaforo": semaforo,
             "prob_promedio": round(sum(probs) / len(probs)) if probs else None,
             "en_riesgo": en_riesgo, "estudiantes": filas}
+
+
+def pronostico_export_payload(db, course_id, escala="chile_1_7", exigencia=60.0) -> dict:
+    """Documento exportable (Word/PDF/Excel) del pronóstico del curso: resumen del semáforo +
+    tabla por estudiante (semáforo, estado, probabilidad, nota, proyección, necesita, asistencia)."""
+    from app.core.errors import conflict
+    p = pronostico_curso(db, course_id, escala, exigencia)
+    if not p.get("parametrizado"):
+        raise conflict("El curso no está parametrizado; no hay pronóstico para exportar.")
+
+    def _f(v, dec=1):
+        return "—" if v is None else (f"{v:.{dec}f}" if isinstance(v, float) else v)
+
+    LUZ = {"verde": "🟢 Al día", "amarillo": "🟡 Alerta", "rojo": "🔴 Reprobando (temporal)", "sin_datos": "—"}
+    headers = ["Semáforo", "Estudiante", "RUT/Matrícula", "Estado", "Prob. aprobar %",
+               "Nota acumulada", "Proyección", "Necesita en lo que resta", "Asistencia %"]
+    filas = []
+    for e in p["estudiantes"]:
+        filas.append([LUZ.get(e.get("color"), "—"), e.get("nombre") or e.get("rut") or "", e.get("rut") or "",
+                      e.get("estado") or "", _f(e.get("probabilidad"), 0), _f(e.get("nota_acumulada")),
+                      _f(e.get("proyeccion")),
+                      ("Asegura" if e.get("necesita") is None and (e.get("proyeccion") or 0) >= 4 else _f(e.get("necesita"))),
+                      _f(e.get("asistencia_pct"), 0)])
+    s = p["semaforo"]
+    resumen = (f"Semáforo de éxito: {s['verde']} en verde (al día), {s['amarillo']} en amarillo "
+               f"(alerta), {s['rojo']} en rojo (reprobando, temporal). "
+               f"Probabilidad promedio de aprobar: {p['prob_promedio']}%. "
+               f"Estudiantes en riesgo (amarillo+rojo): {p['en_riesgo']} de {p['n_estudiantes']}. "
+               "Proyección transparente sobre la parametrización del curso (pesos + asistencia). "
+               "El estado es TEMPORAL y reversible; no altera calificaciones (G1).")
+    tabla = {"titulo": "Pronóstico por estudiante", "headers": headers, "rows": filas}
+    doc = {
+        "titulo": "Pronóstico de aprobación · " + (p["curso"] or ""),
+        "secciones": [{"heading": "Semáforo de éxito · " + (p["curso"] or ""), "nivel": 1, "texto": resumen}],
+        "tablas": [tabla],
+        "hojas": [{"nombre": "Pronóstico", "headers": headers, "rows": filas}],
+    }
+    return {"payload": doc, "pronostico": p}
