@@ -34,9 +34,34 @@ def register(request: Request, payload: RegisterIn, db: Session = Depends(get_db
 @limit("8/minute")
 def login(request: Request, payload: LoginIn, db: Session = Depends(get_db)):
     result = login_teacher(db, payload.email, payload.password)
+    if result.get("email_no_verificado"):
+        # No es un error de credenciales: el frontend muestra "verifica tu correo" + reenviar.
+        return {"email_no_verificado": True, "email": result.get("email"), "detail": result["error"]}
     if "error" in result:
         raise HTTPException(status_code=401, detail=result["error"])
     return result
+
+
+from app.services.auth_service import verificar_email as _verificar_email, reenviar_verificacion as _reenviar_verif
+
+class VerifyIn(BaseModel):
+    token: str
+
+class ResendVerifyIn(BaseModel):
+    email: str
+
+@router.post("/verify-email")
+@limit("10/minute")
+def verify_email(request: Request, payload: VerifyIn, db: Session = Depends(get_db)):
+    result = _verificar_email(db, payload.token)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+@router.post("/resend-verification")
+@limit("4/minute")
+def resend_verification(request: Request, payload: ResendVerifyIn, db: Session = Depends(get_db)):
+    return _reenviar_verif(db, payload.email)
 
 from app.services.auth_service import create_reset_token, reset_password
 

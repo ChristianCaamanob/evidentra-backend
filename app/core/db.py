@@ -529,6 +529,9 @@ _COLUMNAS_ADITIVAS = {
     "assessments": {
         "tipo": "VARCHAR(20)",
     },
+    "teachers": {
+        "email_verificado": "BOOLEAN NOT NULL DEFAULT true",
+    },
     "courses": {
         "tipo": "VARCHAR(20)",
         "departamento": "VARCHAR(160)",

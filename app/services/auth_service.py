@@ -46,25 +46,69 @@ def _token_payload(teacher):
 def get_teacher_by_email(db, email):
     return db.query(Teacher).filter(Teacher.email == email.lower()).first()
 
+def _teacher_dict(teacher):
+    return {"id": str(teacher.id), "email": teacher.email, "name": teacher.name,
+            "rol": teacher.rol, "email_verificado": bool(getattr(teacher, "email_verificado", True))}
+
+def _verify_email_token(teacher):
+    from datetime import datetime as _dt, timedelta as _td
+    return jwt.encode({"sub": str(teacher.id), "p": "verify_email",
+                       "exp": _dt.utcnow() + _td(days=2)}, SECRET_KEY, algorithm=ALGORITHM)
+
+def enviar_verificacion(db, teacher) -> bool:
+    """Envía (o reenvía) el correo de verificación. Devuelve True si se envió."""
+    from app.services.email_service import send_verification_email
+    try:
+        send_verification_email(teacher.email, _verify_email_token(teacher), teacher.name)
+        print(f"[VERIFY OK] enviado a {teacher.email}", flush=True)
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f"[VERIFY ERROR] {teacher.email}: {e}", flush=True)
+        return False
+
+def verificar_email(db, token: str):
+    payload = decode_token(token or "")
+    if not payload or payload.get("p") != "verify_email" or not payload.get("sub"):
+        return {"error": "Enlace de verificación inválido o expirado"}
+    import uuid as _uuid
+    try:
+        uid = _uuid.UUID(str(payload["sub"]))
+    except (ValueError, TypeError):
+        return {"error": "Enlace inválido"}
+    teacher = db.query(Teacher).filter(Teacher.id == uid).first()
+    if not teacher:
+        return {"error": "Cuenta no encontrada"}
+    teacher.email_verificado = True
+    db.commit()
+    return {"ok": True, "email": teacher.email}
+
+def reenviar_verificacion(db, email: str):
+    teacher = get_teacher_by_email(db, (email or "").lower().strip())
+    if teacher and not getattr(teacher, "email_verificado", True):
+        enviar_verificacion(db, teacher)
+    return {"ok": True}   # no revela si el correo existe
+
 def register_teacher(db, email, password, name):
     email = email.lower().strip()
     if get_teacher_by_email(db, email):
         return {"error": "Este correo ya está registrado"}
     # El auto-registro SIEMPRE crea 'profesor'. Elevar a investigador/director/creador es
     # una accion del creador (no se puede autoasignar un rol privilegiado).
-    teacher = Teacher(email=email, hashed_password=hash_password(password), name=name)
+    # Cuenta NUEVA nace SIN verificar: debe confirmar el enlace del correo antes de ingresar.
+    teacher = Teacher(email=email, hashed_password=hash_password(password), name=name,
+                      email_verificado=False)
     db.add(teacher); db.commit(); db.refresh(teacher)
-    return {"token": create_token(_token_payload(teacher)),
-            "teacher": {"id": str(teacher.id), "email": teacher.email, "name": teacher.name,
-                        "rol": teacher.rol}}
+    enviado = enviar_verificacion(db, teacher)
+    return {"pendiente_verificacion": True, "email": teacher.email, "correo_enviado": enviado}
 
 def login_teacher(db, email, password):
     teacher = get_teacher_by_email(db, email)
     if not teacher: return {"error": "Correo no registrado"}
     if not verify_password(password, teacher.hashed_password): return {"error": "Contraseña incorrecta"}
-    return {"token": create_token(_token_payload(teacher)),
-            "teacher": {"id": str(teacher.id), "email": teacher.email, "name": teacher.name,
-                        "rol": teacher.rol}}
+    if not getattr(teacher, "email_verificado", True):
+        return {"error": "Verifica tu correo antes de ingresar. Te enviamos un enlace.",
+                "email_no_verificado": True, "email": teacher.email}
+    return {"token": create_token(_token_payload(teacher)), "teacher": _teacher_dict(teacher)}
 
 import secrets
 from app.models.password_reset import PasswordResetToken

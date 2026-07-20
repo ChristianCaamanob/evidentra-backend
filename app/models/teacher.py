@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import String
+from sqlalchemy import String, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, TimestampMixin, UUIDMixin
@@ -25,3 +25,7 @@ class Teacher(Base, UUIDMixin, TimestampMixin):
     # Aditivo: las filas existentes quedan como 'profesor' (server_default), sin romper el MVP.
     rol: Mapped[str] = mapped_column(String(20), default=ROL_PROFESOR,
                                      server_default=ROL_PROFESOR, nullable=False)
+    # Verificación de correo: las cuentas EXISTENTES quedan verificadas (server_default true) para
+    # no bloquear a nadie; las NUEVAS se crean en False y deben confirmar el enlace del correo.
+    email_verificado: Mapped[bool] = mapped_column(Boolean, default=False,
+                                                   server_default="true", nullable=False)
