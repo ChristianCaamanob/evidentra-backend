@@ -60,7 +60,7 @@ def opciones_registro(db, teacher: Teacher, origin_header=None) -> dict:
     from webauthn.helpers import options_to_json
     from webauthn.helpers.structs import (
         AuthenticatorSelectionCriteria, UserVerificationRequirement, ResidentKeyRequirement,
-        AttestationConveyancePreference, PublicKeyCredentialDescriptor)
+        AttestationConveyancePreference, PublicKeyCredentialDescriptor, AuthenticatorAttachment)
     rp_id, rp_name, _ = _rp(origin_header)
     existentes = db.query(TeacherPasskey).filter(
         TeacherPasskey.teacher_id == teacher.id, TeacherPasskey.activo.is_(True)).all()
@@ -71,6 +71,9 @@ def opciones_registro(db, teacher: Teacher, origin_header=None) -> dict:
         user_name=teacher.email, user_display_name=(teacher.name or teacher.email),
         challenge=challenge, attestation=AttestationConveyancePreference.NONE,
         authenticator_selection=AuthenticatorSelectionCriteria(
+            # PLATFORM = biometría integrada del equipo (Touch ID / Windows Hello / huella del móvil),
+            # abre directo el diálogo biométrico en vez del selector QR/llave externa.
+            authenticator_attachment=AuthenticatorAttachment.PLATFORM,
             user_verification=UserVerificationRequirement.REQUIRED,
             resident_key=ResidentKeyRequirement.REQUIRED),   # passkey descubrible (login sin escribir correo)
         exclude_credentials=excluir)
