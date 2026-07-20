@@ -126,6 +126,7 @@ def crear_sesion(db, assessment_id, version: str = "A", config: dict | None = No
                      version=version.upper(),
                      retro_alumno=bool(cfg.get("retro_alumno")),
                      revelar_correccion=bool(cfg.get("revelar_correccion", True)),
+                     mascota_motivacional=bool(cfg.get("mascota_motivacional", True)),
                      modo_ritmo=modo, shuffle_preguntas=shuffle_p, shuffle_opciones=shuffle_o,
                      requiere_seb=bool(cfg.get("requiere_seb")))
     db.add(s); db.commit(); db.refresh(s)
@@ -435,6 +436,7 @@ def responder(db, codigo: str, participante_id, token: str,
 def _config_dict(s) -> dict:
     return {"modo_ritmo": s.modo_ritmo, "retro_alumno": s.retro_alumno,
             "revelar_correccion": s.revelar_correccion,
+            "mascota_motivacional": bool(getattr(s, "mascota_motivacional", True)),
             "shuffle_preguntas": s.shuffle_preguntas, "shuffle_opciones": s.shuffle_opciones,
             "requiere_seb": bool(getattr(s, "requiere_seb", False))}
 
@@ -606,6 +608,7 @@ def mi_resultado(db, codigo: str, participante_id, token: str) -> dict:
         "nota": nota, "nota_label": nota_label, "aprobado": aprobado,
         "escala": escala, "umbral": umbral,
         "revelar": s.revelar_correccion, "detalle": detalle,
+        "mascota_motivacional": bool(getattr(s, "mascota_motivacional", True)),
     }
 
 

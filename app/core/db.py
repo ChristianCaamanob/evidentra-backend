@@ -497,6 +497,7 @@ _COLUMNAS_ADITIVAS = {
     "sesiones_en_vivo": {
         "retro_alumno": "BOOLEAN NOT NULL DEFAULT false",
         "revelar_correccion": "BOOLEAN NOT NULL DEFAULT true",
+        "mascota_motivacional": "BOOLEAN NOT NULL DEFAULT true",
         "modo_ritmo": "VARCHAR(20) NOT NULL DEFAULT 'docente'",
         "shuffle_preguntas": "BOOLEAN NOT NULL DEFAULT false",
         "shuffle_opciones": "BOOLEAN NOT NULL DEFAULT false",

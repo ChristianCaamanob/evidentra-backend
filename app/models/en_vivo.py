@@ -48,6 +48,8 @@ class SesionEnVivo(UUIDMixin, Base):
     # Retroalimentación al alumno (config del docente antes de abrir la sala):
     retro_alumno: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     revelar_correccion: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
+    # Reveal motivacional del "huillín" al alumno antes de mostrar el puntaje (según su % de logro).
+    mascota_motivacional: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
     modo_ritmo: Mapped[str] = mapped_column(String(20), default=RITMO_DOCENTE,
                                             server_default=RITMO_DOCENTE, nullable=False)
     shuffle_preguntas: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
