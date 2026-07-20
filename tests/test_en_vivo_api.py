@@ -399,3 +399,45 @@ def test_no_se_puede_iniciar_sin_pauta_valida(entorno):
     c = entorno["client"]
     r = c.post(f"/api/v1/assessments/00000000-0000-0000-0000-000000000000/en-vivo")
     assert r.status_code == 409
+
+
+def test_candado_dispositivo_evita_doble_registro(entorno):
+    """LV10 · Reproduce el caso del CEO: rindo, obtengo puntaje, reescaneo el MISMO QR e
+    intento rendir por un compañero desde el MISMO dispositivo → NO se crea un 2º registro."""
+    aid, c = entorno["aid"], entorno["client"]
+    cod = c.post(f"/api/v1/assessments/{aid}/en-vivo").json()["codigo"]
+
+    DEV_A = "device-telefono-de-ana"
+
+    # 1) Ana entra desde su teléfono (device A) y responde las 3 preguntas (self-paced no hace
+    #    falta: usamos ritmo docente avanzando; basta con dejar su participante creado).
+    r = c.post(f"/api/v1/en-vivo/{cod}/unir", json={"alias": "Ana", "device_id": DEV_A})
+    assert r.status_code == 200, r.text
+    ana = r.json()
+    ana_id = ana["participante_id"]
+    assert ana.get("reanudado") in (False, None)
+
+    # 2) Ana "termina y obtiene su puntaje" → 3) REESCANEA el mismo QR y ELIGE a un compañero
+    #    (Beto) desde el MISMO dispositivo. El candado debe DEVOLVER a Ana, no crear a Beto.
+    r2 = c.post(f"/api/v1/en-vivo/{cod}/unir", json={"alias": "Beto", "device_id": DEV_A})
+    assert r2.status_code == 200, r2.text
+    j2 = r2.json()
+    assert j2["participante_id"] == ana_id, "El mismo equipo creó un 2º participante (FALLA)"
+    assert j2["alias"] == "Ana", "Debe reconectar como Ana, no como Beto"
+    assert j2["reanudado"] is True
+
+    # 4) El backend registró la EVIDENCIA trazable del intento de suplantación.
+    integ = c.get(f"/api/v1/en-vivo/{cod}/integridad").json()
+    fila_ana = [f for f in integ["participantes"] if f["participante_id"] == ana_id][0]
+    assert fila_ana["reingresos_bloqueados"] >= 1, "No quedó la evidencia de reingreso"
+    assert fila_ana["nivel"] == "revisar"
+
+    # 5) Solo existe UN participante en la sala (no dos).
+    est = c.get(f"/api/v1/en-vivo/{cod}/estado").json()
+    assert est["n_participantes"] == 1, f"Hay {est['n_participantes']} participantes (debía ser 1)"
+
+    # 6) Control: OTRO dispositivo (el teléfono real de Beto) SÍ puede unirse como Beto.
+    r3 = c.post(f"/api/v1/en-vivo/{cod}/unir", json={"alias": "Beto", "device_id": "device-de-beto"})
+    assert r3.status_code == 200 and r3.json()["participante_id"] != ana_id
+    est2 = c.get(f"/api/v1/en-vivo/{cod}/estado").json()
+    assert est2["n_participantes"] == 2
