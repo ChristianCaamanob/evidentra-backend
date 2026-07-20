@@ -239,3 +239,14 @@ def integridad_bloquear(codigo: str, participante_id: str, payload: dict | None 
     return integridad_service.bloquear(db, s, participante_id,
                                        bool(payload.get("bloquear", True)),
                                        payload.get("motivo"))
+
+
+@router.post("/en-vivo/{codigo}/participante/{participante_id}/tiempo", dependencies=[Depends(req_profesor)])
+def extender_tiempo(codigo: str, participante_id: str, payload: dict | None = None,
+                    db: Session = Depends(get_db)):
+    """El DOCENTE reabre y/o extiende el tiempo de UN alumno (llegó tarde / se le agotó):
+    le deja `extra_min` minutos desde AHORA. reabrir=True por defecto (limpia el bloqueo)."""
+    payload = payload or {}
+    return ev.extender_tiempo(db, codigo, participante_id,
+                              int(payload.get("extra_min", 0) or 0),
+                              reabrir=bool(payload.get("reabrir", True)))

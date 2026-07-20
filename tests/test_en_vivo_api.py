@@ -441,3 +441,49 @@ def test_candado_dispositivo_evita_doble_registro(entorno):
     assert r3.status_code == 200 and r3.json()["participante_id"] != ana_id
     est2 = c.get(f"/api/v1/en-vivo/{cod}/estado").json()
     assert est2["n_participantes"] == 2
+
+
+def test_temporizador_autocierre_y_extension(entorno):
+    """LV11 · Duración configurable: el alumno ve su cuenta regresiva, al llegar a 0 no puede
+    responder (auto-cierre), y el docente puede REABRIR+EXTENDER selectivamente a ese alumno."""
+    import time as _t
+    from sqlalchemy.orm import Session as _S
+    from app.models.en_vivo import SesionEnVivo
+    aid, c, engine = entorno["aid"], entorno["client"], entorno["engine"]
+
+    # sala con 10 min de límite
+    cod = c.post(f"/api/v1/assessments/{aid}/en-vivo", json={"duracion_min": 10}).json()["codigo"]
+    pid, tk = _unir(c, cod, "Ana")
+    # aún no arranca el timer (lobby) → sin cuenta
+    st0 = c.get(f"/api/v1/en-vivo/{cod}/mi-estado", params={"participante_id": pid, "token": tk}).json()
+    assert st0["duracion_min"] == 10 and st0["segundos_restantes"] is None
+
+    # el docente abre la sala → arranca la cuenta regresiva
+    c.post(f"/api/v1/en-vivo/{cod}/avanzar")
+    st1 = c.get(f"/api/v1/en-vivo/{cod}/mi-estado", params={"participante_id": pid, "token": tk}).json()
+    assert 500 < st1["segundos_restantes"] <= 600 and st1["tiempo_agotado"] is False
+
+    # simulamos que pasaron 11 min: retrocedemos el inicio del timer
+    with _S(engine) as db:
+        s = db.query(SesionEnVivo).filter(SesionEnVivo.codigo == cod).first()
+        s.timer_inicio_ts = int(_t.time()) - 11 * 60
+        db.commit()
+
+    # el alumno ya no puede responder: tiempo agotado → auto-cierre
+    st2 = c.get(f"/api/v1/en-vivo/{cod}/mi-estado", params={"participante_id": pid, "token": tk}).json()
+    assert st2["tiempo_agotado"] is True and st2["segundos_restantes"] == 0
+    r = c.post(f"/api/v1/en-vivo/{cod}/responder",
+               json={"participante_id": pid, "token": tk, "respuesta": "B"})
+    assert r.status_code == 409 and "tiempo" in r.json()["detail"].lower()
+
+    # el docente REABRE + EXTIENDE 5 min SOLO a Ana → vuelve a tener ~5 min y puede responder
+    rext = c.post(f"/api/v1/en-vivo/{cod}/participante/{pid}/tiempo", json={"extra_min": 5})
+    assert rext.status_code == 200, rext.text
+    assert 240 < rext.json()["segundos_restantes"] <= 300
+    r2 = c.post(f"/api/v1/en-vivo/{cod}/responder",
+                json={"participante_id": pid, "token": tk, "respuesta": "B"})
+    assert r2.status_code == 200 and r2.json()["correcta"] is True
+
+    # y quedó la evidencia trazable de la extensión
+    tl = c.get(f"/api/v1/en-vivo/{cod}/integridad/{pid}").json()
+    assert any(e["tipo"] == "tiempo_extendido" for e in tl["eventos"])

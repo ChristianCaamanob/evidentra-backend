@@ -50,6 +50,11 @@ class SesionEnVivo(UUIDMixin, Base):
     revelar_correccion: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
     # Reveal motivacional del "huillín" al alumno antes de mostrar el puntaje (según su % de logro).
     mascota_motivacional: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
+    # Temporizador (LV11): duración total en minutos (0 = sin límite). timer_inicio_ts = epoch en
+    # que arrancó la cuenta (se estampa al pasar lobby→activa la primera vez). El plazo de cada
+    # alumno = timer_inicio_ts + duracion_min*60 + su tiempo_extra_seg (extensión selectiva).
+    duracion_min: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    timer_inicio_ts: Mapped[int | None] = mapped_column(Integer, nullable=True)
     modo_ritmo: Mapped[str] = mapped_column(String(20), default=RITMO_DOCENTE,
                                             server_default=RITMO_DOCENTE, nullable=False)
     shuffle_preguntas: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
@@ -87,6 +92,9 @@ class ParticipanteVivo(UUIDMixin, Base):
     bloqueado: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     bloqueado_motivo: Mapped[str | None] = mapped_column(String(255), nullable=True)
     ultimo_latido_ts: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Extensión selectiva de tiempo (LV11): segundos EXTRA que el docente concede a ESTE alumno
+    # (llegó tarde / reabierto). Se suma a su plazo. 0 = sin extensión.
+    tiempo_extra_seg: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
 
     sesion = relationship("SesionEnVivo", back_populates="participantes")
 

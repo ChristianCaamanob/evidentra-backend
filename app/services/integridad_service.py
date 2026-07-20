@@ -140,12 +140,14 @@ def resumen_participantes(db, s) -> dict:
     resp_por_part: dict = {}
     for rv in db.query(RespuestaVivo).filter(RespuestaVivo.sesion_id == s.id).all():
         resp_por_part.setdefault(rv.participante_id, {})[int(rv.question_number)] = bool(rv.correcta)
+    from app.services.en_vivo_service import segundos_restantes as _seg_rest
     ahora = _ahora_epoch()
     orden = {"revisar": 0, "aviso": 1, "ok": 2}
     filas = []
     for p in parts:
         r = _resumen_de(por_part.get(p.id, []))
         sin_latido = (ahora - p.ultimo_latido_ts) if p.ultimo_latido_ts else None
+        _rest = _seg_rest(s, p)
         # Correlación clave: preguntas durante las cuales se ausentó Y respondió (¿acertó al volver?).
         resp = resp_por_part.get(p.id, {})
         respondidas_tras_ausencia = [{"pregunta": q, "correcta": resp[q]}
@@ -154,6 +156,8 @@ def resumen_participantes(db, s) -> dict:
             "participante_id": str(p.id), "alias": p.alias, "student_id": p.student_id,
             "progreso": p.progreso, "bloqueado": bool(p.bloqueado),
             "bloqueado_motivo": p.bloqueado_motivo,
+            "segundos_restantes": _rest,
+            "tiempo_extra_seg": int(getattr(p, "tiempo_extra_seg", 0) or 0),
             "sin_latido_s": sin_latido,
             "conectado": (sin_latido is not None and sin_latido <= 25),
             "respondidas_tras_ausencia": respondidas_tras_ausencia,
@@ -163,6 +167,8 @@ def resumen_participantes(db, s) -> dict:
     return {"codigo": s.codigo, "n": len(filas),
             "n_revisar": sum(1 for f in filas if f["nivel"] == "revisar"),
             "n_aviso": sum(1 for f in filas if f["nivel"] == "aviso"),
+            "duracion_min": int(getattr(s, "duracion_min", 0) or 0),
+            "timer_activo": bool(int(getattr(s, "duracion_min", 0) or 0) > 0 and getattr(s, "timer_inicio_ts", None)),
             "participantes": filas}
 
 
@@ -185,7 +191,7 @@ def timeline_participante(db, s, participante_id) -> dict:
     interes = {"page_hidden", "page_visible", "fullscreen_exit", "fullscreen_enter",
                "paste", "copy", "cut", "contextmenu", "sesion_concurrente",
                "ventana_otra_encima", "window_resize", "posible_captura", "conexion_perdida",
-               "reingreso_bloqueado", "join"}
+               "reingreso_bloqueado", "tiempo_extendido", "join"}
     linea = [{
         "tipo": e.tipo, "question_number": e.question_number,
         "duration_ms": e.duration_ms, "meta": e.meta_json,

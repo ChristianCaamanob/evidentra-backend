@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import random
 import secrets
+import time
 import uuid
 
 from app.core.errors import conflict, not_found
@@ -127,6 +128,7 @@ def crear_sesion(db, assessment_id, version: str = "A", config: dict | None = No
                      retro_alumno=bool(cfg.get("retro_alumno")),
                      revelar_correccion=bool(cfg.get("revelar_correccion", True)),
                      mascota_motivacional=bool(cfg.get("mascota_motivacional", True)),
+                     duracion_min=max(0, int(cfg.get("duracion_min") or 0)),
                      modo_ritmo=modo, shuffle_preguntas=shuffle_p, shuffle_opciones=shuffle_o,
                      requiere_seb=bool(cfg.get("requiere_seb")))
     db.add(s); db.commit(); db.refresh(s)
@@ -144,6 +146,32 @@ def verificar_seb_o_error(db, s, request):
                        ".seb que te compartió el docente.")
 
 
+def _ahora() -> int:
+    return int(time.time())
+
+
+def _arrancar_timer(s) -> None:
+    """Estampa el inicio de la cuenta regresiva la PRIMERA vez que la sala se abre (si hay límite)."""
+    if int(getattr(s, "duracion_min", 0) or 0) > 0 and not getattr(s, "timer_inicio_ts", None):
+        s.timer_inicio_ts = _ahora()
+
+
+def segundos_restantes(s, p) -> int | None:
+    """Segundos que le quedan a ESTE alumno (plazo global + su extensión). None = sin límite
+    o aún no arrancó. Puede ser negativo → tiempo agotado."""
+    dur = int(getattr(s, "duracion_min", 0) or 0)
+    ini = getattr(s, "timer_inicio_ts", None)
+    if dur <= 0 or not ini:
+        return None
+    deadline = int(ini) + dur * 60 + int(getattr(p, "tiempo_extra_seg", 0) or 0)
+    return deadline - _ahora()
+
+
+def _tiempo_agotado(s, p) -> bool:
+    r = segundos_restantes(s, p)
+    return r is not None and r <= 0
+
+
 def avanzar(db, codigo: str) -> SesionEnVivo:
     s = _sesion(db, codigo)
     if s.estado == ESTADO_CERRADA:
@@ -154,8 +182,10 @@ def avanzar(db, codigo: str) -> SesionEnVivo:
         s.estado = ESTADO_ACTIVA
         if s.pregunta_actual == 0:
             s.pregunta_actual = 1                 # nominal: marca "empezó" (no dirige a los alumnos)
+        _arrancar_timer(s)
         db.commit(); db.refresh(s)
         return s
+    _arrancar_timer(s)
     cierra = s.pregunta_actual >= s.n_preguntas
     if cierra:
         s.estado = ESTADO_CERRADA                 # se acabaron las preguntas -> cierra
@@ -404,6 +434,19 @@ def _participante(db, s, participante_id, token) -> ParticipanteVivo:
     return p
 
 
+def _participante_por_id(db, s, participante_id) -> ParticipanteVivo:
+    """Lookup por id SIN token (acciones del docente: extender tiempo, cerrar/reabrir)."""
+    try:
+        pid = uuid.UUID(str(participante_id))
+    except ValueError:
+        raise not_found("Participante no valido.")
+    p = db.query(ParticipanteVivo).filter(
+        ParticipanteVivo.id == pid, ParticipanteVivo.sesion_id == s.id).first()
+    if not p:
+        raise not_found("Participante no encontrado en esta sesion.")
+    return p
+
+
 def _ordinal_actual(s, p, n_items: int) -> int:
     """Ordinal (1..N) de la pregunta que le toca al participante ahora, o 0 si ninguna."""
     if s.modo_ritmo == RITMO_ALUMNO:
@@ -421,6 +464,8 @@ def responder(db, codigo: str, participante_id, token: str,
     p = _participante(db, s, participante_id, token)
     if getattr(p, "bloqueado", False):
         raise conflict("El docente cerró tu evaluación. No puedes seguir respondiendo.")
+    if _tiempo_agotado(s, p):
+        raise conflict("Se acabó el tiempo. Tu evaluación se cerró automáticamente.")
 
     items = _items_contenido(db, uuid.UUID(s.assessment_id), s.version)
     ordinal = _ordinal_actual(s, p, len(items))
@@ -464,10 +509,38 @@ def responder(db, codigo: str, participante_id, token: str,
     return out
 
 
+def extender_tiempo(db, codigo: str, participante_id, extra_min: int, reabrir: bool = True) -> dict:
+    """El docente REABRE y/o EXTIENDE el tiempo de UN alumno (llegó tarde / se le agotó).
+    Semántica intuitiva: le deja `extra_min` minutos CONTADOS DESDE AHORA (no importa cuánto
+    se pasó). Si la sala no tiene temporizador, solo reabre. Decisión humana, registrada."""
+    s = _sesion(db, codigo)
+    p = _participante_por_id(db, s, participante_id)
+    extra_min = max(0, int(extra_min or 0))
+    dur = int(getattr(s, "duracion_min", 0) or 0)
+    ini = getattr(s, "timer_inicio_ts", None)
+    if dur > 0 and ini:
+        base_sin_extra = int(ini) + dur * 60           # plazo del alumno SIN su extensión
+        objetivo = _ahora() + extra_min * 60           # queremos que venza dentro de `extra_min`
+        p.tiempo_extra_seg = max(0, objetivo - base_sin_extra)
+    if reabrir:
+        p.bloqueado = False
+        p.bloqueado_motivo = None
+    db.add(EventoIntegridad(sesion_id=s.id, participante_id=p.id, tipo="tiempo_extendido",
+                            duration_ms=extra_min * 60000,
+                            meta_json={"extra_min": extra_min, "reabierto": bool(reabrir)}))
+    db.commit(); db.refresh(p)
+    return {"participante_id": str(p.id), "alias": p.alias,
+            "segundos_restantes": segundos_restantes(s, p),
+            "tiempo_extra_seg": int(getattr(p, "tiempo_extra_seg", 0) or 0),
+            "bloqueado": bool(p.bloqueado)}
+
+
 def _config_dict(s) -> dict:
     return {"modo_ritmo": s.modo_ritmo, "retro_alumno": s.retro_alumno,
             "revelar_correccion": s.revelar_correccion,
             "mascota_motivacional": bool(getattr(s, "mascota_motivacional", True)),
+            "duracion_min": int(getattr(s, "duracion_min", 0) or 0),
+            "timer_activo": bool(int(getattr(s, "duracion_min", 0) or 0) > 0 and getattr(s, "timer_inicio_ts", None)),
             "shuffle_preguntas": s.shuffle_preguntas, "shuffle_opciones": s.shuffle_opciones,
             "requiere_seb": bool(getattr(s, "requiere_seb", False))}
 
@@ -497,14 +570,24 @@ def estado_participante(db, codigo: str, participante_id, token: str) -> dict:
     n = len(items)
     respondidas = db.query(RespuestaVivo).filter(RespuestaVivo.participante_id == p.id).count()
 
+    restante = segundos_restantes(s, p)
     base = {"estado": s.estado, "modo_ritmo": s.modo_ritmo, "alias": p.alias,
             "n_preguntas": n, "respondidas": respondidas,
             "progreso_pct": round(respondidas / n * 100) if n else 0,
             "bloqueado": bool(getattr(p, "bloqueado", False)),
-            "bloqueado_motivo": getattr(p, "bloqueado_motivo", None)}
+            "bloqueado_motivo": getattr(p, "bloqueado_motivo", None),
+            "retro_alumno": bool(getattr(s, "retro_alumno", False)),
+            "duracion_min": int(getattr(s, "duracion_min", 0) or 0),
+            "segundos_restantes": (max(0, restante) if restante is not None else None),
+            "tiempo_agotado": _tiempo_agotado(s, p)}
 
     if getattr(p, "bloqueado", False):
         base["pregunta"] = None                 # el docente cerró la prueba a este alumno
+        return base
+    # Temporizador agotado: se cierra solo (como si hubiera terminado); ve su resultado.
+    if base["tiempo_agotado"] and s.estado == ESTADO_ACTIVA:
+        base["pregunta"] = None
+        base["fin"] = True
         return base
     if s.estado in (ESTADO_LOBBY,) or (s.estado != ESTADO_ACTIVA and s.modo_ritmo == RITMO_DOCENTE):
         base["pregunta"] = None                 # esperando (lobby o pausa en ritmo-docente)

@@ -498,6 +498,8 @@ _COLUMNAS_ADITIVAS = {
         "retro_alumno": "BOOLEAN NOT NULL DEFAULT false",
         "revelar_correccion": "BOOLEAN NOT NULL DEFAULT true",
         "mascota_motivacional": "BOOLEAN NOT NULL DEFAULT true",
+        "duracion_min": "INTEGER NOT NULL DEFAULT 0",
+        "timer_inicio_ts": "INTEGER",
         "modo_ritmo": "VARCHAR(20) NOT NULL DEFAULT 'docente'",
         "shuffle_preguntas": "BOOLEAN NOT NULL DEFAULT false",
         "shuffle_opciones": "BOOLEAN NOT NULL DEFAULT false",
@@ -511,6 +513,7 @@ _COLUMNAS_ADITIVAS = {
         "bloqueado_motivo": "VARCHAR(255)",
         "ultimo_latido_ts": "INTEGER",
         "device_id": "VARCHAR(64)",
+        "tiempo_extra_seg": "INTEGER NOT NULL DEFAULT 0",
     },
     "answer_key_items": {
         "opciones_json": "JSON",
