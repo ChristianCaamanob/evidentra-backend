@@ -81,6 +81,9 @@ class AnswerKeyItem(UUIDMixin, Base):
     # Si están vacíos, el modo en vivo cae al modo genérico (solo letras A-D), sin romper nada.
     opciones_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
     justificacion: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # LV12 - imagen del enunciado (muy usada en pruebas de laboratorio: "a partir de la imagen…").
+    # Data URI (base64) para no depender de almacenamiento de archivos. Aditivo/nullable.
+    enunciado_imagen: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     answer_key = relationship("AnswerKey", back_populates="items")
     # F1 - criterios de rubrica (solo relevantes para preguntas open_response).

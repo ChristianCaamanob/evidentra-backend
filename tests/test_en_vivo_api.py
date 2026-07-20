@@ -487,3 +487,35 @@ def test_temporizador_autocierre_y_extension(entorno):
     # y quedó la evidencia trazable de la extensión
     tl = c.get(f"/api/v1/en-vivo/{cod}/integridad/{pid}").json()
     assert any(e["tipo"] == "tiempo_extendido" for e in tl["eventos"])
+
+
+def test_import_con_imagen_y_pauta(entorno):
+    """LV12 · Importa preguntas con IMAGEN de enunciado (lab) y la letra correcta ya marcada;
+    la imagen viaja hasta el teléfono del alumno y la pauta queda validada."""
+    aid, c = entorno["aid"], entorno["client"]
+    IMG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    items = [{"enunciado": "¿Qué estructura señala la flecha?", "imagen": IMG,
+              "opciones": [{"letra": "A", "texto": "Yeyuno"}, {"letra": "B", "texto": "Íleon"},
+                           {"letra": "C", "texto": "Colon"}, {"letra": "D", "texto": "Ciego"}],
+              "correcta": "B", "justificacion": "La imagen muestra las válvulas conniventes del íleon."}]
+    r = c.post(f"/api/v1/en-vivo/banco-importar/{aid}", json={"version": "A", "items": items})
+    assert r.status_code == 200 and r.json()["pauta_validada"] is True
+
+    cont = c.get(f"/api/v1/en-vivo/banco/{aid}", params={"version": "A"}).json()
+    assert cont["items"][0]["imagen"] == IMG and cont["items"][0]["correcta"] == "B"
+
+    # una data URI que NO es imagen se descarta (seguridad)
+    it2 = [dict(items[0], imagen="javascript:alert(1)")]
+    c.post(f"/api/v1/en-vivo/banco-importar/{aid}", json={"version": "A", "items": it2})
+    cont2 = c.get(f"/api/v1/en-vivo/banco/{aid}", params={"version": "A"}).json()
+    assert cont2["items"][0]["imagen"] in (None, "")
+
+    # la imagen llega al alumno en su pregunta
+    cod = c.post(f"/api/v1/assessments/{aid}/en-vivo", json={}).json()["codigo"]
+    # reponemos la imagen buena (el import anterior la borró)
+    c.post(f"/api/v1/en-vivo/banco-importar/{aid}", json={"version": "A", "items": items})
+    cod = c.post(f"/api/v1/assessments/{aid}/en-vivo", json={}).json()["codigo"]
+    pid, tk = _unir(c, cod, "Ana")
+    c.post(f"/api/v1/en-vivo/{cod}/avanzar")
+    me = c.get(f"/api/v1/en-vivo/{cod}/mi-estado", params={"participante_id": pid, "token": tk}).json()
+    assert me["pregunta"]["imagen"] == IMG

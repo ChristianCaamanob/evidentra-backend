@@ -518,6 +518,7 @@ _COLUMNAS_ADITIVAS = {
     "answer_key_items": {
         "opciones_json": "JSON",
         "justificacion": "TEXT",
+        "enunciado_imagen": "TEXT",
     },
     "asistencia_matriculas": {
         "webauthn_challenge": "VARCHAR(255)",

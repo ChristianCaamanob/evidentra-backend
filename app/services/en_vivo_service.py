@@ -70,6 +70,20 @@ def _letras_item(it) -> list:
     return ["A", "B", "C", "D"]
 
 
+_IMAGEN_MAX_CHARS = 3_500_000    # ~2.5 MB en base64; suficiente para una foto de laboratorio
+
+
+def _limpiar_imagen(v) -> str | None:
+    """Acepta SOLO un data URI de imagen (base64), acotado en tamaño. Cadena vacía => None
+    (permite BORRAR la imagen). Cualquier otra cosa (URL externa, script) se descarta."""
+    s = str(v or "").strip()
+    if not s:
+        return None
+    if not s.startswith("data:image/"):
+        return None
+    return s[:_IMAGEN_MAX_CHARS]
+
+
 def _items_contenido(db, assessment_id, version: str) -> list:
     """Ítems MC enriquecidos con su contenido (banco de ítems) para el modo en vivo digital.
 
@@ -82,7 +96,8 @@ def _items_contenido(db, assessment_id, version: str) -> list:
         out.append({
             "ordinal": i, "qn": it.question_number,
             "correcta": str(it.correct_answer).strip().upper(),
-            "enunciado": it.enunciado, "opciones": opciones,
+            "enunciado": it.enunciado, "imagen": getattr(it, "enunciado_imagen", None),
+            "opciones": opciones,
             "letras": _letras_item(it), "tiene_opciones": bool(opciones),
             "justificacion": it.justificacion, "ra": it.learning_outcome_id,
             "bloom": it.bloom_level, "unidad": it.unidad, "weight": it.weight or 1.0,
@@ -615,6 +630,7 @@ def estado_participante(db, codigo: str, participante_id, token: str) -> dict:
         "ordinal": ordinal,
         "numero_mostrado": (respondidas + 1) if s.modo_ritmo == RITMO_ALUMNO else ordinal,
         "enunciado": item["enunciado"], "tiene_contenido": bool(item["enunciado"]),
+        "imagen": item.get("imagen"),
         "opciones": opciones, "ya_respondida": bool(ya),
     }
     if ya and s.revelar_correccion:
@@ -790,6 +806,7 @@ def informe_en_vivo(db, codigo: str) -> dict:
         disc = round(_pearson(col, resto), 3)
         items_stat.append({
             "n": it["ordinal"], "enunciado": it["enunciado"] or f"Pregunta {it['ordinal']}",
+            "imagen": it.get("imagen"),
             "correcta": it["correcta"], "dificultad_p": round(p, 3),
             "discriminacion": disc, "ra": it["ra"], "bloom": it["bloom"], "unidad": it["unidad"],
             "alerta": ("muy fácil" if p >= 0.9 else "muy difícil" if p <= 0.2 else
@@ -1111,6 +1128,7 @@ def contenido_items(db, assessment_id, version: str = "A") -> dict:
     return {"version": version.upper(), "n_preguntas": len(items),
             "items": [{"question_number": it["qn"], "ordinal": it["ordinal"],
                        "correcta": it["correcta"], "enunciado": it["enunciado"] or "",
+                       "imagen": it.get("imagen"),
                        "opciones": it["opciones"] or [], "justificacion": it["justificacion"] or "",
                        "ra": it["ra"], "bloom": it["bloom"], "unidad": it["unidad"]}
                       for it in items]}
@@ -1142,6 +1160,8 @@ def guardar_contenido_items(db, assessment_id, version: str, items: list) -> dic
             continue
         if "enunciado" in entrada:
             it.enunciado = (str(entrada.get("enunciado") or "").strip() or None)
+        if "imagen" in entrada:
+            it.enunciado_imagen = _limpiar_imagen(entrada.get("imagen"))
         if "justificacion" in entrada:
             it.justificacion = (str(entrada.get("justificacion") or "").strip() or None)
         if "opciones" in entrada:
@@ -1201,6 +1221,7 @@ def importar_preguntas(db, assessment_id, version: str, items: list) -> dict:
             correct_answer=correcta, weight=1.0, is_annulled=False,
             question_type=QUESTION_TYPE_MULTIPLE_CHOICE,
             enunciado=(str(q.get("enunciado") or "").strip() or None),
+            enunciado_imagen=_limpiar_imagen(q.get("imagen")),
             opciones_json=ops or None,
             justificacion=(str(q.get("justificacion") or "").strip() or None)))
         creadas += 1
@@ -1230,8 +1251,12 @@ def proponer_desde_texto(texto: str, n_alternativas: int = 4, llamar=None) -> di
     system = ("Eres un asistente que ESTRUCTURA preguntas de alternativas ya escritas. "
               "No inventes preguntas nuevas ni cambies el contenido: transcribe fielmente el "
               "enunciado y las alternativas del texto dado, identifica la alternativa correcta "
-              "si el texto la indica (si no, deja 'correcta' en la más plausible y márcalo en "
-              "la justificación como 'a confirmar por el docente'). Responde SOLO un arreglo JSON.")
+              "si el texto la indica. La correcta suele venir MARCADA como PAUTA de alguna de "
+              "estas formas: un asterisco (*), un ticket/checkmark (✓ ✔ ☑ ✅), la palabra "
+              "'(correcta)'/'[correcta]', o resaltada en NEGRITA, SUBRAYADA, en OTRO COLOR o "
+              "con marca de resaltado. Detecta esa marca y úsala como 'correcta'. Si nada la "
+              "indica, deja 'correcta' en la más plausible y márcalo en la justificación como "
+              "'a confirmar por el docente'. Responde SOLO un arreglo JSON.")
     user = (f"Extrae las preguntas del siguiente texto. Cada pregunta con {n_alt} alternativas "
             f"({letras}). Formato de cada elemento:\n"
             '[{"enunciado": "<texto>", "alternativas": {"A": "<texto>", ...}, '
