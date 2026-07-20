@@ -63,6 +63,34 @@ def verify_email(request: Request, payload: VerifyIn, db: Session = Depends(get_
 def resend_verification(request: Request, payload: ResendVerifyIn, db: Session = Depends(get_db)):
     return _reenviar_verif(db, payload.email)
 
+
+# ── Mi cuenta: perfil + cambio de contraseña + reenviar mi verificación ──
+from app.services import auth_service as _auth
+
+class ChangePwdIn(BaseModel):
+    actual: str
+    nueva: str
+
+@router.get("/me")
+def me(db: Session = Depends(get_db), teacher=Depends(usuario_actual)):
+    return _auth.perfil(teacher)
+
+@router.post("/change-password")
+@limit("6/minute")
+def change_password(request: Request, payload: ChangePwdIn, db: Session = Depends(get_db),
+                    teacher=Depends(usuario_actual)):
+    result = _auth.cambiar_password(db, teacher, payload.actual, payload.nueva)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+@router.post("/me/resend-verification")
+@limit("4/minute")
+def me_resend(request: Request, db: Session = Depends(get_db), teacher=Depends(usuario_actual)):
+    if not getattr(teacher, "email_verificado", True):
+        _auth.enviar_verificacion(db, teacher)
+    return {"ok": True}
+
 from app.services.auth_service import create_reset_token, reset_password
 
 class ForgotIn(BaseModel):

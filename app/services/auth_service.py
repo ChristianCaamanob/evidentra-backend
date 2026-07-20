@@ -132,6 +132,22 @@ def create_reset_token(db, email: str):
         print(f"[SMTP ERROR] {teacher.email}: {e}", flush=True)
     return {"ok": True}
 
+def cambiar_password(db, teacher, actual: str, nueva: str):
+    """Cambio de contraseña del usuario AUTENTICADO (verifica la actual)."""
+    if not verify_password(actual or "", teacher.hashed_password):
+        return {"error": "La contraseña actual no es correcta"}
+    if len(nueva or "") < 6:
+        return {"error": "La nueva contraseña debe tener al menos 6 caracteres"}
+    teacher.hashed_password = hash_password(nueva)
+    db.commit()
+    return {"ok": True}
+
+def perfil(teacher):
+    return {"id": str(teacher.id), "email": teacher.email, "name": teacher.name,
+            "rol": teacher.rol, "email_verificado": bool(getattr(teacher, "email_verificado", True)),
+            "institution": getattr(teacher, "institution", None),
+            "created_at": teacher.created_at.isoformat() if getattr(teacher, "created_at", None) else None}
+
 def reset_password(db, token: str, new_password: str):
     record = db.query(PasswordResetToken).filter(
         PasswordResetToken.token == token,
