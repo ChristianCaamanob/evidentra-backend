@@ -269,8 +269,12 @@ def analisis_evaluacion(db, assessment_id, origen: str | None = None,
     filas: list[dict] = []          # por scan: {q: c} de ítems MC + total (para discriminación)
     sesiones: set[str] = set()      # códigos de sesión en vivo (trazabilidad)
     fechas: list = []               # created_at de los escaneos
+    opt_acc: dict[str, dict[int, dict[str, int]]] = {}   # [version][q][letra] -> conteo (distractores)
+    ver_counts: dict[str, int] = {}                       # nº de scans por versión (para elegir dominante)
+    matriz_tmp: list[dict] = []                           # por scan: {nota, ra:{code:pct}} (mapa de calor)
     for scan in sel["scans"]:
-        clave = por_version.get((scan.detected_version or "A").upper())
+        ver = (scan.detected_version or "A").upper()
+        clave = por_version.get(ver)
         if not clave:
             continue
         payload = (scan.raw_ocr_payload_json or {})
@@ -282,6 +286,7 @@ def analisis_evaluacion(db, assessment_id, origen: str | None = None,
             fechas.append(scan.created_at)
         ev = ok = 0
         fila: dict[int, float] = {}
+        fila_ra: dict[str, dict] = {}
         for q, it in clave.items():
             if list(it.rubric_criteria):
                 continue  # desarrollo: no entra al agregado por-RA de alternativas
@@ -289,15 +294,23 @@ def analisis_evaluacion(db, assessment_id, origen: str | None = None,
             c = 1.0 if (elegida is not None and str(elegida).upper() == str(it.correct_answer).upper()) else 0.0
             ev += 1; ok += c
             fila[q] = c
+            # distractores: conteo de la letra marcada, por versión (no mezcla barajados)
+            letra = str(elegida).strip().upper()[:2] if elegida is not None else "∅"
+            opt_acc.setdefault(ver, {}).setdefault(q, {}).setdefault(letra, 0)
+            opt_acc[ver][q][letra] += 1
             rc = ra_por_q.get(q)
             if rc:
                 d = ra_acc.setdefault(rc, {"ev": 0, "ok": 0.0}); d["ev"] += 1; d["ok"] += c
+                fr = fila_ra.setdefault(rc, {"ev": 0, "ok": 0.0}); fr["ev"] += 1; fr["ok"] += c
         if not ev:
             continue
+        ver_counts[ver] = ver_counts.get(ver, 0) + 1
         pct = round(ok / ev * 100, 1)
         nota, _, _ = calculate_grade(pct, escala, exig, banda_movil=bool(getattr(asm, "bandas_moviles", False)))
         notas.append(round(nota, 1)); logros.append(pct)
         filas.append({"fila": fila, "ok": ok})
+        matriz_tmp.append({"nota": round(nota, 1),
+                           "ra": {code: round(v["ok"] / v["ev"] * 100) for code, v in fila_ra.items() if v["ev"]}})
 
     for code in sorted(ra_acc):
         if code not in ra_meta:
@@ -358,6 +371,49 @@ def analisis_evaluacion(db, assessment_id, origen: str | None = None,
     _sev = {"critica": 0, "media": 1, "baja": 2}
     alertas.sort(key=lambda a: _sev.get(a["severidad"], 3))
 
+    # Distractores (versión dominante): distribución de la letra marcada por ítem; marca los ítems
+    # donde un distractor ATRAE más que la correcta (error conceptual sistemático o redacción ambigua).
+    distractores = []
+    if ver_counts:
+        dom = max(ver_counts, key=ver_counts.get)
+        claved = por_version.get(dom, {})
+        for q in sorted(opt_acc.get(dom, {})):
+            counts = opt_acc[dom][q]
+            tot = sum(counts.values())
+            if not tot:
+                continue
+            it = claved.get(q)
+            correcta = str(it.correct_answer).strip().upper() if it else ""
+            letras = sorted(l for l in counts if l != "∅")
+            opciones = [{"letra": l, "n": counts[l], "pct": round(counts[l] / tot * 100),
+                         "correcta": (l == correcta)} for l in letras]
+            if counts.get("∅"):
+                opciones.append({"letra": "∅", "n": counts["∅"], "pct": round(counts["∅"] / tot * 100),
+                                 "correcta": False, "omitida": True})
+            co = next((o for o in opciones if o.get("correcta")), None)
+            pc = co["pct"] if co else 0
+            trampa = next((o for o in opciones if not o.get("correcta") and not o.get("omitida") and o["pct"] > pc), None)
+            distractores.append({"q": q, "ra": ra_por_q.get(q), "correcta": correcta,
+                                 "opciones": opciones, "trampa": (trampa["letra"] if trampa else None)})
+        for dd in distractores:
+            if dd["trampa"]:
+                to = next(o for o in dd["opciones"] if o["letra"] == dd["trampa"])
+                co = next((o for o in dd["opciones"] if o.get("correcta")), None)
+                alertas.append({"tipo": "distractor", "severidad": "media",
+                                "titulo": f'P{dd["q"]}: el distractor {dd["trampa"]} atrae más que la correcta',
+                                "detalle": f'{to["pct"]}% marcó {dd["trampa"]} vs {(co["pct"] if co else 0)}% la correcta {dd["correcta"]}. Error conceptual sistemático o redacción ambigua.'})
+        alertas.sort(key=lambda a: _sev.get(a["severidad"], 3))
+
+    # Mapa de calor estudiante × RA (seudonimizado G2): ordenado por nota, etiquetas E1..EN.
+    ra_codes_mat = [r["code"] for r in por_ra if r.get("logro_pct") is not None]
+    matriz_tmp.sort(key=lambda m: m["nota"], reverse=True)
+    _LIM = 40
+    estudiantes_mat = [{"alias": f"E{i + 1}", "nota": m["nota"],
+                        "ra": {c: m["ra"].get(c) for c in ra_codes_mat}}
+                       for i, m in enumerate(matriz_tmp[:_LIM])]
+    matriz_ra = {"ra_codes": ra_codes_mat, "estudiantes": estudiantes_mat,
+                 "n_total": len(matriz_tmp), "truncado": len(matriz_tmp) > _LIM}
+
     fecha_ult = None
     if fechas:
         try:
@@ -382,6 +438,8 @@ def analisis_evaluacion(db, assessment_id, origen: str | None = None,
         "por_item": por_item,
         "distribucion": [{"rango": b[0], "n": sum(1 for x in notas if b[1] <= x < b[2])} for b in bandas],
         "discriminacion": discriminacion,
+        "distractores": distractores,
+        "matriz_ra": matriz_ra,
         "alertas": alertas,
         "trazabilidad": {
             "origen": sel["origen"], "escaneos_omr": sel["n_omr"], "escaneos_en_vivo": sel["n_en_vivo"],
