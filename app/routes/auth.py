@@ -93,9 +93,11 @@ from app.services import teacher_webauthn as _twa   # noqa: E402
 
 
 @router.post("/passkey/register/options")
-def passkey_reg_options(request: Request, db: Session = Depends(get_db),
+def passkey_reg_options(request: Request, payload: dict | None = None, db: Session = Depends(get_db),
                         teacher=Depends(usuario_actual)):
-    return _twa.opciones_registro(db, teacher, _origin(request))
+    payload = payload or {}
+    return _twa.opciones_registro(db, teacher, _origin(request),
+                                  prefer_platform=bool(payload.get("platform", True)))
 
 
 @router.post("/passkey/register/verify")

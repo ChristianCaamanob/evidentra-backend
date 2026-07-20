@@ -55,7 +55,7 @@ def _challenge_de_token(token: str, proposito: str) -> bytes:
 
 
 # ── registro de una passkey (staff autenticado) ──────────────────────────────────────
-def opciones_registro(db, teacher: Teacher, origin_header=None) -> dict:
+def opciones_registro(db, teacher: Teacher, origin_header=None, prefer_platform=True) -> dict:
     from webauthn import generate_registration_options
     from webauthn.helpers import options_to_json
     from webauthn.helpers.structs import (
@@ -66,17 +66,18 @@ def opciones_registro(db, teacher: Teacher, origin_header=None) -> dict:
         TeacherPasskey.teacher_id == teacher.id, TeacherPasskey.activo.is_(True)).all()
     excluir = [PublicKeyCredentialDescriptor(id=_b64u_dec(d.credential_id)) for d in existentes]
     challenge = os.urandom(32)
+    # Si el equipo TIENE biometría integrada (lo detecta el frontend), pedimos PLATFORM para abrir
+    # Touch ID / Windows Hello directo. Si NO la tiene, se omite la restricción para que el teléfono
+    # (QR híbrido) o una llave de seguridad puedan enrolar sin bloquear al usuario.
+    sel = AuthenticatorSelectionCriteria(
+        user_verification=UserVerificationRequirement.REQUIRED,
+        resident_key=ResidentKeyRequirement.REQUIRED,
+        authenticator_attachment=(AuthenticatorAttachment.PLATFORM if prefer_platform else None))
     opts = generate_registration_options(
         rp_id=rp_id, rp_name=rp_name, user_id=teacher.id.bytes,
         user_name=teacher.email, user_display_name=(teacher.name or teacher.email),
         challenge=challenge, attestation=AttestationConveyancePreference.NONE,
-        authenticator_selection=AuthenticatorSelectionCriteria(
-            # PLATFORM = biometría integrada del equipo (Touch ID / Windows Hello / huella del móvil),
-            # abre directo el diálogo biométrico en vez del selector QR/llave externa.
-            authenticator_attachment=AuthenticatorAttachment.PLATFORM,
-            user_verification=UserVerificationRequirement.REQUIRED,
-            resident_key=ResidentKeyRequirement.REQUIRED),   # passkey descubrible (login sin escribir correo)
-        exclude_credentials=excluir)
+        authenticator_selection=sel, exclude_credentials=excluir)
     return {"options": json.loads(options_to_json(opts)), "rp_id": rp_id,
             "challenge_token": _challenge_token(challenge, "reg")}
 
