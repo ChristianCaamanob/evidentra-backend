@@ -399,7 +399,7 @@ def _seed_ficha_p3(db):
         def abil(rut, ra, boost):                            # habilidad 0.05–0.98 (brechas + tendencia)
             return max(0.05, min(0.98, 0.2 + _u("abil", rut, ra) * 0.72 + boost))
 
-        def _prueba(pn, tp, origen="omr", boost=0.0):
+        def _prueba(pn, tp, origen="omr", boost=0.0, con_scans=True):
             # Idempotente por nombre: si ya existe esa evaluación en el curso, no la re-crea.
             if db.query(Assessment).filter(Assessment.course_id == course.id, Assessment.name == pn).first():
                 return
@@ -414,6 +414,8 @@ def _seed_ficha_p3(db):
                     db.add(AnswerKeyItem(answer_key_id=ak.id, question_number=q, version=v,
                                          correct_answer=correcta(q, v), weight=1.0,
                                          learning_outcome_id=ra_q[q], bloom_level="aplicar"))
+            if not con_scans:
+                return   # evaluación PENDIENTE (programada, aún sin rendir) → pronóstico mid-course
             sesiones = [_codigo_sesion(_h("ses", pn, i)) for i in range(2)] if origen == "en_vivo" else None
             for idx, rut in enumerate(ruts):
                 v = "A" if _h("ver", pn, rut) % 2 == 0 else "B"
@@ -439,22 +441,29 @@ def _seed_ficha_p3(db):
         _prueba("Certamen", "certamen", "omr", 0.06)
         _prueba("Control 1", "control", "omr", -0.05)
         _prueba("Quiz en vivo Nº1", "control", "en_vivo", 0.09)
+        _prueba("Examen final", "certamen", "omr", 0.0, con_scans=False)   # PENDIENTE → mid-course
         db.flush()
 
-        # Parametrización demo (pesos que suman 100% + asistencia) → habilita el pronóstico de una.
-        if not course.parametrizacion:
+        # Parametrización demo (pesos que suman 100% + asistencia + semáforo). Incluye el Examen
+        # final PENDIENTE (peso restante) para exhibir el pronóstico mid-course ("necesita X…").
+        # Re-siembra si falta o si aún no incluye el Examen final (curso ya sembrado antes).
+        _pactual = course.parametrizacion or {}
+        _tiene_examen = any((cc.get("nombre") == "Examen final") for cc in (_pactual.get("componentes") or []))
+        if not _pactual or not _tiene_examen:
             asm_by_name = {a.name: str(a.id) for a in
                            db.query(Assessment).filter(Assessment.course_id == course.id).all()}
-            pesos = [("Solemne 1", "solemne", 25), ("Solemne 2", "solemne", 25),
-                     ("Certamen", "certamen", 30), ("Control 1", "control", 10),
-                     ("Quiz en vivo Nº1", "lab_envivo", 10)]
+            pesos = [("Solemne 1", "solemne", 20), ("Solemne 2", "solemne", 20),
+                     ("Certamen", "certamen", 20), ("Control 1", "control", 10),
+                     ("Quiz en vivo Nº1", "lab_envivo", 10), ("Examen final", "certamen", 20)]
             comps = [{"id": "d%d" % i, "nombre": nm, "categoria": cat, "peso_pct": pw,
                       "assessment_id": asm_by_name.get(nm)}
                      for i, (nm, cat, pw) in enumerate(pesos, start=1) if asm_by_name.get(nm)]
             if comps:
                 course.parametrizacion = {"activa": True, "componentes": comps,
                                           "asistencia": {"teorico_pct": 75, "teorico_libre": False,
-                                                         "lab_pct": 100, "modo": "gate"}}
+                                                         "lab_pct": 100, "modo": "gate"},
+                                          "semaforo": {"nota_verde": 5.0, "nota_amarillo": 4.0,
+                                                       "asist_amarillo_min": 50}}
                 from sqlalchemy.orm.attributes import flag_modified
                 flag_modified(course, "parametrizacion")
                 db.flush()
