@@ -47,6 +47,13 @@ def panorama(db, facultad: str | None = None, departamento: str | None = None,
     from app.services import ficha_service
 
     cursos = [c for c in db.query(Course).all() if c.code not in COHORTES_OCULTAS]
+    # Opciones de filtro SIN filtrar (para poblar los selectores del Director aunque haya filtro activo).
+    facs_todas = sorted({(c.facultad or SIN_FAC) for c in cursos})
+    deps_por_fac: dict[str, set] = {}
+    for c in cursos:
+        deps_por_fac.setdefault(c.facultad or SIN_FAC, set()).add(c.departamento or SIN_DEP)
+    opciones = {"facultades": facs_todas,
+                "departamentos": {k: sorted(v) for k, v in deps_por_fac.items()}}
     if facultad:
         cursos = [c for c in cursos if (c.facultad or SIN_FAC) == facultad]
     if departamento:
@@ -75,7 +82,7 @@ def panorama(db, facultad: str | None = None, departamento: str | None = None,
             for br in b["brechas"]:
                 ra_ct[br["code"]] += 1
         resumen_cursos.append({
-            "curso": c.name, "code": c.code, "tipo": c.tipo,
+            "id": str(c.id), "curso": c.name, "code": c.code, "tipo": c.tipo,
             "facultad": c.facultad or SIN_FAC, "departamento": c.departamento or SIN_DEP,
             "n_estudiantes": len(estudiantes), "n_evaluados": len(logros),
             "logro_promedio": round(sum(logros) / len(logros), 1) if logros else None,
@@ -101,6 +108,7 @@ def panorama(db, facultad: str | None = None, departamento: str | None = None,
     return {
         "facultades": facultades,
         "global": _agg(resumen_cursos),
+        "opciones": opciones,
         "filtros": {"facultad": facultad, "departamento": departamento,
                     "umbral_brecha": umbral_brecha},
         "gobernanza": "Agregado y seudonimizado (G2): logro por RA cruzado con la evidencia real, "
