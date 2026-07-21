@@ -19,7 +19,7 @@ TIPOS_VALIDOS = {
     "copy", "paste", "cut", "contextmenu", "heartbeat", "join", "sesion_concurrente",
     "ventana_otra_encima", "window_resize", "posible_captura", "conexion_perdida",
     # Atención por cámara (en-dispositivo, solo eventos — nunca video/imágenes). Consentido.
-    "rostro_ausente", "multi_rostro", "camara_ok", "camara_sin_consentir", "camara_no_soportada",
+    "rostro_ausente", "mirada_fuera", "multi_rostro", "camara_ok", "camara_sin_consentir", "camara_no_soportada",
 }
 
 # Umbrales del semáforo (interpretación sugerida, NO veredicto).
@@ -76,8 +76,10 @@ def _resumen_de(eventos: list) -> dict:
     desconexiones = 0      # caídas de red (wifi/datos) — INVOLUNTARIO, no penaliza
     offline_ms = 0
     reingresos = 0         # este equipo intentó re-entrar como OTRA persona (candado LV10)
-    rostro_ausente = 0     # cámara: nº de veces que el rostro salió del cuadro (mira al lado/se va)
+    rostro_ausente = 0     # cámara: nº de veces que el rostro salió del cuadro (se retiró/volteó del todo)
     rostro_ausente_ms = 0  # tiempo total con el rostro fuera
+    mirada_fuera = 0       # cámara: quitó la mirada de la pantalla (rotó cabeza / miró arriba-abajo-lado)
+    mirada_fuera_ms = 0    # tiempo total con la mirada fuera
     multi_rostro = 0       # cámara: se detectó más de un rostro (otra persona presente)
     camara_estado = None   # "ok" | "sin_consentir" | "no_soportada" | None (sin cámara)
     preguntas_ausencia = set()   # nº de pregunta activa cuando se ausentó
@@ -90,6 +92,11 @@ def _resumen_de(eventos: list) -> dict:
             rostro_ausente += 1
             if e.duration_ms:
                 rostro_ausente_ms += e.duration_ms
+            continue
+        if t == "mirada_fuera":
+            mirada_fuera += 1
+            if e.duration_ms:
+                mirada_fuera_ms += e.duration_ms
             continue
         if t == "multi_rostro":
             multi_rostro += 1
@@ -127,12 +134,13 @@ def _resumen_de(eventos: list) -> dict:
     # Nivel (evidencia interpretada, no sentencia): ok / aviso / revisar.
     nivel = "ok"
     if (salidas or salio_fs or menus or pegados or otra_ventana or reducciones or capturas
-            or reingresos or rostro_ausente or multi_rostro):
+            or reingresos or rostro_ausente or multi_rostro or mirada_fuera):
         nivel = "aviso"
     if (oculto_ms >= OCULTO_REVISAR_MS or salidas >= SALIDAS_REVISAR
             or pegados > 0 or concurrentes > 0 or capturas > 0 or reingresos > 0
             or oculto_max_ms >= OCULTO_AVISO_MS
-            or multi_rostro > 0 or rostro_ausente_ms >= OCULTO_REVISAR_MS):
+            or multi_rostro > 0 or rostro_ausente_ms >= OCULTO_REVISAR_MS
+            or mirada_fuera_ms >= OCULTO_REVISAR_MS or mirada_fuera >= SALIDAS_REVISAR):
         nivel = "revisar"
     return {"salidas_foco": salidas, "oculto_ms": oculto_ms,
             "oculto_s": round(oculto_ms / 1000, 1), "oculto_max_s": round(oculto_max_ms / 1000, 1),
@@ -141,6 +149,7 @@ def _resumen_de(eventos: list) -> dict:
             "ventana_reducida": reducciones, "posibles_capturas": capturas,
             "reingresos_bloqueados": reingresos,
             "rostro_ausente": rostro_ausente, "rostro_ausente_s": round(rostro_ausente_ms / 1000, 1),
+            "mirada_fuera": mirada_fuera, "mirada_fuera_s": round(mirada_fuera_ms / 1000, 1),
             "multi_rostro": multi_rostro, "camara_estado": camara_estado,
             "desconexiones": desconexiones, "offline_s": round(offline_ms / 1000, 1),
             "preguntas_ausencia": sorted(preguntas_ausencia),
