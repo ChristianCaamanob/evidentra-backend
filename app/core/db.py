@@ -508,6 +508,7 @@ _COLUMNAS_ADITIVAS = {
         "shuffle_opciones": "BOOLEAN NOT NULL DEFAULT false",
         "requiere_seb": "BOOLEAN NOT NULL DEFAULT false",
         "seb_config_key": "VARCHAR(80)",
+        "atencion_camara": "BOOLEAN NOT NULL DEFAULT false",
     },
     "participantes_vivo": {
         "layout_json": "JSON",

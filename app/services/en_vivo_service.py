@@ -145,7 +145,8 @@ def crear_sesion(db, assessment_id, version: str = "A", config: dict | None = No
                      mascota_motivacional=bool(cfg.get("mascota_motivacional", True)),
                      duracion_min=max(0, int(cfg.get("duracion_min") or 0)),
                      modo_ritmo=modo, shuffle_preguntas=shuffle_p, shuffle_opciones=shuffle_o,
-                     requiere_seb=bool(cfg.get("requiere_seb")))
+                     requiere_seb=bool(cfg.get("requiere_seb")),
+                     atencion_camara=bool(cfg.get("atencion_camara")))
     db.add(s); db.commit(); db.refresh(s)
     return s
 
@@ -557,7 +558,8 @@ def _config_dict(s) -> dict:
             "duracion_min": int(getattr(s, "duracion_min", 0) or 0),
             "timer_activo": bool(int(getattr(s, "duracion_min", 0) or 0) > 0 and getattr(s, "timer_inicio_ts", None)),
             "shuffle_preguntas": s.shuffle_preguntas, "shuffle_opciones": s.shuffle_opciones,
-            "requiere_seb": bool(getattr(s, "requiere_seb", False))}
+            "requiere_seb": bool(getattr(s, "requiere_seb", False)),
+            "atencion_camara": bool(getattr(s, "atencion_camara", False))}
 
 
 # ── lecturas (polling) ───────────────────────────────────────────────────────────────
@@ -593,6 +595,7 @@ def estado_participante(db, codigo: str, participante_id, token: str) -> dict:
             "bloqueado_motivo": getattr(p, "bloqueado_motivo", None),
             "retro_alumno": bool(getattr(s, "retro_alumno", False)),
             "duracion_min": int(getattr(s, "duracion_min", 0) or 0),
+            "atencion_camara": bool(getattr(s, "atencion_camara", False)),
             "segundos_restantes": (max(0, restante) if restante is not None else None),
             "tiempo_agotado": _tiempo_agotado(s, p)}
 
