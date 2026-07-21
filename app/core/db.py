@@ -16,6 +16,7 @@ from app.models.asistencia import (  # noqa: F401
 from app.models.suscripcion import Suscripcion, EventoPago  # noqa: F401
 from app.models.snapshot import AnalisisSnapshot  # noqa: F401
 from app.models.teacher_passkey import TeacherPasskey  # noqa: F401
+from app.models.estructura import EstructuraInstitucional  # noqa: F401
 
 # Normaliza el esquema de Render/Heroku: SQLAlchemy 2.0 exige 'postgresql://'.
 _db_url = settings.database_url
