@@ -644,6 +644,11 @@ def create_db_and_seed() -> None:
             db.commit()
         # Cuenta OWNER (creador): acceso TOTAL a todos los perfiles con datos reales. Es la que
         # usa el CEO para trabajar; las demás cuentas demo siguen mostrando el modo demostración.
+        if not db.query(Teacher).filter(Teacher.email == "director@evalys.demo").first():
+            db.add(Teacher(email="director@evalys.demo",
+                           hashed_password=hash_password("evalys2026"),
+                           name="Director(a) Demo", rol="director", email_verificado=True))
+            db.commit()
         _adm = db.query(Teacher).filter(Teacher.email == "admin@evalys.demo").first()
         if not _adm:
             db.add(Teacher(email="admin@evalys.demo",
