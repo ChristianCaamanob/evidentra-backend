@@ -5,8 +5,21 @@ from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 from app.models.teacher import Teacher
 import os
+import secrets as _secrets
+import logging as _logging
 
-SECRET_KEY = os.getenv("SECRET_KEY", "evalys-secret-2026-uss")
+# SECRET_KEY firma los JWT de sesión (y los tokens de reset/verificación/challenge de passkey).
+# DEBE venir de una variable de entorno fuerte y ESTABLE (Render → Environment → SECRET_KEY).
+# Si falta o es el viejo default débil, se genera una EFÍMERA (fuerte, pero distinta por proceso:
+# invalida sesiones en cada reinicio) y se avisa en CRÍTICO. Nunca se firma con un valor público.
+_WEAK_DEFAULT = "evalys-secret-2026-uss"
+SECRET_KEY = os.getenv("SECRET_KEY", "").strip()
+if not SECRET_KEY or SECRET_KEY == _WEAK_DEFAULT or len(SECRET_KEY) < 32:
+    SECRET_KEY = _secrets.token_urlsafe(64)
+    _logging.getLogger(__name__).critical(
+        "SECRET_KEY ausente, débil o muy corta: se generó una EFÍMERA por proceso. "
+        "Configura SECRET_KEY (>=32 chars aleatorios) en las variables de entorno de Render "
+        "para que las sesiones sobrevivan a reinicios y sean seguras.")
 ALGORITHM = "HS256"
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
