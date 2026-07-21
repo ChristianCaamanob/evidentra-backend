@@ -644,11 +644,14 @@ def create_db_and_seed() -> None:
             db.commit()
         # Cuenta OWNER (creador): acceso TOTAL a todos los perfiles con datos reales. Es la que
         # usa el CEO para trabajar; las demás cuentas demo siguen mostrando el modo demostración.
-        if not db.query(Teacher).filter(Teacher.email == "admin@evalys.demo").first():
+        _adm = db.query(Teacher).filter(Teacher.email == "admin@evalys.demo").first()
+        if not _adm:
             db.add(Teacher(email="admin@evalys.demo",
                            hashed_password=hash_password("evalys2026"),
-                           name="Administrador", rol="creador"))
+                           name="Administrador", rol="creador", email_verificado=True))
             db.commit()
+        elif not getattr(_adm, "email_verificado", False) or _adm.rol != "creador":
+            _adm.email_verificado = True; _adm.rol = "creador"; db.commit()
 
         # Cohortes demo (idempotentes por su propia marca).
         _seed_cohorte_psicometria(db)
