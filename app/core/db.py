@@ -594,8 +594,34 @@ def _init_schema() -> None:
     _ensure_columns(log)
 
 
+def _promote_owners() -> None:
+    """Owner bootstrap: promueve a rol 'creador' (acceso total) los correos declarados en
+    EVALYS_OWNER_EMAILS (coma-separado; por defecto el correo del CEO). Idempotente; corre
+    SIEMPRE (también en producción). Así el dueño tiene acceso real sin depender del modo demo."""
+    import os
+    emails = [e.strip().lower() for e in
+              os.getenv("EVALYS_OWNER_EMAILS", "mispelis2020@gmail.com").split(",") if e.strip()]
+    if not emails:
+        return
+    db = SessionLocal()
+    try:
+        for em in emails:
+            t = db.query(Teacher).filter(Teacher.email == em).first()
+            if t and t.rol != "creador":
+                t.rol = "creador"
+                t.email_verificado = True
+                print(f"[OWNER] {em} promovido a creador", flush=True)
+        db.commit()
+    except Exception as e:  # noqa: BLE001
+        db.rollback()
+        print(f"[OWNER ERROR] {e}", flush=True)
+    finally:
+        db.close()
+
+
 def create_db_and_seed() -> None:
     _init_schema()
+    _promote_owners()   # el dueño (CEO) siempre queda con acceso total, con o sin datos demo
     # En producción real (SEED_DEMO=false) el sistema arranca vacío: los usuarios se
     # auto-registran y crean sus cursos. Los datos demo solo para exhibición.
     if not settings.seed_demo:
@@ -615,6 +641,13 @@ def create_db_and_seed() -> None:
             db.add(Teacher(email="investigador@evalys.demo",
                            hashed_password=hash_password("evalys2026"),
                            name="Investigadora Demo", rol="investigador"))
+            db.commit()
+        # Cuenta OWNER (creador): acceso TOTAL a todos los perfiles con datos reales. Es la que
+        # usa el CEO para trabajar; las demás cuentas demo siguen mostrando el modo demostración.
+        if not db.query(Teacher).filter(Teacher.email == "admin@evalys.demo").first():
+            db.add(Teacher(email="admin@evalys.demo",
+                           hashed_password=hash_password("evalys2026"),
+                           name="Administrador", rol="creador"))
             db.commit()
 
         # Cohortes demo (idempotentes por su propia marca).
