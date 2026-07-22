@@ -364,7 +364,9 @@ def guardar_rubrica(item_id: UUID, payload: dict, db: Session = Depends(get_db))
 def _pregunta_dict(it, total_peso) -> dict:
     return {"id": str(it.id), "numero": it.question_number, "enunciado": it.enunciado or "",
             "weight": float(it.weight or 1),
-            "respuesta_optima": it.correct_answer or "",
+            "respuesta_optima": (it.respuesta_optima if it.respuesta_optima is not None else (it.correct_answer or "")),
+            "nivel_rigor": getattr(it, "nivel_rigor", None) or "estricto",
+            "area_conocimiento": getattr(it, "area_conocimiento", None) or "general",
             "pct": round(float(it.weight or 0) / total_peso * 100, 1) if total_peso else 0.0,
             "n_criterios": len(it.rubric_criteria)}
 
@@ -396,7 +398,8 @@ def crear_pregunta_desarrollo(ak_id: UUID, payload: dict, db: Session = Depends(
         w = 1.0
     nums = [it.question_number for it in ak.items] or [0]
     it = AnswerKeyItem(answer_key_id=ak.id, question_number=max(nums) + 1, version="A",
-                       correct_answer=(payload.get("respuesta_optima") or "").strip(),
+                       correct_answer="",
+                       respuesta_optima=((payload.get("respuesta_optima") or "").strip() or None),
                        weight=max(0.1, w), is_annulled=False,
                        question_type=QUESTION_TYPE_OPEN_RESPONSE,
                        enunciado=((payload.get("enunciado") or "").strip() or None))
@@ -416,7 +419,14 @@ def editar_pregunta_desarrollo(item_id: UUID, payload: dict, db: Session = Depen
     if "enunciado" in payload:
         it.enunciado = (payload.get("enunciado") or "").strip() or None
     if "respuesta_optima" in payload:
-        it.correct_answer = (payload.get("respuesta_optima") or "").strip()
+        it.respuesta_optima = (payload.get("respuesta_optima") or "").strip() or None
+    if "nivel_rigor" in payload:
+        from app.models.answer_key import NIVELES_RIGOR
+        v = str(payload.get("nivel_rigor") or "").strip()
+        if v in NIVELES_RIGOR:
+            it.nivel_rigor = v
+    if "area_conocimiento" in payload:
+        it.area_conocimiento = (str(payload.get("area_conocimiento") or "").strip() or None)
     if "weight" in payload:
         try:
             w = float(payload["weight"])
@@ -496,7 +506,8 @@ async def importar_prueba_desarrollo(ak_id: UUID, file: UploadFile = File(...),
     creadas = []
     for i, p in enumerate(prev, start=1):
         it = AnswerKeyItem(answer_key_id=ak.id, question_number=n0 + i, version="A",
-                           correct_answer=p.get("respuesta_optima", ""), weight=p["weight"], is_annulled=False,
+                           correct_answer="", respuesta_optima=(p.get("respuesta_optima") or None),
+                           weight=p["weight"], is_annulled=False,
                            question_type=QUESTION_TYPE_OPEN_RESPONSE, enunciado=p["enunciado"])
         db.add(it); creadas.append(p)
     ak.is_valid = True

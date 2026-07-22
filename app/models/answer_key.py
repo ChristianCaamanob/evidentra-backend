@@ -22,6 +22,19 @@ EXIGENCIA_TOLERANTE = "tolerante"
 EXIGENCIA_FLEXIBLE = "flexible"
 NIVELES_EXIGENCIA = (EXIGENCIA_ESTRICTO, EXIGENCIA_TOLERANTE, EXIGENCIA_FLEXIBLE)
 
+# Fase 1 (corrección desarrollo) — nivel de RIGOR de la revisión IA POR pregunta. La IA propone;
+# el docente valida (G1). N1 estricto (forma+fondo superlativo, autoridad nomenclatural estricta) →
+# N4 criterioso (más juicio/licencias por parámetro).
+RIGOR_ESTRICTO = "estricto"        # N1 · superlativo, forma y fondo, autoridad estricta
+RIGOR_FLEXIBLE = "flexible"        # N2 · permite ciertas licencias
+RIGOR_MUY_FLEXIBLE = "muy_flexible"  # N3 · más licencias
+RIGOR_CRITERIOSO = "criterioso"    # N4 · mayor criterio/juicio por parámetro
+NIVELES_RIGOR = (RIGOR_ESTRICTO, RIGOR_FLEXIBLE, RIGOR_MUY_FLEXIBLE, RIGOR_CRITERIOSO)
+# Área de conocimiento → fija la autoridad nomenclatural que la IA debe aplicar (Fase 3).
+AREAS_CONOCIMIENTO = ("general", "anatomia", "odontologia", "medicina", "enfermeria", "kinesiologia",
+                      "derecho", "ingenieria", "arquitectura", "quimica", "biologia", "psicologia",
+                      "educacion", "economia_admin")
+
 # Niveles de logro que asigna la pre-calificacion (F2) y las anclas de calibracion.
 LOGRO_LOGRADO = "logrado"
 LOGRO_PARCIAL = "parcial"
@@ -74,6 +87,11 @@ class AnswerKeyItem(UUIDMixin, Base):
     # LV (modo en vivo): el enunciado también se reutiliza para mostrar la pregunta de
     # alternativas en el teléfono del alumno (banco de ítems), cuando está cargado.
     enunciado: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # F-desarrollo: respuesta óptima/de referencia (texto largo — antes se truncaba en correct_answer).
+    respuesta_optima: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # F-desarrollo: rigor de la revisión IA + área (autoridad nomenclatural). Default sensato.
+    nivel_rigor: Mapped[str] = mapped_column(String(20), default="estricto", server_default="estricto", nullable=False)
+    area_conocimiento: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
     # LV (banco de ítems) - contenido opcional para el modo en vivo digital. Aditivo/nullable:
     # opciones_json = textos de las alternativas ([{"letra":"A","texto":"..."}, ...]);
