@@ -199,6 +199,37 @@ def _llamar_anthropic(system: str, user: str, modelo: str = MODELO_EXPERTO) -> s
     return getattr(msg.content[0], "text", "") if msg.content else ""
 
 
+def redactar_texto(texto: str, contexto: str = "", llamar=None) -> dict:
+    """
+    Limpia un texto DICTADO POR EL DOCENTE (enunciado / respuesta óptima): corrige ortografía,
+    gramática y errores de transcripción de voz SIN cambiar el significado, sin agregar
+    contenido y sin responder la pregunta. Es el propio texto del docente (no toca G1, que
+    aplica a respuestas de alumnos). Sin API key → disponible=False.
+    """
+    texto = (texto or "").strip()
+    if not texto:
+        return {"ok": False, "disponible": True, "error": "No hay texto que redactar."}
+    if llamar is None and not os.environ.get("ANTHROPIC_API_KEY"):
+        return {"ok": False, "disponible": False,
+                "error": "La redacción con IA necesita ANTHROPIC_API_KEY configurada."}
+    system = (
+        "Eres un editor de textos académicos. Tu ÚNICA tarea es limpiar un texto que un docente "
+        "dictó por voz y quedó con errores de transcripción. REGLAS ESTRICTAS: (1) corrige "
+        "ortografía, gramática, puntuación y palabras mal transcritas; (2) NO cambies el "
+        "significado ni el nivel de detalle; (3) NO agregues información, ejemplos ni respondas "
+        "ninguna pregunta; (4) si una parte es ininteligible, deja la mejor reconstrucción fiel y "
+        "no inventes datos. Devuelve SOLO el texto corregido, sin comillas ni comentarios.")
+    user = ((f"Contexto (no lo incluyas en la salida): {contexto}\n\n" if contexto else "")
+            + "Texto dictado a limpiar:\n\"\"\"\n" + texto[:4000] + "\n\"\"\"")
+    try:
+        crudo = (llamar or _llamar_anthropic)(system, user)
+        limpio = (crudo or "").strip().strip('"').strip()
+        return {"ok": bool(limpio), "disponible": True, "texto": limpio or texto}
+    except Exception as e:
+        logger.warning("Redacción falló: %s", f"{type(e).__name__}: {e}"[:200])
+        return {"ok": False, "disponible": True, "error": f"{type(e).__name__}: {e}"[:200]}
+
+
 def corregir(respuesta: str, cfg: dict, llamar=None) -> dict:
     """
     Motor experto. Devuelve {ok, disponible, motor, propuesta|error}.

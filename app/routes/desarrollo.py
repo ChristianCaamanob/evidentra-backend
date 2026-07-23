@@ -260,6 +260,14 @@ def guardar_reporte_estudiante(assessment_id: UUID, student_id: UUID, payload: d
         db, assessment_id, student_id, preguntas, docente=(payload.get("docente") or "docente"))
 
 
+@router.post("/desarrollo/redactar", dependencies=[Depends(req_profesor)])
+def redactar_desarrollo(payload: dict):
+    """Limpia un texto dictado por el docente (enunciado/respuesta óptima): corrige transcripción
+    y ortografía SIN cambiar el significado ni responder. payload = {texto, contexto?}."""
+    return correccion_experta_service.redactar_texto(
+        (payload.get("texto") or ""), (payload.get("contexto") or ""))
+
+
 @router.get("/answer-keys/{ak_id}/rubrica/versiones", dependencies=[Depends(req_profesor)])
 def listar_versiones(ak_id: UUID, db: Session = Depends(get_db)):
     """F4 - Historial de versiones de la rubrica (replicabilidad: cada corrida se clava a una)."""
