@@ -141,8 +141,9 @@ def create_assessment(payload: AssessmentIn, db: Session = Depends(get_db)):
     modalidad = modalidad_norm(payload.modalidad)
     if modalidad not in MODALIDADES:
         modalidad = MODALIDAD_ALTERNATIVAS
-    # Modalidades que corrigen por RÚBRICA (ítems open_response): desarrollo, mixta y oral.
-    es_desarrollo = modalidad in ("desarrollo", "mixta", "oral")
+    # Modalidades que corrigen por RÚBRICA (ítems open_response): desarrollo, mixta, oral y
+    # oral_examen (5º módulo · examen oral asistido por IA, reusa las preguntas abiertas).
+    es_desarrollo = modalidad in ("desarrollo", "mixta", "oral", "oral_examen")
     # En desarrollo puro, n_questions describe las preguntas de desarrollo (no la grilla OCR).
     a = Assessment(
         course_id=_uuid.UUID(payload.course_id),
@@ -181,7 +182,7 @@ def create_assessment(payload: AssessmentIn, db: Session = Depends(get_db)):
         elif payload.n_desarrollo > 0:
             n_seed = payload.n_desarrollo
         else:
-            n_seed = payload.n_questions if modalidad == "desarrollo" else 1
+            n_seed = payload.n_questions if modalidad in ("desarrollo", "oral_examen") else 1
         n_seed = max(1, min(n_seed, 40))
         for i in range(1, n_seed + 1):
             db.add(AnswerKeyItem(
