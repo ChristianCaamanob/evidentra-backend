@@ -28,6 +28,7 @@ from app.services import precalificacion_service
 from app.services import coder_llm
 from app.services import correccion_experta_service
 from app.services import retroalimentacion_service
+from app.services import reportes_desarrollo_service
 from app.services import mfrm_service
 from app.services import rubrica_psicometria_service
 from app.services import aprendizaje_service
@@ -225,6 +226,38 @@ def informe_retroalimentacion(assessment_id: UUID, payload: dict, db: Session = 
     except Exception:
         logger.error(f"Error en informe_retroalimentacion {assessment_id}: {traceback.format_exc()}")
         raise
+
+
+@router.get("/assessments/{assessment_id}/desarrollo/reportes", dependencies=[Depends(req_profesor)])
+def reportes_desarrollo(assessment_id: UUID, db: Session = Depends(get_db)):
+    """Ventana de Reportes: tabla por estudiante (curso · prueba · ponderación · RUT · nombre ·
+    puntaje · nota) con marca de qué estudiantes tienen detalle re-consultable."""
+    try:
+        return reportes_desarrollo_service.tabla_reportes(db, assessment_id)
+    except Exception:
+        logger.error(f"Error en reportes_desarrollo {assessment_id}: {traceback.format_exc()}")
+        raise
+
+
+@router.get("/assessments/{assessment_id}/desarrollo/reporte/{student_id}",
+            dependencies=[Depends(req_profesor)])
+def reporte_estudiante(assessment_id: UUID, student_id: UUID, db: Session = Depends(get_db)):
+    """Detalle de la revisión de un estudiante: por pregunta, respuesta + revisión + criterios."""
+    return reportes_desarrollo_service.detalle_estudiante(db, assessment_id, student_id)
+
+
+@router.post("/assessments/{assessment_id}/desarrollo/reporte/{student_id}",
+             dependencies=[Depends(req_profesor)])
+def guardar_reporte_estudiante(assessment_id: UUID, student_id: UUID, payload: dict,
+                               db: Session = Depends(get_db)):
+    """Persiste (upsert) el detalle por pregunta de un estudiante (lo alimenta la corrección por
+    lote). payload = {docente?, preguntas:[{item_id?, question_number|numero, respuesta, puntaje?,
+    frac?, nivel?, revision?}]}."""
+    preguntas = payload.get("preguntas") or []
+    if not isinstance(preguntas, list):
+        raise conflict("preguntas debe ser una lista.")
+    return reportes_desarrollo_service.guardar_detalle(
+        db, assessment_id, student_id, preguntas, docente=(payload.get("docente") or "docente"))
 
 
 @router.get("/answer-keys/{ak_id}/rubrica/versiones", dependencies=[Depends(req_profesor)])

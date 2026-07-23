@@ -333,6 +333,7 @@ def get_assessment_config(assessment_id: UUID, db: Session = Depends(get_db)):
         "n_questions": a.n_questions or a.version_count or 40,
         "grading_scale": a.grading_scale or "chile_1_7",
         "passing_threshold": a.passing_threshold or 60.0,
+        "ponderacion_semestral": getattr(a, "ponderacion_semestral", None),
         "status": a.status,
         "modalidad": modalidad_norm(a.modalidad),
         "tipo": a.tipo,
@@ -360,10 +361,17 @@ def update_assessment_config(assessment_id: UUID, payload: dict, db: Session = D
         a.bandas_moviles = bool(payload["bandas_moviles"])
     if "tipo" in payload:
         a.tipo = ((payload.get("tipo") or "").strip().lower()[:20] or None)
+    if "ponderacion_semestral" in payload:
+        try:
+            v = payload.get("ponderacion_semestral")
+            a.ponderacion_semestral = (max(0.0, min(100.0, float(v))) if v not in (None, "") else None)
+        except (TypeError, ValueError):
+            pass
     db.commit()
     db.refresh(a)
     return {"id": str(a.id), "name": a.name, "grading_scale": a.grading_scale,
             "passing_threshold": a.passing_threshold, "tipo": a.tipo,
+            "ponderacion_semestral": getattr(a, "ponderacion_semestral", None),
             "bandas_moviles": bool(getattr(a, "bandas_moviles", False))}
 
 

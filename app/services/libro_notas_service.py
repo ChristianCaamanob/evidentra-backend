@@ -26,7 +26,8 @@ from app.services.rubrica_escala_service import fraccion_logro
 from app.services.matriz_service import _pseudo, answer_key_repo, scan_repo
 
 
-def libro_notas(db, assessment_id, escala: str = "chile_1_7", exigencia: float = 60.0) -> dict:
+def libro_notas(db, assessment_id, escala: str = "chile_1_7", exigencia: float = 60.0,
+                incluir_identidad: bool = False) -> dict:
     answer_key = answer_key_repo.get_by_assessment_id(db, assessment_id)
     if not answer_key or not answer_key.is_valid:
         raise conflict("La pauta no esta validada; no hay libro de notas.")
@@ -89,6 +90,15 @@ def libro_notas(db, assessment_id, escala: str = "chile_1_7", exigencia: float =
             if str(st.id) not in cubiertos and p in validado:
                 sujetos.append((p, None, str(st.id)))
 
+    # Mapa identidad (solo vista docente): student_id -> {rut, nombre}. G1/G2: por defecto OFF.
+    ident = {}
+    if incluir_identidad:
+        for st in estudiantes:
+            nombre = ((getattr(st, "apellido_paterno", "") or "") + " "
+                      + (getattr(st, "apellido_materno", "") or "") + " "
+                      + (getattr(st, "nombres", "") or "")).replace("  ", " ").strip()
+            ident[str(st.id)] = {"rut": getattr(st, "rut", None), "nombre": nombre or None}
+
     filas = []
     for pseudo, scan, student_id in sujetos:
         clave = por_version.get((scan.detected_version or "A").upper()) if scan else None
@@ -126,9 +136,15 @@ def libro_notas(db, assessment_id, escala: str = "chile_1_7", exigencia: float =
         pct = round(contrib / total_weight * 100, 1)
         nota, etiqueta, aprob = calculate_grade(
             pct, escala, exigencia, banda_movil=bool(getattr(assessment, "bandas_moviles", False)))
-        filas.append({"estudiante": pseudo, "logro_pct": pct, "nota": round(nota, 1),
-                      "etiqueta": etiqueta, "aprobado": bool(aprob),
-                      "desarrollo_pendiente": pendiente})
+        fila = {"estudiante": pseudo, "logro_pct": pct, "nota": round(nota, 1),
+                "etiqueta": etiqueta, "aprobado": bool(aprob),
+                "desarrollo_pendiente": pendiente}
+        if incluir_identidad:
+            info = ident.get(str(student_id), {}) if student_id else {}
+            fila["student_id"] = str(student_id) if student_id else None
+            fila["rut"] = info.get("rut")
+            fila["nombre"] = info.get("nombre")
+        filas.append(fila)
 
     n_mc = sum(1 for m in items_meta.values() if not m["desarrollo"])
     n_dev = sum(1 for m in items_meta.values() if m["desarrollo"])

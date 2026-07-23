@@ -49,6 +49,9 @@ class Assessment(UUIDMixin, TimestampMixin, Base):
     # Tipo/categoría de la evaluación (solemne | certamen | prueba | control | otro). Etiqueta
     # para los informes; no altera el cálculo de la nota. Nullable (evaluaciones antiguas).
     tipo: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Peso (%) de esta evaluación en el total de evaluaciones del semestre. Lo declara el
+    # docente; alimenta la ponderación en la ventana de Reportes y el pronóstico. Nullable.
+    ponderacion_semestral: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Opt-in del docente: en escalas de BANDAS (EEUU/UK/IB/ECTS), mover los cortes con la
     # exigencia en vez de dejarlos fijos. Solo aplica a esas escalas; el resto lo ignora.
     bandas_moviles: Mapped[bool] = mapped_column(Boolean, default=False,
