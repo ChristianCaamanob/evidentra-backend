@@ -61,7 +61,15 @@ def _sesion_dict(s, db, incluir_segmentos=False) -> dict:
             "transcripcion_literal": g.transcripcion_literal or "",
             "version_normalizada": g.version_normalizada or "",
             "sintesis_json": g.sintesis_json, "confianza": g.confianza,
-            "sin_respuesta": g.sin_respuesta}
+            "correcciones_json": g.correcciones_json or [],
+            "sin_respuesta": g.sin_respuesta,
+            "evaluaciones": [{
+                "id": str(e.id), "criterio": e.criterio, "peso_criterio": e.peso_criterio,
+                "puntaje_ia": e.puntaje_ia, "puntaje_docente": e.puntaje_docente,
+                "justificacion": e.justificacion or "",
+                "evidencia": (e.evidencia_json or {}).get("evidencia", "") if isinstance(e.evidencia_json, dict) else "",
+                "accion": e.accion, "confianza": e.confianza}
+                for e in g.evaluaciones]}
             for g in sorted(s.segmentos, key=lambda x: x.pregunta_numero)]
     return d
 
@@ -143,6 +151,26 @@ def guardar_segmentos(sesion_id: UUID, payload: dict, db: Session = Depends(get_
         n += 1
     db.commit(); db.refresh(s)
     return {"ok": True, "n_segmentos": n, "sesion": _sesion_dict(s, db, incluir_segmentos=True)}
+
+
+@router.post("/sesion/{sesion_id}/procesar", dependencies=[Depends(req_profesor)])
+def procesar_sesion(sesion_id: UUID, db: Session = Depends(get_db)):
+    """F2+F3 · Procesa con IA: por cada segmento genera Capa 3 (normalizada + síntesis +
+    correcciones fonéticas) y evalúa por 4 criterios con evidencia, y calcula la nota ponderada
+    PROPUESTA. La IA propone; el docente valida y publica (G1). Sin API key → disponible=False."""
+    from app.models.examen_oral import OralExamSesion
+    from app.services import examen_oral_ia_service
+    s = db.get(OralExamSesion, sesion_id)
+    if not s:
+        raise not_found("Sesión no encontrada.")
+    try:
+        res = examen_oral_ia_service.procesar_examen(db, s)
+        if res.get("ok"):
+            res["sesion"] = _sesion_dict(s, db, incluir_segmentos=True)
+        return res
+    except Exception:
+        logger.error(f"Error en procesar_sesion {sesion_id}: {traceback.format_exc()}")
+        raise
 
 
 @router.get("/assessments/{assessment_id}/sesiones", dependencies=[Depends(req_profesor)])
