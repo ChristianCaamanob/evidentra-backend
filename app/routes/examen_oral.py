@@ -91,6 +91,98 @@ def preguntas_oral(assessment_id: UUID, db: Session = Depends(get_db)):
                        for st in roster]}
 
 
+def _ak_de(db, assessment_id):
+    ak = db.query(AnswerKey).filter(AnswerKey.assessment_id == assessment_id).first()
+    if not ak:
+        ak = AnswerKey(assessment_id=assessment_id, status="draft", is_valid=False)
+        db.add(ak); db.flush()
+    return ak
+
+
+@router.post("/assessments/{assessment_id}/preguntas-ia", dependencies=[Depends(req_profesor)])
+def preguntas_ia(assessment_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    """Genera preguntas orales con IA (NO persiste; devuelve preview). modo='plantilla' (desde
+    tema/unidad/RA/cantidad) o 'extraer' (estructura texto pegado de un PDF/DOCX/apunte)."""
+    import os, json as _json
+    from app.services import correccion_experta_service as ce
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return {"ok": False, "disponible": False, "error": "Falta ANTHROPIC_API_KEY."}
+    asm = db.get(Assessment, assessment_id)
+    if not asm:
+        raise not_found("Evaluación no encontrada.")
+    modo = payload.get("modo") or "plantilla"
+    n = max(1, min(int(payload.get("cantidad") or 5), 30))
+    system = ("Eres un experto en evaluación por competencias que redacta preguntas para un EXAMEN "
+              "ORAL. Devuelve SOLO un JSON {\"preguntas\":[{\"enunciado\":\"...\",\"respuesta_esperada\":"
+              "\"...\",\"conceptos_indispensables\":\"c1, c2\",\"dificultad\":\"baja|media|alta\"}]}. "
+              "Preguntas claras, de respuesta hablada, sin numerar en el enunciado.")
+    if modo == "extraer":
+        texto = (payload.get("texto") or "").strip()
+        if not texto:
+            raise conflict("Pega el texto del que extraer preguntas.")
+        user = ("Extrae y estructura como preguntas de examen oral el siguiente material "
+                "(respeta las preguntas existentes; no inventes de más):\n\"\"\"\n" + texto[:8000] + "\n\"\"\"")
+    else:
+        ctx = {k: payload.get(k) for k in ("tema", "unidad", "ra", "nivel", "dificultad") if payload.get(k)}
+        user = (f"Genera {n} preguntas de examen oral. Contexto: {_json.dumps(ctx, ensure_ascii=False)}. "
+                f"Asignatura: {asm.name}.")
+    try:
+        crudo = ce._llamar_anthropic(system, user)
+        t = crudo.strip(); i, j = t.find("{"), t.rfind("}")
+        d = _json.loads(t[i:j + 1])
+        pregs = []
+        for p in (d.get("preguntas") or [])[:30]:
+            en = str(p.get("enunciado", "")).strip()
+            if en:
+                pregs.append({"enunciado": en[:2000],
+                              "respuesta_optima": str(p.get("respuesta_esperada", ""))[:3000],
+                              "conceptos_indispensables": str(p.get("conceptos_indispensables", ""))[:1000],
+                              "dificultad": str(p.get("dificultad", ""))[:20]})
+        return {"ok": True, "disponible": True, "preguntas": pregs}
+    except Exception as e:
+        logger.warning("preguntas_ia falló: %s", f"{type(e).__name__}: {e}"[:200])
+        return {"ok": False, "disponible": True, "error": f"{type(e).__name__}: {e}"[:200]}
+
+
+@router.post("/assessments/{assessment_id}/importar", dependencies=[Depends(req_profesor)])
+def importar_preguntas(assessment_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    """Crea preguntas orales (open_response) desde una lista. payload = {preguntas:[{enunciado,
+    respuesta_optima?, conceptos_indispensables?, weight?, tiempo_reflexion_seg?}], reemplazar?}."""
+    asm = db.get(Assessment, assessment_id)
+    if not asm:
+        raise not_found("Evaluación no encontrada.")
+    pregs = payload.get("preguntas") or []
+    if not isinstance(pregs, list) or not pregs:
+        raise conflict("Envía al menos una pregunta.")
+    ak = _ak_de(db, str(assessment_id))
+    if payload.get("reemplazar"):
+        for it in list(ak.items):
+            if it.question_type == QUESTION_TYPE_OPEN_RESPONSE:
+                db.delete(it)
+        db.flush()
+    base_num = max([it.question_number for it in ak.items] or [0])
+    n = 0
+    for p in pregs:
+        en = (p.get("enunciado") or "").strip()
+        if not en:
+            continue
+        base_num += 1
+        try:
+            w = float(p.get("weight") or 10)
+        except (TypeError, ValueError):
+            w = 10.0
+        db.add(AnswerKeyItem(
+            answer_key_id=ak.id, question_number=base_num, version="A", correct_answer="",
+            question_type=QUESTION_TYPE_OPEN_RESPONSE, enunciado=en[:2000], weight=max(0.1, w),
+            respuesta_optima=((p.get("respuesta_optima") or "").strip() or None),
+            conceptos_indispensables=((p.get("conceptos_indispensables") or "").strip() or None),
+            tiempo_reflexion_seg=(int(p["tiempo_reflexion_seg"]) if p.get("tiempo_reflexion_seg") else None)))
+        n += 1
+    ak.is_valid = True
+    db.commit()
+    return {"ok": True, "creadas": n, "preguntas": _preguntas(db, assessment_id)}
+
+
 @router.post("/assessments/{assessment_id}/sesion", dependencies=[Depends(req_profesor)])
 def crear_o_abrir_sesion(assessment_id: UUID, payload: dict, db: Session = Depends(get_db)):
     """Crea (o reabre) la sesión de examen oral de un estudiante. payload = {student_id, evaluador?,
