@@ -526,6 +526,7 @@ _COLUMNAS_ADITIVAS = {
         "respuesta_optima": "TEXT",
         "nivel_rigor": "VARCHAR(20) NOT NULL DEFAULT 'estricto'",
         "area_conocimiento": "VARCHAR(40)",
+        "fuente_estandar": "TEXT",
     },
     "asistencia_matriculas": {
         "webauthn_challenge": "VARCHAR(255)",

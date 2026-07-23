@@ -26,6 +26,7 @@ from app.services import matriz_service
 from app.services import validacion_service
 from app.services import precalificacion_service
 from app.services import coder_llm
+from app.services import correccion_experta_service
 from app.services import mfrm_service
 from app.services import rubrica_psicometria_service
 from app.services import aprendizaje_service
@@ -165,6 +166,39 @@ def precalificar(item_id: UUID, payload: dict, db: Session = Depends(get_db)):
         return rep
     except Exception:
         logger.error(f"Error en precalificar {item_id}: {traceback.format_exc()}")
+        raise
+
+
+@router.post("/answer-key-items/{item_id}/corregir-experto", dependencies=[Depends(req_profesor)])
+def corregir_experto(item_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    """
+    Fase 3 · Corrección EXPERTA holística (la IA PROPONE; el docente valida, G1). Funciona
+    AUNQUE no haya rúbrica manual: se apoya en respuesta óptima + nivel de rigor + autoridad
+    del área + la fuente que el docente declara (clave en Derecho/normativa, sin alucinar).
+
+    payload = {respuesta}
+    """
+    from app.models.answer_key import AnswerKeyItem
+    it = db.get(AnswerKeyItem, item_id)
+    if not it:
+        raise not_found("Pregunta no encontrada.")
+    respuesta = (payload.get("respuesta") or "").strip()
+    if not respuesta:
+        raise conflict("Falta la respuesta del estudiante a corregir.")
+    criterios = [{"name": c.name, "descriptor": c.descriptor} for c in (it.rubric_criteria or [])]
+    cfg = {
+        "enunciado": it.enunciado or "",
+        "respuesta_optima": (it.respuesta_optima or it.correct_answer or ""),
+        "nivel_rigor": getattr(it, "nivel_rigor", None) or "estricto",
+        "area_conocimiento": getattr(it, "area_conocimiento", None) or "general",
+        "fuente_estandar": getattr(it, "fuente_estandar", None) or "",
+        "peso": float(it.weight or 1),
+        "criterios": criterios,
+    }
+    try:
+        return correccion_experta_service.corregir(respuesta, cfg)
+    except Exception:
+        logger.error(f"Error en corregir_experto {item_id}: {traceback.format_exc()}")
         raise
 
 
@@ -367,6 +401,7 @@ def _pregunta_dict(it, total_peso) -> dict:
             "respuesta_optima": (it.respuesta_optima if it.respuesta_optima is not None else (it.correct_answer or "")),
             "nivel_rigor": getattr(it, "nivel_rigor", None) or "estricto",
             "area_conocimiento": getattr(it, "area_conocimiento", None) or "general",
+            "fuente_estandar": getattr(it, "fuente_estandar", None) or "",
             "pct": round(float(it.weight or 0) / total_peso * 100, 1) if total_peso else 0.0,
             "n_criterios": len(it.rubric_criteria)}
 
@@ -427,6 +462,8 @@ def editar_pregunta_desarrollo(item_id: UUID, payload: dict, db: Session = Depen
             it.nivel_rigor = v
     if "area_conocimiento" in payload:
         it.area_conocimiento = (str(payload.get("area_conocimiento") or "").strip() or None)
+    if "fuente_estandar" in payload:
+        it.fuente_estandar = (str(payload.get("fuente_estandar") or "").strip() or None)
     if "weight" in payload:
         try:
             w = float(payload["weight"])

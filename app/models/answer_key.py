@@ -92,6 +92,11 @@ class AnswerKeyItem(UUIDMixin, Base):
     # F-desarrollo: rigor de la revisión IA + área (autoridad nomenclatural). Default sensato.
     nivel_rigor: Mapped[str] = mapped_column(String(20), default="estricto", server_default="estricto", nullable=False)
     area_conocimiento: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # F3 (corrección experta) — fuente/estándar DECLARADO por el docente para esta pregunta.
+    # Clave en áreas jurisdiccionales/consenso (Derecho, normativa técnica): la IA corrige
+    # contra ESTA fuente (nunca desde su memoria) y lo transparenta. Texto libre: puede ser
+    # "Código Civil chileno art. 1545 (ed. 2024)", una guía clínica, un apunte pegado, etc.
+    fuente_estandar: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # LV (banco de ítems) - contenido opcional para el modo en vivo digital. Aditivo/nullable:
     # opciones_json = textos de las alternativas ([{"letra":"A","texto":"..."}, ...]);
