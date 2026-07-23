@@ -104,13 +104,18 @@ def detalle_estudiante(db, assessment_id, student_id) -> dict:
 
 
 def guardar_detalle(db, assessment_id, student_id, preguntas: list, docente: str = "docente") -> dict:
-    """Upsert por (evaluación × estudiante): reemplaza el detalle persistido."""
+    """Upsert POR PREGUNTA (evaluación × estudiante × question_number): reemplaza solo las
+    preguntas incluidas en el payload, sin borrar el detalle de otras preguntas ya guardadas
+    (el lote corrige una pregunta a la vez)."""
     asm = db.get(Assessment, assessment_id)
     if not asm:
         raise not_found("Evaluación no encontrada.")
-    db.query(DesarrolloRespuesta).filter(
-        DesarrolloRespuesta.assessment_id == str(assessment_id),
-        DesarrolloRespuesta.student_id == str(student_id)).delete()
+    nums = {int(p.get("question_number") or p.get("numero") or 0) for p in (preguntas or [])}
+    if nums:
+        db.query(DesarrolloRespuesta).filter(
+            DesarrolloRespuesta.assessment_id == str(assessment_id),
+            DesarrolloRespuesta.student_id == str(student_id),
+            DesarrolloRespuesta.question_number.in_(nums)).delete(synchronize_session=False)
     n = 0
     for p in (preguntas or []):
         resp = (p.get("respuesta") or "").strip()
