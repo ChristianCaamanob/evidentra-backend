@@ -92,6 +92,13 @@ class AnswerKeyItem(UUIDMixin, Base):
     # F-desarrollo: rigor de la revisión IA + área (autoridad nomenclatural). Default sensato.
     nivel_rigor: Mapped[str] = mapped_column(String(20), default="estricto", server_default="estricto", nullable=False)
     area_conocimiento: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Examen Oral (5º módulo) — parametrización de la pregunta oral. Aditivo/nullable: solo
+    # aplica a modalidad oral_examen; el resto de flujos lo ignora.
+    tiempo_reflexion_seg: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tiempo_max_seg: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    conceptos_indispensables: Mapped[str | None] = mapped_column(Text, nullable=True)
+    errores_criticos: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # F3 (corrección experta) — fuente/estándar DECLARADO por el docente para esta pregunta.
     # Clave en áreas jurisdiccionales/consenso (Derecho, normativa técnica): la IA corrige
     # contra ESTA fuente (nunca desde su memoria) y lo transparenta. Texto libre: puede ser

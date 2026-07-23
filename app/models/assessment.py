@@ -17,8 +17,13 @@ MODALIDAD_ALTERNATIVAS = "alternativas"
 MODALIDAD_DESARROLLO = "desarrollo"
 MODALIDAD_MIXTA = "mixta"
 MODALIDAD_ORAL = "oral"
+# 5º módulo: examen oral asistido por IA (grabación + segmentación por comando "Respuesta N" +
+# 3 capas de integridad + evaluación por 4 criterios + validación docente G1). Distinto de
+# 'oral' (rúbrica directa/disertaciones).
+MODALIDAD_ORAL_EXAMEN = "oral_examen"
 MODALIDAD_ESCRITA = "escrita"  # legado -> se interpreta como alternativas
-MODALIDADES = (MODALIDAD_ALTERNATIVAS, MODALIDAD_DESARROLLO, MODALIDAD_MIXTA, MODALIDAD_ORAL)
+MODALIDADES = (MODALIDAD_ALTERNATIVAS, MODALIDAD_DESARROLLO, MODALIDAD_MIXTA,
+               MODALIDAD_ORAL, MODALIDAD_ORAL_EXAMEN)
 
 
 def modalidad_norm(m: str | None) -> str:

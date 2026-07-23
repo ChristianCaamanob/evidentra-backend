@@ -18,6 +18,8 @@ from app.models.snapshot import AnalisisSnapshot  # noqa: F401
 from app.models.teacher_passkey import TeacherPasskey  # noqa: F401
 from app.models.estructura import EstructuraInstitucional  # noqa: F401
 from app.models.desarrollo_reporte import DesarrolloRespuesta  # noqa: F401
+from app.models.examen_oral import (  # noqa: F401
+    OralExamSesion, OralExamSegmento, OralExamEvaluacion)
 
 # Normaliza el esquema de Render/Heroku: SQLAlchemy 2.0 exige 'postgresql://'.
 _db_url = settings.database_url
@@ -528,6 +530,10 @@ _COLUMNAS_ADITIVAS = {
         "nivel_rigor": "VARCHAR(20) NOT NULL DEFAULT 'estricto'",
         "area_conocimiento": "VARCHAR(40)",
         "fuente_estandar": "TEXT",
+        "tiempo_reflexion_seg": "INTEGER",
+        "tiempo_max_seg": "INTEGER",
+        "conceptos_indispensables": "TEXT",
+        "errores_criticos": "TEXT",
     },
     "asistencia_matriculas": {
         "webauthn_challenge": "VARCHAR(255)",
