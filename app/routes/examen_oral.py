@@ -52,6 +52,7 @@ def _sesion_dict(s, db, incluir_segmentos=False) -> dict:
          "rut": (getattr(st, "rut", None) if st else None), "nombre": _nombre(st) if st else None,
          "estado": s.estado, "evaluador": s.evaluador, "duracion_seg": s.duracion_seg,
          "nota_final": s.nota_final, "logro_pct": s.logro_pct,
+         "observaciones": (s.config_json or {}).get("observaciones", "") if isinstance(s.config_json, dict) else "",
          "n_segmentos": len(s.segmentos)}
     if incluir_segmentos:
         d["segmentos"] = [{
@@ -171,6 +172,60 @@ def procesar_sesion(sesion_id: UUID, db: Session = Depends(get_db)):
     except Exception:
         logger.error(f"Error en procesar_sesion {sesion_id}: {traceback.format_exc()}")
         raise
+
+
+def _recompute_nota(db, sesion):
+    """Nota ponderada usando el puntaje del DOCENTE si existe, si no el de la IA (G1)."""
+    from app.services.result_service import calculate_grade
+    asm = db.get(Assessment, sesion.assessment_id)
+    escala = (asm.grading_scale if asm else "chile_1_7") or "chile_1_7"
+    exig = (asm.passing_threshold if asm and asm.passing_threshold is not None else 60.0)
+    num = 0.0; den = 0.0
+    for seg in sesion.segmentos:
+        item = db.get(AnswerKeyItem, seg.answer_key_item_id) if seg.answer_key_item_id else None
+        wp = float(getattr(item, "weight", 1.0) or 1.0); den += wp
+        evs = list(seg.evaluaciones)
+        if not evs:
+            continue
+        pj = 0.0; ws = 0.0
+        for e in evs:
+            p = e.puntaje_docente if e.puntaje_docente is not None else (e.puntaje_ia or 0.0)
+            pj += (p or 0.0) * (e.peso_criterio or 0.0); ws += (e.peso_criterio or 0.0)
+        num += (pj / ws if ws else 0.0) * wp
+    pct = round(num / den * 100, 1) if den else 0.0
+    nota, etiqueta, aprob = calculate_grade(pct, escala, exig)
+    return pct, round(nota, 1), etiqueta
+
+
+@router.post("/sesion/{sesion_id}/validar", dependencies=[Depends(req_profesor)])
+def validar_sesion(sesion_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    """F4 · El docente ajusta puntajes por criterio (G1) y opcionalmente publica. payload =
+    {evaluaciones:[{id, puntaje_docente(0-1)}], observaciones?, publicar?(bool)}. Recalcula la
+    nota con los puntajes del docente. No borra la evidencia original."""
+    from app.models.examen_oral import OralExamSesion, OralExamEvaluacion, OE_REVISADA, OE_PUBLICADA
+    s = db.get(OralExamSesion, sesion_id)
+    if not s:
+        raise not_found("Sesión no encontrada.")
+    for ev in (payload.get("evaluaciones") or []):
+        e = db.get(OralExamEvaluacion, ev.get("id"))
+        if not e:
+            continue
+        if ev.get("puntaje_docente") is not None:
+            try:
+                e.puntaje_docente = min(1.0, max(0.0, float(ev["puntaje_docente"])))
+                e.accion = "ajustado" if (e.puntaje_ia is None or abs(e.puntaje_docente - e.puntaje_ia) > 1e-6) else "aprobado"
+            except (TypeError, ValueError):
+                pass
+    if payload.get("observaciones") is not None:
+        cfg = dict(s.config_json or {}); cfg["observaciones"] = str(payload["observaciones"])[:4000]
+        s.config_json = cfg
+    db.flush()
+    pct, nota, etiqueta = _recompute_nota(db, s)
+    s.logro_pct = pct; s.nota_final = nota
+    s.estado = OE_PUBLICADA if payload.get("publicar") else OE_REVISADA
+    db.commit(); db.refresh(s)
+    return {"ok": True, "logro_pct": pct, "nota_final": nota, "etiqueta": etiqueta,
+            "estado": s.estado, "sesion": _sesion_dict(s, db, incluir_segmentos=True)}
 
 
 @router.get("/assessments/{assessment_id}/sesiones", dependencies=[Depends(req_profesor)])
