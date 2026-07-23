@@ -239,6 +239,21 @@ def pronostico_estudiante(db, course_id, rut, escala="chile_1_7", exigencia=60.0
         apellidos = " ".join(x for x in [est.apellido_paterno, est.apellido_materno] if x).strip()
         nombre = (f"{apellidos}, {est.nombres}" if apellidos else (est.nombres or rut)).strip(", ")
 
+    # Puente: si el curso no tiene parametrización explícita, se derivan los componentes de la
+    # PONDERACIÓN SEMESTRAL que el docente declaró por prueba (Reportes). Se normalizan a 100%
+    # para que la proyección sea coherente aunque no sumen exactamente 100.
+    fuente_ponderacion = "parametrizacion"
+    if not comps:
+        from app.models.assessment import Assessment
+        con_peso = [a for a in db.query(Assessment).filter(Assessment.course_id == course_id).all()
+                    if getattr(a, "ponderacion_semestral", None)]
+        suma = sum(float(a.ponderacion_semestral) for a in con_peso)
+        if con_peso and suma > 0:
+            comps = [{"nombre": a.name, "categoria": (a.tipo or "prueba"),
+                      "peso_pct": round(float(a.ponderacion_semestral) * 100.0 / suma, 2),
+                      "assessment_id": str(a.id)} for a in con_peso]
+            fuente_ponderacion = "ponderacion_semestral"
+
     if not comps:
         return {"course_id": str(course_id), "rut": rut, "nombre": nombre,
                 "parametrizado": False,
@@ -339,6 +354,7 @@ def pronostico_estudiante(db, course_id, rut, escala="chile_1_7", exigencia=60.0
         "estado": estado,
         "probabilidad_aprobar": prob,
         "semaforo": semaforo,
+        "fuente_ponderacion": fuente_ponderacion,   # 'parametrizacion' | 'ponderacion_semestral'
         "detalle": detalle,
     }
 

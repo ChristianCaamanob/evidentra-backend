@@ -445,6 +445,7 @@ def analisis_evaluacion(db, assessment_id, origen: str | None = None,
         "assessment_id": str(assessment_id),
         "prueba": (asm.name if asm else ""), "tipo": getattr(asm, "tipo", None),
         "modalidad": getattr(asm, "modalidad", None),
+        "ponderacion_semestral": getattr(asm, "ponderacion_semestral", None),
         "curso": (course.name if course else ""), "curso_code": (course.code if course else ""),
         "kpis": {
             "n_estudiantes": n,
