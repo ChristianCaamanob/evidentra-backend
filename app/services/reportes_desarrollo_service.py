@@ -33,6 +33,12 @@ def _cabecera(db, assessment) -> dict:
     }
 
 
+def _nombre_de(st) -> str | None:
+    return ((getattr(st, "apellido_paterno", "") or "") + " "
+            + (getattr(st, "apellido_materno", "") or "") + " "
+            + (getattr(st, "nombres", "") or "")).replace("  ", " ").strip() or None
+
+
 def tabla_reportes(db, assessment_id) -> dict:
     asm = db.get(Assessment, assessment_id)
     if not asm:
@@ -41,22 +47,39 @@ def tabla_reportes(db, assessment_id) -> dict:
     escala = cab["escala"]; exig = cab["exigencia"]
     libro = libro_notas_service.libro_notas(db, assessment_id, escala=escala, exigencia=exig,
                                             incluir_identidad=True)
-    # estudiantes con detalle persistido (para habilitar el click-through)
-    con_detalle = {r.student_id for r in db.query(DesarrolloRespuesta.student_id)
-                   .filter(DesarrolloRespuesta.assessment_id == str(assessment_id)).all()}
-    filas = []
+    # Resultados del libro indexados por estudiante identificado (ignora hojas sin match a nómina).
+    por_sid = {}
     for f in libro.get("estudiantes", []):
         sid = f.get("student_id")
+        if sid:
+            por_sid[sid] = f
+    # estudiantes con detalle de DESARROLLO persistido (para habilitar el click-through)
+    con_detalle = {r.student_id for r in db.query(DesarrolloRespuesta.student_id)
+                   .filter(DesarrolloRespuesta.assessment_id == str(assessment_id)).all()}
+
+    # La tabla se ancla en la NÓMINA REAL del curso (RUT + nombre); cada alumno muestra su nota
+    # si ya está cargado, o queda 'pendiente'. Así no aparecen hojas sueltas "sin nómina".
+    roster = (db.query(Student).filter(Student.course_id == asm.course_id).all()
+              if asm.course_id else [])
+    filas = []
+    for st in roster:
+        sid = str(st.id)
+        f = por_sid.get(sid)
+        cargado = f is not None
         filas.append({
-            "student_id": sid, "rut": f.get("rut"), "nombre": f.get("nombre"),
-            "puntaje_pct": f.get("logro_pct"), "nota": f.get("nota"),
-            "aprobado": f.get("aprobado"), "etiqueta": f.get("etiqueta"),
-            "pendiente": f.get("desarrollo_pendiente"),
-            "tiene_detalle": bool(sid and sid in con_detalle),
+            "student_id": sid, "rut": getattr(st, "rut", None), "nombre": _nombre_de(st),
+            "puntaje_pct": (f.get("logro_pct") if cargado else None),
+            "nota": (f.get("nota") if cargado else None),
+            "aprobado": (f.get("aprobado") if cargado else None),
+            "etiqueta": (f.get("etiqueta") if cargado else None),
+            "pendiente": (f.get("desarrollo_pendiente") if cargado else True),
+            "cargado": cargado,
+            "tiene_detalle": sid in con_detalle,
         })
-    # nombre primero, luego los sin identidad
-    filas.sort(key=lambda x: (x["nombre"] is None, (x["nombre"] or "").lower()))
+    filas.sort(key=lambda x: (not x["cargado"], (x["nombre"] or "").lower()))
     cab["estudiantes"] = filas
+    cab["n_cargados"] = sum(1 for x in filas if x["cargado"])
+    cab["n_nomina"] = len(filas)
     cab["resumen"] = libro.get("resumen", {})
     cab["composicion"] = libro.get("composicion", {})
     return cab
