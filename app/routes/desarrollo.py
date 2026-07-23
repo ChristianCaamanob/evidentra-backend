@@ -27,6 +27,7 @@ from app.services import validacion_service
 from app.services import precalificacion_service
 from app.services import coder_llm
 from app.services import correccion_experta_service
+from app.services import retroalimentacion_service
 from app.services import mfrm_service
 from app.services import rubrica_psicometria_service
 from app.services import aprendizaje_service
@@ -199,6 +200,30 @@ def corregir_experto(item_id: UUID, payload: dict, db: Session = Depends(get_db)
         return correccion_experta_service.corregir(respuesta, cfg)
     except Exception:
         logger.error(f"Error en corregir_experto {item_id}: {traceback.format_exc()}")
+        raise
+
+
+@router.post("/assessments/{assessment_id}/desarrollo/informe-retroalimentacion",
+             dependencies=[Depends(req_profesor)])
+def informe_retroalimentacion(assessment_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    """
+    Fase 4 · Informe de retroalimentación que CRUZA la Tabla de Especificaciones (RA/unidad)
+    con el desempeño del estudiante → brechas + estrategias de estudio basadas en evidencia
+    POR RA. La IA propone; el docente valida (G1). payload = {respuestas:[{item_id,respuesta}],
+    estudiante?}.
+    """
+    from app.models.assessment import Assessment
+    asm = db.get(Assessment, assessment_id)
+    if not asm:
+        raise not_found("Evaluación no encontrada.")
+    respuestas = payload.get("respuestas") or []
+    if not isinstance(respuestas, list) or not respuestas:
+        raise conflict("Envía al menos una respuesta {item_id, respuesta}.")
+    estudiante = (str(payload.get("estudiante") or "Estudiante").strip() or "Estudiante")[:80]
+    try:
+        return retroalimentacion_service.generar_informe(db, asm, respuestas, estudiante)
+    except Exception:
+        logger.error(f"Error en informe_retroalimentacion {assessment_id}: {traceback.format_exc()}")
         raise
 
 
