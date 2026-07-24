@@ -390,6 +390,34 @@ def extraer_efecto(payload: dict):
                               (payload.get("medida") or "smd"))
 
 
+@router.get("/investigacion/openalex-plan")
+def openalex_plan(q: str = Query(..., min_length=2), anios: int = Query(0, ge=0, le=50),
+                  limite: int = Query(150, ge=10, le=300)):
+    """Devuelve la URL base + parámetros para que el NAVEGADOR consulte OpenAlex directamente (con la
+    IP del usuario, presupuesto de créditos propio). Evita el throttling de la IP compartida de Render."""
+    import datetime as _dt
+    desde = (_dt.date.today().year - anios + 1) if anios else None
+    filtros = ["type:article|review|book-chapter"]
+    if desde:
+        filtros.append(f"from_publication_date:{desde}-01-01")
+    return {"base": "https://api.openalex.org/works", "select": literatura_service._OA_SELECT,
+            "filter": ",".join(filtros), "per_page": 100, "mailto": literatura_service._MAILTO,
+            "desde_anio": desde, "limite": min(max(limite, 10), 300)}
+
+
+@router.post("/investigacion/corpus-enriquecer")
+def corpus_enriquecer(payload: dict):
+    """Recibe trabajos CRUDOS de OpenAlex (traídos por el navegador) y los parsea + formatea citas +
+    añade cuartil SJR por ISSN, SIN llamar a OpenAlex. Base del corpus con factor de impacto/indexación."""
+    try:
+        return literatura_service.enriquecer_works(
+            payload.get("works") or [], payload.get("query") or "",
+            payload.get("desde_anio"), payload.get("total_disponible"))
+    except Exception:
+        logger.error(f"Error en corpus-enriquecer: {traceback.format_exc()}")
+        raise
+
+
 @router.post("/investigacion/experimental/analizar")
 def experimental_analizar(payload: dict):
     """Arsenal cuantitativo del estudio experimental sobre un dataset {columns, rows}:

@@ -604,3 +604,42 @@ def buscar_corpus(query: str, anios: int | None = None, limite: int = 150) -> di
     return {"query": query, "n": len(arts), "articulos": arts, "fuente": "OpenAlex",
             "limite": limite, "total_disponible": total_disponible, "truncado": truncado,
             "ventana_anios": anios or None, "desde_anio": desde_anio, "nota": nota}
+
+
+def enriquecer_works(works: list, query: str = "", desde_anio: int | None = None,
+                     total_disponible: int | None = None) -> dict:
+    """Toma trabajos CRUDOS de OpenAlex (traídos por el NAVEGADOR con la IP del usuario → sin gastar
+    los créditos de la IP compartida de Render) y los parsea + formatea citas + añade el cuartil SJR
+    por ISSN (lookup LOCAL). NO llama a OpenAlex. Devuelve el mismo shape que buscar_corpus."""
+    vistos_doi, vistos_tit, refs = set(), set(), []
+    for it in (works or []):
+        r = _oa_item(it)
+        if not r:
+            continue
+        d = _norm_doi(r["id"]); t = _norm_titulo(r["titulo"])
+        if d in vistos_doi or t in vistos_tit:
+            continue
+        vistos_doi.add(d); vistos_tit.add(t); refs.append(r)
+    arts = []
+    for r in refs:
+        arts.append({
+            "titulo": r["titulo"], "anio": r.get("anio"), "revista": r.get("revista"),
+            "id_tipo": r["id_tipo"], "id": r["id"], "url": r["url"], "tipo": r.get("tipo"),
+            "pmid": r.get("pmid"), "pmcid": r.get("pmcid"),
+            "abstract": r.get("abstract"), "citas": r.get("citas"),
+            "oa": r.get("oa"), "oa_estado": r.get("oa_estado"), "oa_url": r.get("oa_url"),
+            "issn": r.get("issn"), "idioma": r.get("idioma"),
+            "metricas": _sjr_por_issn(r.get("issn")),
+            "autores_str": _apa_autores(r.get("autores", [])),
+            "apa": formatear(r, "apa"), "vancouver": formatear(r, "vancouver"),
+            "bibtex": _bibtex(r), "ris": _ris(r),
+        })
+    truncado = bool(total_disponible and total_disponible > len(arts))
+    nota = f"{len(arts)} candidatos verificados por DOI (OpenAlex · vía tu navegador)."
+    if desde_anio:
+        nota += f" Ventana {desde_anio}–{datetime.date.today().year}."
+    if truncado:
+        nota += f" Hay ~{total_disponible} en total; se trajeron los {len(arts)} más relevantes."
+    return {"query": query, "n": len(arts), "articulos": arts, "fuente": "OpenAlex (navegador)",
+            "total_disponible": total_disponible, "truncado": truncado,
+            "desde_anio": desde_anio, "nota": nota}
