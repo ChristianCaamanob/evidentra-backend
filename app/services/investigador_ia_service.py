@@ -342,13 +342,14 @@ def proponer_extraccion(campos: list, titulo: str, texto: str) -> dict:
         return {"ok": False, "error": str(e)[:200]}
 
 
-def sintetizar_resultados(meta: dict, rob: dict | None = None, contexto: str = "") -> dict:
+def sintetizar_resultados(meta: dict, rob: dict | None = None, contexto: str = "", variables: list | None = None) -> dict:
     """Síntesis narrativa de los RESULTADOS de una revisión sistemática + metaanálisis, anclada a las
     cifras dadas, lista para el capítulo 'Resultados' de un Q1. La IA propone; el investigador valida (G1)."""
     if not _disponible():
         return {"ok": False, "disponible": False}
     import json as _json
     from app.services import correccion_experta_service as ce
+    tiene_vars = bool(variables)
     system = (
         "Eres autor de revisiones sistemáticas para revistas Q1. A partir del OBJETO JSON con los "
         "resultados del metaanálisis (efecto combinado, IC95%, z, p, heterogeneidad I²/τ²/Q, intervalo de "
@@ -356,10 +357,17 @@ def sintetizar_resultados(meta: dict, rob: dict | None = None, contexto: str = "
         "metarregresión, GRADE) y el resumen de riesgo de sesgo, redacta una síntesis de RESULTADOS "
         "rigurosa (180-260 palabras) en estilo APA: (1) magnitud y dirección del efecto combinado con IC95% "
         "y significación; (2) heterogeneidad y su interpretación; (3) robustez (sensibilidad) y sesgo de "
-        "publicación; (4) certeza GRADE. Cifras EXACTAS del objeto; NO inventes; NO afirmes causalidad. "
+        "publicación; (4) certeza GRADE. "
+        + ("Además se te dan VARIABLES de interés sintetizadas por separado (cada una con su método y "
+           "estimador): INTEGRA cada variable en la síntesis, CRUZÁNDOLA con el efecto principal y entre sí "
+           "(coherencias, discrepancias, patrón por variable) — este cruce es la base de la Discusión. "
+           if tiene_vars else "")
+        + "Cifras EXACTAS del objeto; NO inventes; NO afirmes causalidad. "
         'Devuelve SOLO JSON: {"sintesis":"..","frase_clave":"..","limitaciones_evidencia":".."}.'
     )
     payload = {"meta": meta, "riesgo_sesgo": rob or {}}
+    if tiene_vars:
+        payload["variables_sintetizadas"] = variables
     user = "PREGUNTA/ORIENTACIÓN: " + (contexto or "(no dada)") + "\n\nRESULTADOS:\n" + _json.dumps(payload, ensure_ascii=False)[:9000]
     try:
         crudo = ce._llamar_anthropic(system, user, max_tokens=1600)
