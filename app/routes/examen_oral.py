@@ -42,6 +42,7 @@ def _preguntas(db, assessment_id) -> list:
              "tiempo_max_seg": getattr(it, "tiempo_max_seg", None),
              "respuesta_optima": (it.respuesta_optima or it.correct_answer or ""),
              "conceptos_indispensables": getattr(it, "conceptos_indispensables", None) or "",
+             "nivel_rigor": getattr(it, "nivel_rigor", None) or "estricto",
              "area_conocimiento": getattr(it, "area_conocimiento", None) or "general"}
             for it in items]
 
@@ -69,6 +70,7 @@ def _sesion_dict(s, db, incluir_segmentos=False) -> dict:
                 "puntaje_ia": e.puntaje_ia, "puntaje_docente": e.puntaje_docente,
                 "justificacion": e.justificacion or "",
                 "evidencia": (e.evidencia_json or {}).get("evidencia", "") if isinstance(e.evidencia_json, dict) else "",
+                "fundamento": (e.evidencia_json or {}).get("fundamento", "") if isinstance(e.evidencia_json, dict) else "",
                 "accion": e.accion, "confianza": e.confianza}
                 for e in g.evaluaciones]}
             for g in sorted(s.segmentos, key=lambda x: x.pregunta_numero)]

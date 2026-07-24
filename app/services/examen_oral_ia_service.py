@@ -53,6 +53,7 @@ def procesar_segmento(literal: str, cfg: dict, criterios: list, llamar=None) -> 
                 "confianza": 0.0, "evaluaciones": []}
     area = cfg.get("area_conocimiento") or "general"
     nat, autoridad = ce._autoridad(area)
+    rigor = cfg.get("nivel_rigor") if cfg.get("nivel_rigor") in ce.NIVELES_RIGOR else ce.RIGOR_ESTRICTO
     optima = cfg.get("respuesta_optima") or ""
     conceptos = cfg.get("conceptos_indispensables") or ""
     crit_txt = "\n".join(f"  {i+1}. {c['nombre']} (peso {c.get('peso',25)}%)"
@@ -68,10 +69,21 @@ def procesar_segmento(literal: str, cfg: dict, criterios: list, llamar=None) -> 
         "2) Solo corriges una palabra si hay alta evidencia de error de reconocimiento fonético "
         "(p. ej. 'foramen yugolar'→'yugular'); si hay duda, la dejas y la marcas en 'correcciones' "
         "con confianza baja.\n"
-        "3) Evalúas por los criterios dados con evidencia citada de lo efectivamente dicho. La IA "
-        "PROPONE; el docente decide la nota. Responde SOLO con un objeto JSON.")
+        "3) Evalúas por los criterios dados con el NIVEL DE RIGOR indicado y con evidencia citada "
+        "de lo efectivamente dicho. La IA PROPONE; el docente decide la nota.\n"
+        "4) FUNDAMENTACIÓN: cada criterio incluye un 'fundamento' que respalda tu juicio con una "
+        "referencia disciplinar en cita Vancouver BREVE. Distingue FONDO (texto/manual de "
+        "referencia de la disciplina, p. ej. Anatomía → Moore KL, Anatomía con orientación clínica, "
+        "última ed.; Fisiología → Guyton & Hall; Derecho → el código/ley pertinente) y FORMA "
+        "(nomenclatura/norma, p. ej. Anatomía → Terminologia Anatomica FIPAT/IFAA; Química → IUPAC). "
+        "Puedes sugerir 1–2 artículos Q1 de alto impacto que apoyen el juicio, en Vancouver. "
+        "HONESTIDAD OBLIGATORIA: si no estás seguro de una cita de artículo (autores/año/DOI), "
+        "márcala como 'sugerido, verificar' y NO inventes DOIs ni datos exactos con falsa certeza. "
+        "Los manuales/normas canónicos sí puedes citarlos con seguridad.\n"
+        "Responde SOLO con un objeto JSON.")
 
-    P = [f"ÁREA: {area}. Autoridad terminológica: {autoridad}."]
+    P = [f"ÁREA: {area}. Autoridad de FORMA (nomenclatura): {autoridad}."]
+    P.append("NIVEL DE RIGOR EXIGIDO PARA PUNTUAR:\n" + ce._REGLA_RIGOR.get(rigor, ce._REGLA_RIGOR[ce.RIGOR_ESTRICTO]))
     if cfg.get("enunciado"):
         P.append(f"PREGUNTA: {cfg['enunciado']}")
     if optima:
@@ -89,8 +101,10 @@ def procesar_segmento(literal: str, cfg: dict, criterios: list, llamar=None) -> 
         '  "sintesis": {"idea_central":"...","conceptos_correctos":["..."],"argumentos":["..."],'
         '"incompleto":["..."],"errores":["..."],"conceptos_omitidos":["..."],"sintesis_final":"..."},\n'
         '  "confianza": <0-1 confianza global de la transcripción>,\n'
+        '  "referencias": {"fondo":"<manual/texto de referencia de la disciplina, Vancouver breve>",'
+        '"forma":"<norma/nomenclatura, Vancouver breve>","articulos":["<artículo Q1 Vancouver breve (sugerido, verificar)>"]},\n'
         '  "evaluaciones": [{"criterio":"<nombre exacto>","puntaje":<0-1>,"justificacion":"...",'
-        '"evidencia":"<cita breve de lo dicho>","confianza":<0-1>}]\n'
+        '"evidencia":"<cita breve de lo dicho>","fundamento":"<cita Vancouver breve que respalda ESTE criterio (forma o fondo)>","confianza":<0-1>}]\n'
         "}")
     try:
         crudo = (llamar or ce._llamar_anthropic)(system, "\n\n".join(P))
@@ -122,11 +136,17 @@ def procesar_segmento(literal: str, cfg: dict, criterios: list, llamar=None) -> 
             "puntaje_ia": round(_f(e.get("puntaje"), 0.0), 2),
             "justificacion": str(e.get("justificacion", ""))[:800],
             "evidencia": str(e.get("evidencia", ""))[:500],
+            "fundamento": str(e.get("fundamento", ""))[:400],
             "confianza": round(_f(e.get("confianza"), 0.5), 2),
         })
+    rf = d.get("referencias") or {}
+    referencias = {"fondo": str(rf.get("fondo", ""))[:400],
+                   "forma": str(rf.get("forma", ""))[:400],
+                   "articulos": _lista(rf.get("articulos"), 3)}
     return {"vacio": False, "normalizada": str(d.get("normalizada", ""))[:6000],
             "correcciones": (d.get("correcciones") or [])[:20],
-            "sintesis": sintesis, "confianza": round(_f(d.get("confianza"), 0.5), 2),
+            "sintesis": sintesis, "referencias": referencias,
+            "confianza": round(_f(d.get("confianza"), 0.5), 2),
             "evaluaciones": evals}
 
 
@@ -158,6 +178,7 @@ def procesar_examen(db, sesion, llamar=None) -> dict:
             "respuesta_optima": (getattr(item, "respuesta_optima", None) or getattr(item, "correct_answer", "")) if item else "",
             "conceptos_indispensables": getattr(item, "conceptos_indispensables", None) if item else "",
             "area_conocimiento": getattr(item, "area_conocimiento", None) or "general",
+            "nivel_rigor": getattr(item, "nivel_rigor", None) or "estricto",
         }
         try:
             r = procesar_segmento(seg.transcripcion_literal, scfg, criterios, llamar=llamar)
@@ -165,7 +186,8 @@ def procesar_examen(db, sesion, llamar=None) -> dict:
             return {"ok": False, "disponible": True, "motor": "llm_error",
                     "error": f"{type(e).__name__}: {e}"[:200]}
         seg.version_normalizada = r["normalizada"] or None
-        seg.sintesis_json = r["sintesis"]
+        _sint = dict(r["sintesis"]); _sint["referencias"] = r.get("referencias")   # Fondo/Forma/artículos a nivel pregunta
+        seg.sintesis_json = _sint
         seg.confianza = r["confianza"]
         seg.correcciones_json = r["correcciones"]
         db.query(OralExamEvaluacion).filter(OralExamEvaluacion.segmento_id == seg.id).delete()
@@ -173,7 +195,8 @@ def procesar_examen(db, sesion, llamar=None) -> dict:
         for e in r["evaluaciones"]:
             db.add(OralExamEvaluacion(
                 segmento_id=seg.id, criterio=e["criterio"], peso_criterio=e["peso_criterio"],
-                puntaje_ia=e["puntaje_ia"], evidencia_json={"evidencia": e["evidencia"]},
+                puntaje_ia=e["puntaje_ia"],
+                evidencia_json={"evidencia": e["evidencia"], "fundamento": e.get("fundamento", "")},
                 justificacion=e["justificacion"], confianza=e["confianza"]))
             pj_preg += e["puntaje_ia"] * e["peso_criterio"]; wsum += e["peso_criterio"]
         frac_preg = (pj_preg / wsum) if wsum else 0.0
