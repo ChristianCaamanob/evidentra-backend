@@ -276,6 +276,25 @@ def sintetizar(estudios: list[dict], medida: str = "smd") -> dict:
         "efecto_escala": ("ln(OR)" if medida == "or" else "z de Fisher" if medida == "z" else "Hedges g"),
     }
     out["grade"] = _grade(out)
+    # Sensibilidad leave-one-out: reestima el efecto quitando un estudio a la vez (robustez del pooled).
+    if k >= 3:
+        loo = []
+        for i in range(k):
+            ys_i = [ys[j] for j in range(k) if j != i]
+            vs_i = [vs[j] for j in range(k) if j != i]
+            Mi, se_i, _t = _re_estimate(ys_i, vs_i)
+            loo.append({"sin": labels[i], "estimador": round(Mi, 4),
+                        "ic95": [round(Mi - Z975 * se_i, 4), round(Mi + Z975 * se_i, 4)]})
+        rango = [round(min(x["estimador"] for x in loo), 4), round(max(x["estimador"] for x in loo), 4)]
+        # ¿algún estudio, al quitarlo, cambia la conclusión de significación?
+        cambia = [x["sin"] for x in loo if (x["ic95"][0] > 0) == (x["ic95"][1] > 0) and not (ci_z[0] > 0) == (ci_z[1] > 0)]
+        out["sensibilidad"] = {"leave_one_out": loo, "rango_estimador": rango,
+                               "robusto": len(cambia) == 0,
+                               "estudios_influyentes": cambia,
+                               "nota": ("El efecto combinado es robusto: ninguna omisión individual cambia la conclusión."
+                                        if not cambia else "Atención: quitar " + ", ".join(cambia) + " altera la significación.")}
+    else:
+        out["sensibilidad"] = None
     out["trim_fill"] = trim_and_fill(ys, vs) if k >= 3 else None
     out["subgrupos"] = subgrupos(prep, medida) if any("grupo" in p for p in prep) else None
     out["metarregresion"] = metarregresion(prep) if sum(1 for p in prep if "x" in p) >= 3 else None

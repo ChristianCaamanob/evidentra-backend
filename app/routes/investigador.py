@@ -418,6 +418,14 @@ def corpus_enriquecer(payload: dict):
         raise
 
 
+@router.post("/investigacion/sintesis-resultados")
+def sintesis_resultados(payload: dict):
+    """Síntesis narrativa (IA) del capítulo de Resultados de una RS+meta, anclada a las cifras del
+    metaanálisis + riesgo de sesgo. El investigador valida (G1)."""
+    from app.services import investigador_ia_service as iia
+    return iia.sintetizar_resultados(payload.get("meta") or {}, payload.get("rob"), payload.get("contexto") or "")
+
+
 @router.post("/investigacion/experimental/analizar")
 def experimental_analizar(payload: dict):
     """Arsenal cuantitativo del estudio experimental sobre un dataset {columns, rows}:

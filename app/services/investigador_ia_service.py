@@ -117,6 +117,37 @@ def extraer_efecto(titulo: str, abstract: str, medida: str = "smd") -> dict:
         return {"ok": False, "error": str(e)[:200]}
 
 
+def sintetizar_resultados(meta: dict, rob: dict | None = None, contexto: str = "") -> dict:
+    """Síntesis narrativa de los RESULTADOS de una revisión sistemática + metaanálisis, anclada a las
+    cifras dadas, lista para el capítulo 'Resultados' de un Q1. La IA propone; el investigador valida (G1)."""
+    if not _disponible():
+        return {"ok": False, "disponible": False}
+    import json as _json
+    from app.services import correccion_experta_service as ce
+    system = (
+        "Eres autor de revisiones sistemáticas para revistas Q1. A partir del OBJETO JSON con los "
+        "resultados del metaanálisis (efecto combinado, IC95%, z, p, heterogeneidad I²/τ²/Q, intervalo de "
+        "predicción, sesgo de publicación Egger/trim-and-fill, sensibilidad leave-one-out, subgrupos, "
+        "metarregresión, GRADE) y el resumen de riesgo de sesgo, redacta una síntesis de RESULTADOS "
+        "rigurosa (180-260 palabras) en estilo APA: (1) magnitud y dirección del efecto combinado con IC95% "
+        "y significación; (2) heterogeneidad y su interpretación; (3) robustez (sensibilidad) y sesgo de "
+        "publicación; (4) certeza GRADE. Cifras EXACTAS del objeto; NO inventes; NO afirmes causalidad. "
+        'Devuelve SOLO JSON: {"sintesis":"..","frase_clave":"..","limitaciones_evidencia":".."}.'
+    )
+    payload = {"meta": meta, "riesgo_sesgo": rob or {}}
+    user = "PREGUNTA/ORIENTACIÓN: " + (contexto or "(no dada)") + "\n\nRESULTADOS:\n" + _json.dumps(payload, ensure_ascii=False)[:9000]
+    try:
+        crudo = ce._llamar_anthropic(system, user, max_tokens=1600)
+        d = _json_robusto(crudo)
+        return {"ok": True, "sintesis": str(d.get("sintesis", "")).strip(),
+                "frase_clave": str(d.get("frase_clave", "")).strip(),
+                "limitaciones_evidencia": str(d.get("limitaciones_evidencia", "")).strip(),
+                "motor": "IA (" + ce.MODELO_EXPERTO + ")", "aviso": "Síntesis propuesta por IA — valídala (G1)."}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("sintetizar_resultados falló: %s", str(e)[:150])
+        return {"ok": False, "error": str(e)[:200]}
+
+
 def interpretar_analisis(resultado: dict, contexto: str = "") -> dict:
     """Interpreta un resultado estadístico (t/ANOVA/correlación/regresión…) como lo haría un
     estadígrafo senior para un artículo Q1: lectura del hallazgo, tamaño de efecto, supuestos y
