@@ -420,6 +420,17 @@ def list_assessment_results(assessment_id: UUID, db: Session = Depends(get_db)):
     return result_service.list_results_for_assessment(db, assessment_id)
 
 
+@router.post("/{assessment_id}/remediacion", dependencies=[Depends(req_profesor)])
+def remediacion_pedagogica(assessment_id: UUID, payload: dict):
+    """Pedagogía proactiva: convierte una brecha detectada por la analítica en una acción de aula
+    (micro-repaso, ítems de refuerzo, dinámica o mensaje al grupo). La IA propone; el docente valida (G1)."""
+    from app.services import pedagogia_ia_service as ped
+    return ped.proponer_remediacion(payload.get("tipo") or "repaso",
+                                     payload.get("debilidad") or {},
+                                     payload.get("contexto") or {},
+                                     int(payload.get("n_items") or 3))
+
+
 @router.get("/{assessment_id}/briefing")
 def briefing_del_curso(assessment_id: UUID, db: Session = Depends(get_db)):
     """Briefing del CURSO para el docente (IA sobre resultados REALES): panorama, focos de
