@@ -390,6 +390,23 @@ def extraer_efecto(payload: dict):
                               (payload.get("medida") or "smd"))
 
 
+@router.post("/investigacion/experimental/analizar")
+def experimental_analizar(payload: dict):
+    """Arsenal cuantitativo del estudio experimental sobre un dataset {columns, rows}:
+    descriptivos | supuestos | comparacion | correlacion | regresion. Estadígrafos + tamaño de efecto
+    + reporte APA. El investigador elige el análisis; el motor calcula (no decide)."""
+    from app.services import experimental_stats_service as ex
+    return ex.analizar(payload)
+
+
+@router.post("/investigacion/experimental/interpretar")
+def experimental_interpretar(payload: dict):
+    """Interpretación en prosa (estilo estadígrafo senior) de un resultado de análisis; propone la
+    lectura y sus reservas. El investigador valida (G1). Sin clave IA → disponible=False."""
+    from app.services import investigador_ia_service as iia
+    return iia.interpretar_analisis(payload.get("resultado") or {}, payload.get("contexto") or "")
+
+
 @router.get("/{assessment_id}/psicometria/dimensionalidad")
 def psicometria_dimensionalidad(assessment_id: UUID, origen: str | None = None, db: Session = Depends(get_db)):
     """I7 - Dimensionalidad (KMO, Bartlett, analisis paralelo, EFA) + fiabilidad ampliada.

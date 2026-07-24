@@ -115,3 +115,34 @@ def extraer_efecto(titulo: str, abstract: str, medida: str = "smd") -> dict:
     except Exception as e:  # noqa: BLE001
         logger.warning("extraer_efecto falló: %s", str(e)[:150])
         return {"ok": False, "error": str(e)[:200]}
+
+
+def interpretar_analisis(resultado: dict, contexto: str = "") -> dict:
+    """Interpreta un resultado estadístico (t/ANOVA/correlación/regresión…) como lo haría un
+    estadígrafo senior para un artículo Q1: lectura del hallazgo, tamaño de efecto, supuestos y
+    reservas. La IA propone; el investigador valida (G1)."""
+    if not _disponible():
+        return {"ok": False, "disponible": False}
+    import json as _json
+    from app.services import correccion_experta_service as ce
+    system = (
+        "Eres un estadígrafo senior que redacta la lectura de un resultado para un artículo indexado Q1. "
+        "A partir del OBJETO JSON con el resultado del análisis, escribe una interpretación rigurosa y "
+        "sobria (120-180 palabras): (1) qué muestra el estadístico y su p-valor; (2) el TAMAÑO DE EFECTO y "
+        "su magnitud sustantiva (no solo la significación); (3) supuestos/limitaciones relevantes; (4) una "
+        "frase lista para 'Resultados' en estilo APA. NO exageres, NO afirmes causalidad si el diseño no la "
+        "soporta, NO inventes cifras que no estén en el objeto. Devuelve SOLO JSON: "
+        '{"interpretacion":"..","frase_apa":"..","reservas":".."}.'
+    )
+    user = "CONTEXTO: " + (contexto or "(no dado)") + "\n\nRESULTADO:\n" + _json.dumps(resultado, ensure_ascii=False)[:6000]
+    try:
+        crudo = ce._llamar_anthropic(system, user, max_tokens=1200)
+        d = _json_robusto(crudo)
+        return {"ok": True, "interpretacion": str(d.get("interpretacion", "")).strip(),
+                "frase_apa": str(d.get("frase_apa", "")).strip(),
+                "reservas": str(d.get("reservas", "")).strip(),
+                "motor": "IA (" + ce.MODELO_EXPERTO + ")",
+                "aviso": "Lectura propuesta por IA — valídala (G1)."}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("interpretar_analisis falló: %s", str(e)[:150])
+        return {"ok": False, "error": str(e)[:200]}
