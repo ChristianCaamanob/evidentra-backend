@@ -117,6 +117,41 @@ def extraer_efecto(titulo: str, abstract: str, medida: str = "smd") -> dict:
         return {"ok": False, "error": str(e)[:200]}
 
 
+def proponer_appraisal(tool_nombre: str, items: list, titulo: str, texto: str) -> dict:
+    """Propone la valoración crítica ítem por ítem para CUALQUIER herramienta (JBI por diseño, o RoB 2),
+    desde el título + texto (abstract o texto completo). Respuestas: si/no/poco/na. G1: el investigador valida."""
+    if not _disponible():
+        return {"ok": False, "disponible": False}
+    from app.services import correccion_experta_service as ce
+    lista = "\n".join(str(k) + ". " + str(q) for k, q in enumerate(items or []))
+    system = (
+        "Eres metodólogo experto en valoración crítica de estudios (herramientas JBI / Cochrane). Se te da "
+        "el nombre de la herramienta y sus ítems. Para CADA ítem responde 'si', 'no', 'poco' (poco claro / no "
+        "reportado) o 'na' (no aplica), según lo que el TEXTO dice o NO dice, con una 'justificacion' breve "
+        "(<=160 car.) anclada al texto. NUNCA inventes lo que el texto no reporta (usa 'poco'). Devuelve SOLO "
+        'JSON: {"items":[{"i":<índice>,"respuesta":"si|no|poco|na","justificacion":".."}],"global":".."}.'
+    )
+    user = ("HERRAMIENTA: " + (tool_nombre or "") + "\n\nÍTEMS:\n" + lista
+            + "\n\nTÍTULO: " + (titulo or "") + "\n\nTEXTO (abstract o texto completo):\n" + ((texto or "")[:20000] or "(sin texto)"))
+    try:
+        crudo = ce._llamar_anthropic(system, user, max_tokens=2200)
+        d = _json_robusto(crudo)
+        out = []
+        for it in (d.get("items") or []):
+            r = str(it.get("respuesta", "")).lower()
+            r = "si" if r.startswith("s") or r == "yes" else "no" if r == "no" else "na" if r.startswith("na") or "aplic" in r else "poco"
+            try:
+                idx = int(it.get("i"))
+            except (TypeError, ValueError):
+                continue
+            out.append({"i": idx, "respuesta": r, "justificacion": str(it.get("justificacion", ""))[:220]})
+        return {"ok": True, "items": out, "global": str(d.get("global", ""))[:300],
+                "motor": "IA (" + ce.MODELO_EXPERTO + ")", "aviso": "Propuesta IA — verifica cada ítem (G1)."}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("proponer_appraisal falló: %s", str(e)[:150])
+        return {"ok": False, "error": str(e)[:200]}
+
+
 def sintetizar_resultados(meta: dict, rob: dict | None = None, contexto: str = "") -> dict:
     """Síntesis narrativa de los RESULTADOS de una revisión sistemática + metaanálisis, anclada a las
     cifras dadas, lista para el capítulo 'Resultados' de un Q1. La IA propone; el investigador valida (G1)."""

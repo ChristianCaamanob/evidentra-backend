@@ -418,6 +418,14 @@ def corpus_enriquecer(payload: dict):
         raise
 
 
+@router.post("/investigacion/proponer-appraisal")
+def proponer_appraisal(payload: dict):
+    """Propone la valoración crítica (JBI por diseño o RoB 2) ítem por ítem desde el texto. G1."""
+    from app.services import investigador_ia_service as iia
+    return iia.proponer_appraisal(payload.get("tool") or "", payload.get("items") or [],
+                                  payload.get("titulo") or "", payload.get("texto") or "")
+
+
 @router.post("/investigacion/sintesis-resultados")
 def sintesis_resultados(payload: dict):
     """Síntesis narrativa (IA) del capítulo de Resultados de una RS+meta, anclada a las cifras del
