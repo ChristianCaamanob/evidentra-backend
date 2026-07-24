@@ -45,6 +45,50 @@ def _lista(v, n=6):
     return [str(x)[:400] for x in v if str(x).strip()][:n]
 
 
+def _json_robusto(crudo: str) -> dict:
+    """Extrae el objeto JSON de la respuesta del modelo, tolerando truncación (cierra strings,
+    arrays y objetos abiertos y descarta comas colgantes)."""
+    t = (crudo or "").strip()
+    i = t.find("{")
+    if i < 0:
+        raise ValueError("La respuesta del modelo no contiene JSON.")
+    t = t[i:]
+    j = t.rfind("}")
+    if j > 0:
+        try:
+            return json.loads(t[:j + 1])
+        except Exception:
+            pass
+    # Reparación de truncación: pila de cierres (LIFO) para cerrar en el orden correcto.
+    stack = []; in_str = False; esc = False
+    for ch in t:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            stack.append("}")
+        elif ch == "[":
+            stack.append("]")
+        elif ch in "}]":
+            if stack:
+                stack.pop()
+    s = t
+    if in_str:
+        s += '"'
+    s = s.rstrip()
+    if s.endswith(","):
+        s = s[:-1]
+    s += "".join(reversed(stack))
+    return json.loads(s)
+
+
 def procesar_segmento(literal: str, cfg: dict, criterios: list, llamar=None) -> dict:
     """Devuelve {normalizada, sintesis, correcciones, confianza, evaluaciones[]} para un segmento."""
     literal = (literal or "").strip()
@@ -106,10 +150,11 @@ def procesar_segmento(literal: str, cfg: dict, criterios: list, llamar=None) -> 
         '  "evaluaciones": [{"criterio":"<nombre exacto>","puntaje":<0-1>,"justificacion":"...",'
         '"evidencia":"<cita breve de lo dicho>","fundamento":"<cita Vancouver breve que respalda ESTE criterio (forma o fondo)>","confianza":<0-1>}]\n'
         "}")
+    # El JSON con síntesis + fundamentos + citas Vancouver es grande → tokens holgados para no truncar.
+    _call = llamar or (lambda s, u: ce._llamar_anthropic(s, u, max_tokens=6000))
     try:
-        crudo = (llamar or ce._llamar_anthropic)(system, "\n\n".join(P))
-        t = crudo.strip(); i, j = t.find("{"), t.rfind("}")
-        d = json.loads(t[i:j + 1])
+        crudo = _call(system, "\n\n".join(P))
+        d = _json_robusto(crudo)
     except Exception as e:
         logger.warning("Examen oral · procesar_segmento falló: %s", f"{type(e).__name__}: {e}"[:200])
         raise

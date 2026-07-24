@@ -187,11 +187,11 @@ def parsear_respuesta(texto: str, nat: str) -> dict:
     }
 
 
-def _llamar_anthropic(system: str, user: str, modelo: str = MODELO_EXPERTO) -> str:
+def _llamar_anthropic(system: str, user: str, modelo: str = MODELO_EXPERTO, max_tokens: int = 1800) -> str:
     import anthropic
     cliente = anthropic.Anthropic()          # ANTHROPIC_API_KEY del entorno
     msg = cliente.messages.create(
-        model=modelo, max_tokens=1800, system=system,
+        model=modelo, max_tokens=max_tokens, system=system,
         messages=[{"role": "user", "content": user}])
     for bloque in msg.content:
         if getattr(bloque, "type", None) == "text":
