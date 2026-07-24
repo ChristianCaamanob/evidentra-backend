@@ -58,7 +58,8 @@ def _desc_vec(x):
         return {"n": 0}
     from scipy import stats as st
     media = float(np.mean(x)); de = float(np.std(x, ddof=1)) if n > 1 else 0.0
-    ic = 1.96 * de / math.sqrt(n) if n > 1 else 0.0
+    tcrit = float(st.t.ppf(0.975, n - 1)) if n > 1 else 0.0   # t de Student (no z fijo): correcto para n pequeño
+    ic = tcrit * de / math.sqrt(n) if n > 1 else 0.0
     return {"n": n, "media": _r(media), "de": _r(de),
             "ic95": [_r(media - ic), _r(media + ic)],
             "mediana": _r(float(np.median(x))),
@@ -68,8 +69,9 @@ def _desc_vec(x):
             "curtosis": _r(float(st.kurtosis(x))) if n > 3 else None}
 
 
-def _grupos(rows, gi, vi):
-    """Devuelve {nivel: [valores numéricos]} agrupando la variable vi por la categórica gi."""
+def _grupos(rows, gi, vi, minimo=2):
+    """Devuelve {nivel: [valores numéricos]} agrupando la variable vi por la categórica gi.
+    minimo=2 para pruebas inferenciales; minimo=1 para descriptivos (no oculta grupos de un caso)."""
     g = {}
     for r in rows:
         if gi >= len(r) or vi >= len(r):
@@ -79,7 +81,7 @@ def _grupos(rows, gi, vi):
         if k in (None, "") or v is None:
             continue
         g.setdefault(str(k), []).append(v)
-    return {k: v for k, v in g.items() if len(v) >= 2}
+    return {k: v for k, v in g.items() if len(v) >= minimo}
 
 
 def descriptivos(columns, rows, params):
@@ -92,7 +94,7 @@ def descriptivos(columns, rows, params):
             continue
         item = {"variable": c, "global": _desc_vec([_num(v) for v in _col(rows, j)])}
         if gi is not None and j != gi:
-            gs = _grupos(rows, gi, j)
+            gs = _grupos(rows, gi, j, minimo=1)   # descriptivos: no ocultes grupos de un solo caso
             item["por_grupo"] = {k: _desc_vec(v) for k, v in gs.items()}
         out.append(item)
     return {"ok": True, "analisis": "descriptivos", "variables": out,
@@ -146,6 +148,12 @@ def _interpreta_d(d):
     return "trivial" if a < 0.2 else "pequeño" if a < 0.5 else "mediano" if a < 0.8 else "grande"
 
 
+def _interpreta_r(r):
+    """Cortes de magnitud para correlaciones/rango-biserial (Cohen): 0.1 / 0.3 / 0.5."""
+    a = abs(r)
+    return "trivial" if a < 0.1 else "pequeño" if a < 0.3 else "mediano" if a < 0.5 else "grande"
+
+
 def comparacion(columns, rows, params):
     from scipy import stats as st
     var = params.get("variable"); grupo = params.get("grupo")
@@ -155,12 +163,13 @@ def comparacion(columns, rows, params):
     if len(gs) < 2:
         return {"ok": False, "error": "Se necesitan ≥2 grupos con ≥2 datos cada uno."}
     niveles = list(gs.keys()); arrs = [np.asarray(gs[k], dtype=float) for k in niveles]
-    # normalidad para elegir test
+    # normalidad para elegir test. En grupos con n<3 no se puede verificar → conservador: no paramétrica.
     normal = True
     for a in arrs:
-        if 3 <= a.size <= 5000:
-            if st.shapiro(a)[1] <= 0.05:
-                normal = False
+        if a.size < 3:
+            normal = False
+        elif a.size <= 5000 and st.shapiro(a)[1] <= 0.05:
+            normal = False
     desc = {k: {"n": int(gs[k].__len__()), "media": _r(float(np.mean(a))), "de": _r(float(np.std(a, ddof=1)))} for k, a in zip(niveles, arrs)}
     out = {"ok": True, "analisis": "comparacion", "variable": var, "grupo": grupo, "n_grupos": len(niveles), "descriptivos": desc}
     if len(niveles) == 2:
@@ -170,18 +179,25 @@ def comparacion(columns, rows, params):
             welch = lev_p <= 0.05
             t, p = st.ttest_ind(a, b, equal_var=not welch)
             d, g = _cohen_d(a, b)
-            gl = a.size + b.size - 2 if not welch else None
+            na, nb = a.size, b.size
+            if welch:
+                va, vb = float(np.var(a, ddof=1)), float(np.var(b, ddof=1))
+                den = ((va / na) ** 2 / (na - 1) + (vb / nb) ** 2 / (nb - 1)) if (na > 1 and nb > 1) else 0
+                gl = ((va / na + vb / nb) ** 2 / den) if den else None
+            else:
+                gl = na + nb - 2
+            glTxt = _r(gl) if gl is not None else "—"
             out.update({"test": ("t de Welch" if welch else "t de Student"), "estadistico": _r(t), "p": _r(p),
-                        "gl": gl, "efecto": {"cohen_d": _r(d), "hedges_g": _r(g), "magnitud": _interpreta_d(g)},
+                        "gl": _r(gl), "efecto": {"cohen_d": _r(d), "hedges_g": _r(g), "magnitud": _interpreta_d(g)},
                         "significativo": bool(p < 0.05),
-                        "apa": f"{'t de Welch' if welch else 't'}({_r(gl) if gl else 'gl'}) = {_r(t)}, p = {_r(p)}, g = {_r(g)} ({_interpreta_d(g)})"})
+                        "apa": f"{'t de Welch' if welch else 't'}({glTxt}) = {_r(t)}, p = {_r(p)}, g = {_r(g)} ({_interpreta_d(g)})"})
         else:
             U, p = st.mannwhitneyu(a, b, alternative="two-sided")
-            rb = 1 - (2 * U) / (a.size * b.size)  # rank-biserial
+            rb = 1 - (2 * U) / (a.size * b.size)  # rank-biserial (una correlación → cortes de r)
             out.update({"test": "U de Mann-Whitney", "estadistico": _r(U), "p": _r(p),
-                        "efecto": {"rango_biserial": _r(rb), "magnitud": _interpreta_d(rb)},
+                        "efecto": {"rango_biserial": _r(rb), "magnitud": _interpreta_r(rb)},
                         "significativo": bool(p < 0.05),
-                        "apa": f"U = {_r(U)}, p = {_r(p)}, r = {_r(rb)}"})
+                        "apa": f"U = {_r(U)}, p = {_r(p)}, r = {_r(rb)} ({_interpreta_r(rb)})"})
     else:
         if normal:
             F, p = st.f_oneway(*arrs)
@@ -231,7 +247,12 @@ def correlacion(columns, rows, params):
             if len(par) < 3:
                 continue
             u = np.array([p[0] for p in par]); v = np.array([p[1] for p in par])
+            if np.std(u) == 0 or np.std(v) == 0:
+                M[columns[a] + " × " + columns[b]] = {"r": None, "p": None, "n": len(par), "sig": False, "nota": "variable constante"}
+                continue
             r, p = (st.pearsonr(u, v) if metodo == "pearson" else st.spearmanr(u, v))
+            if math.isnan(float(r)):
+                continue
             M[columns[a] + " × " + columns[b]] = {"r": _r(float(r)), "p": _r(float(p)), "n": len(par), "sig": bool(p < 0.05)}
     return {"ok": True, "analisis": "correlacion", "metodo": metodo, "variables": nombres, "pares": M,
             "nota": ("r de Pearson (lineal)." if metodo == "pearson" else "ρ de Spearman (monótona, robusta).")}
@@ -253,7 +274,13 @@ def regresion(columns, rows, params):
         Y.append(yv); X.append(xv)
     if len(Y) < len(xis) + 2:
         return {"ok": False, "error": "Muy pocos casos completos para estimar el modelo."}
-    Xm = sm.add_constant(np.asarray(X, dtype=float)); Yv = np.asarray(Y, dtype=float)
+    Yv = np.asarray(Y, dtype=float)
+    if logistica:
+        vals = set(round(float(v), 6) for v in Yv)
+        if not vals.issubset({0.0, 1.0}):
+            return {"ok": False, "error": "Para regresión logística, Y debe ser binaria (0/1). "
+                    "Recodifica la variable dependiente a 0 y 1, o usa regresión lineal."}
+    Xm = sm.add_constant(np.asarray(X, dtype=float))
     nombres = ["(intercepto)"] + [columns[k] for k in xis]
     try:
         if logistica:
