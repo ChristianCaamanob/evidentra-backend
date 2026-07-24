@@ -223,6 +223,15 @@ def delete_assessment(assessment_id: UUID, db: Session = Depends(get_db)):
     _wipe("app.models.scan", "Scan", lambda M: M.assessment_id == assessment_id)
     _wipe("app.models.en_vivo", "SesionEnVivo", lambda M: M.assessment_id == aid_str)
     _wipe("app.models.grupo", "Grupo", lambda M: M.assessment_id == aid_str)
+    _wipe("app.models.desarrollo_reporte", "DesarrolloRespuesta", lambda M: M.assessment_id == aid_str)
+    # Examen oral: borrar sesiones vía ORM (cascade → segmentos → evaluaciones; bulk-delete rompería FK).
+    try:
+        from app.models.examen_oral import OralExamSesion
+        for _s in db.query(OralExamSesion).filter(OralExamSesion.assessment_id == aid_str).all():
+            db.delete(_s)
+    except Exception as _e:  # noqa: BLE001
+        import logging
+        logging.getLogger("evalys").warning("delete_assessment: no se pudo limpiar examen oral: %s", _e)
     # answer_key + items + criterios + anclas caen por cascada ORM al borrar el assessment
     db.delete(a)
     db.commit()
