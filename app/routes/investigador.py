@@ -426,6 +426,14 @@ def proponer_appraisal(payload: dict):
                                   payload.get("titulo") or "", payload.get("texto") or "")
 
 
+@router.post("/investigacion/proponer-extraccion")
+def proponer_extraccion(payload: dict):
+    """Propone los campos del formulario de extracción de datos (Covidence-like) desde el texto. G1."""
+    from app.services import investigador_ia_service as iia
+    return iia.proponer_extraccion(payload.get("campos") or [], payload.get("titulo") or "",
+                                   payload.get("texto") or "")
+
+
 @router.post("/investigacion/sintesis-resultados")
 def sintesis_resultados(payload: dict):
     """Síntesis narrativa (IA) del capítulo de Resultados de una RS+meta, anclada a las cifras del

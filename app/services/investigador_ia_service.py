@@ -152,6 +152,44 @@ def proponer_appraisal(tool_nombre: str, items: list, titulo: str, texto: str) -
         return {"ok": False, "error": str(e)[:200]}
 
 
+def proponer_extraccion(campos: list, titulo: str, texto: str) -> dict:
+    """Extrae los campos de un formulario de extracción de datos (estilo Covidence) desde el título +
+    texto (abstract o texto completo). Cada campo se rellena SOLO con lo que el texto reporta; lo que no
+    aparezca queda vacío (nunca se inventa/estima). G1: el investigador valida. `campos` = [{"k","t"}]."""
+    if not _disponible():
+        return {"ok": False, "disponible": False}
+    from app.services import correccion_experta_service as ce
+    lista = "\n".join("- " + str(c.get("k")) + ": " + str(c.get("t", c.get("k"))) for c in (campos or []))
+    system = (
+        "Eres metodólogo experto en extracción de datos para revisiones sistemáticas (estilo Covidence). Se "
+        "te da la lista de CAMPOS a extraer (clave: descripción) y el TEXTO de un estudio. Para CADA campo, "
+        "extrae SOLO lo que el texto reporta, conciso (frases o cifras, no párrafos). Si el texto NO reporta "
+        "un campo, deja 'valor' como cadena vacía \"\" — NUNCA inventes, estimes ni infieras lo no dicho. "
+        "El campo 'diseno' debe ser el tipo de diseño (ECA, cohorte, caso-control, transversal, etc.); "
+        "'n_total' solo dígitos. Añade 'confianza' 'alta'|'media'|'baja' por campo. Devuelve SOLO JSON: "
+        '{"campos":[{"k":"<clave>","valor":"..","confianza":"alta|media|baja"}]}.'
+    )
+    user = ("CAMPOS:\n" + lista + "\n\nTÍTULO: " + (titulo or "")
+            + "\n\nTEXTO (abstract o texto completo):\n" + ((texto or "")[:20000] or "(sin texto)"))
+    validas = {str(c.get("k")) for c in (campos or [])}
+    try:
+        crudo = ce._llamar_anthropic(system, user, max_tokens=1800)
+        d = _json_robusto(crudo)
+        out = []
+        for it in (d.get("campos") or []):
+            k = str(it.get("k", ""))
+            if k not in validas:
+                continue
+            conf = str(it.get("confianza", "")).lower()
+            conf = "alta" if "alt" in conf else "baja" if "baj" in conf else "media"
+            out.append({"k": k, "valor": str(it.get("valor", "")).strip()[:600], "confianza": conf})
+        return {"ok": True, "campos": out, "motor": "IA (" + ce.MODELO_EXPERTO + ")",
+                "aviso": "Extracción propuesta por IA — verifica cada campo (G1)."}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("proponer_extraccion falló: %s", str(e)[:150])
+        return {"ok": False, "error": str(e)[:200]}
+
+
 def sintetizar_resultados(meta: dict, rob: dict | None = None, contexto: str = "") -> dict:
     """Síntesis narrativa de los RESULTADOS de una revisión sistemática + metaanálisis, anclada a las
     cifras dadas, lista para el capítulo 'Resultados' de un Q1. La IA propone; el investigador valida (G1)."""
