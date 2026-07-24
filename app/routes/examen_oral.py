@@ -336,3 +336,135 @@ def obtener_sesion(sesion_id: UUID, db: Session = Depends(get_db)):
     if not s:
         raise not_found("Sesión no encontrada.")
     return _sesion_dict(s, db, incluir_segmentos=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  MODO A · canal en vivo QR (el celular del estudiante graba; el docente controla)
+#  El docente abre el canal (genera token + QR); el teléfono lee la pregunta activa
+#  y postea su transcripción; el docente avanza y ve el progreso develado. Doctrina:
+#  el celular NO ve su transcripción ni descargas; el informe/nota es solo del docente.
+# ══════════════════════════════════════════════════════════════════════════
+def _vivo(s) -> dict:
+    v = (s.config_json or {}).get("vivo") if isinstance(s.config_json, dict) else None
+    return dict(v) if isinstance(v, dict) else {}
+
+
+def _set_vivo(s, patch: dict):
+    cfg = dict(s.config_json or {})
+    v = dict(cfg.get("vivo") or {})
+    v.update(patch)
+    cfg["vivo"] = v
+    s.config_json = cfg
+    return v
+
+
+@router.post("/sesion/{sesion_id}/vivo/abrir", dependencies=[Depends(req_profesor)])
+def vivo_abrir(sesion_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    """Abre (o reabre) el canal QR de una sesión. Devuelve token + URL de unión + QR (data URL).
+    payload = {base?} (origen absoluto del front, p.ej. https://evalys-web.vercel.app)."""
+    import secrets
+    s = db.get(OralExamSesion, sesion_id)
+    if not s:
+        raise not_found("Sesión no encontrada.")
+    if not s.vivo_token:
+        s.vivo_token = secrets.token_urlsafe(9)
+    _set_vivo(s, {"active_idx": 0, "estado": "esperando", "unido": False})
+    s.estado = OE_GRABANDO
+    db.commit(); db.refresh(s)
+    base = (payload.get("base") or "").rstrip("/")
+    join = (base + "/app.html?oral=" + s.vivo_token) if base else ("/app.html?oral=" + s.vivo_token)
+    qr = None
+    try:
+        from app.services import en_vivo_service as _ev
+        qr = _ev.qr_data_url(join)
+    except Exception:
+        qr = None
+    return {"ok": True, "token": s.vivo_token, "join_url": join, "qr": qr}
+
+
+@router.post("/sesion/{sesion_id}/vivo/control", dependencies=[Depends(req_profesor)])
+def vivo_control(sesion_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    """El docente controla el canal: cambia la pregunta activa o el estado
+    (esperando|grabando|pausa|fin). payload = {active_idx?, estado?}."""
+    s = db.get(OralExamSesion, sesion_id)
+    if not s:
+        raise not_found("Sesión no encontrada.")
+    patch = {}
+    if payload.get("active_idx") is not None:
+        try:
+            patch["active_idx"] = max(0, int(payload["active_idx"]))
+        except (TypeError, ValueError):
+            pass
+    if payload.get("estado"):
+        patch["estado"] = str(payload["estado"])[:20]
+    v = _set_vivo(s, patch)
+    db.commit()
+    return {"ok": True, "vivo": v}
+
+
+@router.get("/sesion/{sesion_id}/vivo", dependencies=[Depends(req_profesor)])
+def vivo_estado_docente(sesion_id: UUID, db: Session = Depends(get_db)):
+    """Polling del docente: estado del canal + progreso (nº de caracteres transcritos por pregunta)."""
+    s = db.get(OralExamSesion, sesion_id)
+    if not s:
+        raise not_found("Sesión no encontrada.")
+    prog = {g.pregunta_numero: len((g.transcripcion_literal or "")) for g in s.segmentos}
+    return {"ok": True, "token": s.vivo_token, "vivo": _vivo(s),
+            "progreso": prog, "n_segmentos": len(s.segmentos)}
+
+
+def _sesion_por_token(db, token: str):
+    return (db.query(OralExamSesion)
+            .filter(OralExamSesion.vivo_token == token).first()) if token else None
+
+
+@router.get("/vivo/{token}")
+def vivo_publico_estado(token: str, db: Session = Depends(get_db)):
+    """PÚBLICO (sin login) · el celular del estudiante lee la pregunta activa y el estado.
+    NO expone transcripción ni notas."""
+    s = _sesion_por_token(db, token)
+    if not s:
+        raise not_found("La sesión no existe o el examen ya se cerró.")
+    v = _vivo(s)
+    if not v.get("unido"):
+        v = _set_vivo(s, {"unido": True}); db.commit()
+    try:
+        aid = UUID(s.assessment_id) if isinstance(s.assessment_id, str) else s.assessment_id
+    except Exception:
+        aid = s.assessment_id
+    pregs = _preguntas(db, aid)
+    asm = db.get(Assessment, aid)
+    st = db.get(Student, s.student_id) if s.student_id else None
+    idx = int(v.get("active_idx") or 0)
+    activa = pregs[idx] if 0 <= idx < len(pregs) else None
+    return {"nombre": (_nombre(st) if st else None), "prueba": (asm.name if asm else ""),
+            "estado": v.get("estado", "esperando"), "active_idx": idx, "n": len(pregs),
+            "pregunta": ({"numero": activa["numero"], "enunciado": activa["enunciado"],
+                          "tiempo_max_seg": activa.get("tiempo_max_seg"),
+                          "tiempo_reflexion_seg": activa.get("tiempo_reflexion_seg")} if activa else None)}
+
+
+@router.post("/vivo/{token}/segmento")
+def vivo_publico_segmento(token: str, payload: dict, db: Session = Depends(get_db)):
+    """PÚBLICO · el celular postea la transcripción literal (completa) de la pregunta que responde.
+    Upsert por pregunta; reemplaza el texto acumulado. payload = {pregunta_numero, transcripcion_literal}."""
+    s = _sesion_por_token(db, token)
+    if not s:
+        raise not_found("La sesión no existe o el examen ya se cerró.")
+    try:
+        num = int(payload.get("pregunta_numero") or 0)
+    except (TypeError, ValueError):
+        num = 0
+    if num <= 0:
+        return {"ok": False}
+    lit = (payload.get("transcripcion_literal") or "").strip()
+    seg = (db.query(OralExamSegmento)
+           .filter(OralExamSegmento.sesion_id == str(s.id),
+                   OralExamSegmento.pregunta_numero == num).first())
+    if not seg:
+        seg = OralExamSegmento(sesion_id=s.id, pregunta_numero=num)
+        db.add(seg)
+    seg.transcripcion_literal = (lit or None)
+    seg.sin_respuesta = (not lit)
+    db.commit()
+    return {"ok": True}

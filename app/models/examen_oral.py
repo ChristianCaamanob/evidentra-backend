@@ -38,6 +38,8 @@ class OralExamSesion(UUIDMixin, Base):
     # Config congelada de la sesión: criterios+pesos, ponderación de preguntas, tiempos, escala.
     config_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     audio_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)  # clave IndexedDB local
+    # Modo A (QR): token público del canal en vivo (el celular del estudiante lee/postea con él).
+    vivo_token: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
     duracion_seg: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Nota final (validada por el docente) + % logro. Nullable hasta publicar.
     nota_final: Mapped[float | None] = mapped_column(Float, nullable=True)
