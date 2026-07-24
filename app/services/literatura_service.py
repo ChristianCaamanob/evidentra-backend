@@ -17,10 +17,15 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
 import re
 import ssl
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
+
+logger = logging.getLogger("evalys")
 
 try:  # CA bundle explícito: evita fallos de verificación TLS en contenedores mínimos
     import certifi
@@ -34,10 +39,27 @@ _PARTICULAS = {"de", "del", "la", "las", "los", "van", "von", "der", "den", "da"
                "dos", "das", "du", "el", "al", "bin", "ibn", "san", "santa", "st", "le"}
 
 
-def _get(url: str, timeout: int = 12):
+def _get(url: str, timeout: int = 12, reintentos: int = 2):
+    """GET JSON con reintentos + backoff. Las IP compartidas de la nube (Render) sufren
+    throttling temporal (HTTP 429) o timeouts en OpenAlex/Crossref; un par de reintentos lo salva."""
     req = urllib.request.Request(url, headers={"User-Agent": _UA, "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout, context=_CTX) as r:
-        return json.loads(r.read())
+    ultimo = None
+    for intento in range(reintentos + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout, context=_CTX) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            ultimo = e
+            if e.code in (429, 500, 502, 503, 504) and intento < reintentos:
+                time.sleep(1.2 * (intento + 1)); continue
+            raise
+        except Exception as e:  # timeout, URLError, SSL…
+            ultimo = e
+            if intento < reintentos:
+                time.sleep(1.0 * (intento + 1)); continue
+            raise
+    if ultimo:
+        raise ultimo
 
 
 # ───────────────────────────────────────────── utilidades de identidad
@@ -504,11 +526,36 @@ def buscar_corpus(query: str, anios: int | None = None, limite: int = 150) -> di
                 if len(refs) >= limite:
                     break
             cursor = (data.get("meta") or {}).get("next_cursor")
-    except Exception:
+    except Exception as e:
+        logger.warning("buscar_corpus · OpenAlex falló (q=%r): %s", query[:90], e)
         if not refs:
+            # Fallback: Crossref (otra reputación de egress; salva cuando OpenAlex throttlea la IP).
+            cr = []
+            try:
+                cr = _crossref(query, rows=min(limite, 80), desde_anio=desde_anio)
+            except Exception as e2:
+                logger.warning("buscar_corpus · Crossref fallback también falló: %s", e2)
+            if cr:
+                arts_cr = [{
+                    "titulo": r["titulo"], "anio": r.get("anio"), "revista": r.get("revista"),
+                    "id_tipo": r["id_tipo"], "id": r["id"], "url": r["url"], "tipo": r.get("tipo"),
+                    "pmid": r.get("pmid"), "pmcid": r.get("pmcid"),
+                    "abstract": r.get("abstract"), "citas": r.get("citas"),
+                    "oa": r.get("oa", False), "issn": r.get("issn"), "idioma": r.get("idioma"),
+                    "metricas": None, "autores_str": _apa_autores(r.get("autores", [])),
+                    "apa": formatear(r, "apa"), "vancouver": formatear(r, "vancouver"),
+                    "bibtex": _bibtex(r), "ris": _ris(r),
+                } for r in cr]
+                return {"query": query, "n": len(arts_cr), "articulos": arts_cr, "limite": limite,
+                        "total_disponible": len(arts_cr), "truncado": False, "desde_anio": desde_anio,
+                        "fuente": "Crossref (OpenAlex no respondió)",
+                        "nota": "OpenAlex no respondió (probable límite temporal de la red); se muestran "
+                                "candidatos verificados por DOI desde Crossref. Reintenta en un momento "
+                                "para el corpus completo con abstracts y métricas."}
             return {"query": query, "n": 0, "articulos": [], "fuente": "OpenAlex",
                     "limite": limite, "truncado": False, "error": "sin_conexion",
-                    "nota": "No se pudo consultar OpenAlex en este momento."}
+                    "nota": "No se pudo consultar OpenAlex ni Crossref en este momento. "
+                            "Suele ser un límite temporal de la red del servidor: reintenta en ~30 s."}
 
     # métricas de revista (país, H-index, DOAJ, cuartil SJR…) para todo el corpus
     met = {}
