@@ -487,3 +487,130 @@ def _interpretar(out: dict) -> str:
     return (f"Efecto combinado ({esc}) = {c['estimador']} (IC95 HKSJ [{c['ic95_hksj'][0]}, {c['ic95_hksj'][1]}]), "
             f"{sig} (p = {c['p']}). Heterogeneidad {het['nivel']} (I² = {het['I2']}%, τ² = {het['tau2']}).{pi} "
             f"Certeza GRADE: {out['grade']['certeza']}.")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  MOTOR DE VARIABLES PERSONALIZADAS (agnóstico a disciplina) — el investigador
+#  declara CUALQUIER variable de interés y el sistema aplica el método correcto:
+#  meta de medias, de diferencias de medias, de proporciones (logit), de
+#  correlaciones (z de Fisher) o inverso-varianza genérico; y cae a SÍNTESIS
+#  NARRATIVA (SWiM) cuando no procede combinar. Criterio metodológico "de doctor".
+# ══════════════════════════════════════════════════════════════════════════
+def _pool_yv(pares: list) -> dict:
+    """Efectos aleatorios (DL) + IC Hartung-Knapp-Sidik-Jonkman sobre (y, v, label)."""
+    ys = [p[0] for p in pares]
+    vs = [max(p[1], 1e-9) for p in pares]
+    k = len(ys)
+    w = [1.0 / v for v in vs]
+    sw = sum(w)
+    m_fixed = sum(wi * yi for wi, yi in zip(w, ys)) / sw
+    Q = sum(wi * (yi - m_fixed) ** 2 for wi, yi in zip(w, ys))
+    df = k - 1
+    C = sw - sum(wi * wi for wi in w) / sw
+    tau2 = max(0.0, (Q - df) / C) if C > 0 else 0.0
+    I2 = max(0.0, (Q - df) / Q) * 100 if Q > 0 else 0.0
+    wr = [1.0 / (v + tau2) for v in vs]
+    swr = sum(wr)
+    M = sum(wi * yi for wi, yi in zip(wr, ys)) / swr
+    se_dl = math.sqrt(1.0 / swr)
+    q_hksj = (sum(wi * (yi - M) ** 2 for wi, yi in zip(wr, ys)) / df) if df > 0 else 1.0
+    se_hksj = math.sqrt(q_hksj / swr) if df > 0 else se_dl
+    se = max(se_hksj, se_dl)                          # Knapp-Hartung: no por debajo del Wald
+    tcrit = _t_quantile(0.975, df) if df >= 1 else 1.96
+    ci = [M - tcrit * se, M + tcrit * se]
+    forest = []
+    for (y, v, lab) in pares:
+        se_i = math.sqrt(v)
+        forest.append({"label": lab, "y": round(y, 4),
+                       "ci": [round(y - 1.96 * se_i, 4), round(y + 1.96 * se_i, 4)],
+                       "peso_pct": round(100.0 * (1.0 / (v + tau2)) / swr, 1)})
+    return {"k": k, "M": M, "se": se, "ci": ci, "tau2": tau2, "I2": I2, "Q": Q, "df": df, "forest": forest}
+
+
+def analizar_variable(nombre: str, tipo: str, rows: list, direccion: str = "mayor_mejor",
+                      nulo: float = 0.0, unidad: str = "") -> dict:
+    tipo = (tipo or "").strip().lower()
+    pares = []
+    for i, e in enumerate(rows or []):
+        lab = (e.get("label") or ("Estudio " + str(i + 1)))
+        try:
+            if tipo == "media":
+                m, sd, n = float(e["media"]), float(e["de"]), float(e["n"])
+                if n <= 0 or sd < 0:
+                    continue
+                y, v = m, (sd * sd) / n
+            elif tipo == "md":
+                y = float(e["media1"]) - float(e["media2"])
+                v = (float(e["de1"]) ** 2) / float(e["n1"]) + (float(e["de2"]) ** 2) / float(e["n2"])
+            elif tipo == "proporcion":
+                ev, n = float(e["eventos"]), float(e["n"])
+                if n <= 0 or ev < 0 or ev > n:
+                    continue
+                p = (ev + 0.5) / (n + 1.0)             # corrección de continuidad
+                y = math.log(p / (1.0 - p))
+                v = 1.0 / (ev + 0.5) + 1.0 / (n - ev + 0.5)
+            elif tipo == "correlacion":
+                r, n = float(e["r"]), float(e["n"])
+                if n <= 3:
+                    continue
+                fz = fisher_z(r, n)
+                y, v = fz["y"], fz["v"]
+            elif tipo == "generico":
+                y, ee = float(e["estimador"]), float(e["ee"])
+                if ee <= 0:
+                    continue
+                v = ee * ee
+            else:
+                return {"ok": False, "error": "tipo no soportado: " + tipo}
+        except (KeyError, TypeError, ValueError):
+            continue
+        pares.append((y, max(v, 1e-9), lab))
+
+    k = len(pares)
+    escala = {"media": (unidad or "media"), "md": "diferencia de medias",
+              "proporcion": "proporción", "correlacion": "r de Pearson",
+              "generico": (unidad or "estimador")}.get(tipo, "")
+    trans = tipo in ("proporcion", "correlacion")
+    if k < 2:
+        return {"ok": True, "poolable": False, "k": k, "nombre": nombre, "tipo": tipo, "escala": escala,
+                "metodo": "Síntesis narrativa estructurada (SWiM)",
+                "narrativa": ("Solo " + str(k) + " estudio(s) aportan «" + str(nombre) + "» de forma combinable: "
+                              "no procede un meta-análisis. Se recomienda SÍNTESIS NARRATIVA ESTRUCTURADA (SWiM): "
+                              "describe el rango, la dirección y la consistencia de los hallazgos sin agrupar un "
+                              "estimador único, y explica por qué no se combinó.")}
+
+    res = _pool_yv(pares)
+
+    def back(x):
+        if tipo == "proporcion":
+            return 1.0 / (1.0 + math.exp(-x))
+        if tipo == "correlacion":
+            return math.tanh(x)
+        return x
+
+    est = back(res["M"])
+    ci = sorted([back(res["ci"][0]), back(res["ci"][1])])
+    forest_disp = [{"label": f["label"], "y": round(back(f["y"]), 3),
+                    "ci": sorted([round(back(f["ci"][0]), 3), round(back(f["ci"][1]), 3)]),
+                    "peso_pct": f["peso_pct"]} for f in res["forest"]]
+    z = res["M"] / res["se"] if res["se"] > 0 else 0.0
+    p = 2.0 * (1.0 - _norm_cdf(abs(z)))
+    I2 = res["I2"]
+    nivel = "baja" if I2 < 25 else "moderada" if I2 < 50 else "sustancial" if I2 < 75 else "considerable"
+    metodo = {"media": "Meta-análisis de medias (efectos aleatorios, inverso-varianza, IC Hartung-Knapp)",
+              "md": "Meta-análisis de diferencias de medias (efectos aleatorios, HKSJ)",
+              "proporcion": "Meta-análisis de proporciones (transformación logit, efectos aleatorios)",
+              "correlacion": "Meta-análisis de correlaciones (z de Fisher, efectos aleatorios)",
+              "generico": "Meta-análisis de inverso-varianza genérico (efectos aleatorios, HKSJ)"}.get(tipo, "")
+    nota = None
+    if I2 >= 75:
+        nota = ("Heterogeneidad considerable (I² ≥ 75%): interpreta el estimador combinado con cautela; "
+                "considera subgrupos, metarregresión o una síntesis narrativa.")
+    cruza = (min(ci) <= nulo <= max(ci)) if tipo in ("md", "generico") else None
+    return {"ok": True, "poolable": True, "k": k, "nombre": nombre, "tipo": tipo, "escala": escala,
+            "direccion": direccion, "metodo": metodo, "nota": nota,
+            "combinado": {"estimador": round(est, 4), "ic95": [round(ci[0], 4), round(ci[1], 4)],
+                          "transformada": trans, "z": round(z, 3), "p": round(p, 5), "cruza_nulo": cruza, "nulo": nulo},
+            "heterogeneidad": {"I2": round(I2, 1), "tau2": round(res["tau2"], 4),
+                               "Q": round(res["Q"], 3), "df": res["df"], "nivel": nivel},
+            "forest": forest_disp}

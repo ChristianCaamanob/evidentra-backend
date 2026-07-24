@@ -434,6 +434,21 @@ def proponer_extraccion(payload: dict):
                                    payload.get("texto") or "")
 
 
+@router.post("/investigacion/analizar-variable")
+def analizar_variable(payload: dict):
+    """Motor de variables personalizadas: sintetiza CUALQUIER variable de interés con el método
+    correcto (medias, diferencias de medias, proporciones, correlaciones o inverso-varianza genérico),
+    o cae a síntesis narrativa (SWiM) cuando no procede combinar. Agnóstico a la disciplina."""
+    from app.services import meta_analisis_service as meta
+    try:
+        nulo = float(payload.get("nulo") if payload.get("nulo") is not None else 0.0)
+    except (TypeError, ValueError):
+        nulo = 0.0
+    return meta.analizar_variable(payload.get("nombre") or "", payload.get("tipo") or "",
+                                  payload.get("rows") or [], payload.get("direccion") or "mayor_mejor",
+                                  nulo, payload.get("unidad") or "")
+
+
 @router.post("/investigacion/sintesis-resultados")
 def sintesis_resultados(payload: dict):
     """Síntesis narrativa (IA) del capítulo de Resultados de una RS+meta, anclada a las cifras del
