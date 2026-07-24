@@ -126,6 +126,71 @@ _VAR_CAMPO_DESC = {
 }
 
 
+def proponer_variables(tema: str, estudios: list) -> dict:
+    """Mina las VARIABLES de interés realmente reportadas en el corpus incluido, las agrupa por
+    constructo/dominio y arma un ÁRBOL con: método de síntesis, unidad canónica (para comparar en la
+    discusión), nº de estudios que la reportan, sensibilidad (0-100) al tema y unidades dispares a
+    armonizar. Prioriza las variables más sensibles y transversales. La IA propone; el autor valida (G1)."""
+    if not _disponible():
+        return {"ok": False, "disponible": False}
+    from app.services import correccion_experta_service as ce
+    ests = []
+    for i, e in enumerate((estudios or [])[:50]):
+        t = str(e.get("titulo") or "").strip()
+        ab = str(e.get("texto") or e.get("abstract") or "").strip()[:700]
+        ests.append(str(i + 1) + ". " + (t or "(sin título)") + (" — " + ab if ab else ""))
+    if not ests:
+        return {"ok": False, "error": "sin estudios con texto"}
+    system = (
+        "Eres metodólogo senior de revisiones sistemáticas y metaanálisis. Recibes el TEMA de investigación "
+        "y una lista de estudios (título + resumen). Tu tarea: MINAR las variables/desenlaces de interés "
+        "realmente reportados, AGRUPARLOS por constructo/dominio, y para cada variable recomendar el método "
+        "de síntesis y una UNIDAD CANÓNICA para que sean COMPARABLES entre estudios (imprescindible para "
+        "cruzarlas en la Discusión). Prioriza las variables más SENSIBLES y transversales al tema. "
+        "No inventes variables que ningún estudio sugiera. Devuelve SOLO JSON: "
+        '{"dominios":[{"nombre":"..","variables":[{"nombre":"..","tipo":"media|md|proporcion|correlacion|generico",'
+        '"unidad_canonica":"..","sinonimos":[".."],"n_estudios":<entero>,"sensibilidad":<0-100>,'
+        '"poolable":<true|false>,"unidades_dispares":[".."],"justificacion":".."}]}]}. '
+        "sensibilidad = cuán central y discriminante es la variable para responder el tema (frecuencia entre "
+        "estudios + relevancia). unidades_dispares = unidades distintas vistas para la misma variable (a armonizar)."
+    )
+    user = "TEMA DE INVESTIGACIÓN: " + (tema or "(no dado)") + "\n\nESTUDIOS:\n" + "\n".join(ests)
+    try:
+        crudo = ce._llamar_anthropic(system, user, max_tokens=3000)
+        d = _json_robusto(crudo)
+        doms = []
+        for dm in (d.get("dominios") or []):
+            vs = []
+            for v in (dm.get("variables") or []):
+                tp = str(v.get("tipo", "")).lower()
+                tp = tp if tp in ("media", "md", "proporcion", "correlacion", "generico") else "generico"
+                try:
+                    sens = max(0, min(100, int(float(v.get("sensibilidad", 0)))))
+                except (TypeError, ValueError):
+                    sens = 0
+                try:
+                    ne = int(float(v.get("n_estudios", 0)))
+                except (TypeError, ValueError):
+                    ne = 0
+                vs.append({
+                    "nombre": str(v.get("nombre", ""))[:120], "tipo": tp,
+                    "unidad_canonica": str(v.get("unidad_canonica", ""))[:40],
+                    "sinonimos": [str(s)[:60] for s in (v.get("sinonimos") or [])][:6],
+                    "n_estudios": ne, "sensibilidad": sens, "poolable": bool(v.get("poolable", True)),
+                    "unidades_dispares": [str(s)[:30] for s in (v.get("unidades_dispares") or [])][:6],
+                    "justificacion": str(v.get("justificacion", ""))[:280]})
+            vs.sort(key=lambda x: x["sensibilidad"], reverse=True)
+            if vs:
+                doms.append({"nombre": str(dm.get("nombre", ""))[:100], "variables": vs})
+        doms.sort(key=lambda dd: max([v["sensibilidad"] for v in dd["variables"]] or [0]), reverse=True)
+        return {"ok": True, "tema": tema, "dominios": doms, "n_estudios_analizados": len(ests),
+                "motor": "IA (" + ce.MODELO_EXPERTO + ")",
+                "aviso": "Árbol de variables propuesto por IA — el autor elige cuáles adoptar (G1)."}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("proponer_variables falló: %s", str(e)[:150])
+        return {"ok": False, "error": str(e)[:200]}
+
+
 def extraer_variable(nombre: str, tipo: str, campos: list, titulo: str, texto: str) -> dict:
     """Extrae del TEXTO los valores numéricos de una VARIABLE de interés declarada por el investigador
     (agnóstico a disciplina). Solo lo explícito/derivable sin ambigüedad; ausentes → null (nunca inventa). G1."""

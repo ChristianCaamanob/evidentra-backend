@@ -434,6 +434,14 @@ def proponer_extraccion(payload: dict):
                                    payload.get("texto") or "")
 
 
+@router.post("/investigacion/proponer-variables")
+def proponer_variables(payload: dict):
+    """Árbol de variables sensibles: la IA mina las variables de interés del corpus, las agrupa por
+    constructo y recomienda unidad canónica + sensibilidad, para cruzarlas en la Discusión. G1."""
+    from app.services import investigador_ia_service as iia
+    return iia.proponer_variables(payload.get("tema") or "", payload.get("estudios") or [])
+
+
 @router.post("/investigacion/extraer-variable")
 def extraer_variable(payload: dict):
     """Extrae de un estudio los valores de una VARIABLE de interés declarada (agnóstico a disciplina).
