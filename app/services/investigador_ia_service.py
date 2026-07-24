@@ -58,15 +58,15 @@ def proponer_sesgo(titulo: str, abstract: str) -> dict:
     from app.services import correccion_experta_service as ce
     system = (
         "Eres metodólogo experto en la herramienta Cochrane RoB 2 (Sterne et al., 2019). A partir del "
-        "TÍTULO y ABSTRACT de un estudio PROPONES el riesgo de sesgo por sus 5 dominios. Para cada dominio "
+        "TÍTULO y el TEXTO (abstract o, si lo pegas, el texto completo) de un estudio PROPONES el riesgo de sesgo por sus 5 dominios. Para cada dominio "
         "das: 'juicio' ∈ {bajo, dudas, alto} y 'justificacion' (<=200 caracteres) anclada a lo que el texto "
-        "dice o NO dice. Si el abstract no aporta información suficiente de un dominio, usa 'dudas' y decláralo. "
+        "dice o NO dice. Si el texto no aporta información suficiente de un dominio, usa 'dudas' y decláralo. "
         "NUNCA inventes detalles metodológicos que no estén en el texto. Devuelve SOLO JSON con esta forma: "
         '{"D1":{"juicio":"..","justificacion":".."},"D2":{...},"D3":{...},"D4":{...},"D5":{...},'
         '"global":{"juicio":"..","justificacion":".."}}. Regla del juicio global: ALTO si algún dominio es alto '
         "o hay >=2 con dudas; BAJO si los 5 son bajo; en otro caso DUDAS."
     )
-    user = "TÍTULO: " + (titulo or "(sin título)") + "\n\nABSTRACT: " + ((abstract or "")[:6000] or "(sin abstract disponible)")
+    user = "TÍTULO: " + (titulo or "(sin título)") + "\n\nTEXTO (abstract o texto completo del paper): " + ((abstract or "")[:20000] or "(sin texto disponible)")
     try:
         crudo = ce._llamar_anthropic(system, user, max_tokens=1500)
         d = _json_robusto(crudo)
@@ -101,12 +101,12 @@ def extraer_efecto(titulo: str, abstract: str, medida: str = "smd") -> dict:
                   '"m2":<media grupo2>,"de2":<DE grupo2>,"n2":<n grupo2>}')
         guia = "Para diferencia de medias (Hedges g) necesitas media, DE y n por grupo."
     system = (
-        "Eres extractor de datos para metaanálisis. Del ABSTRACT extraes los estadísticos del tamaño de efecto "
+        "Eres extractor de datos para metaanálisis. Del TEXTO (abstract o texto completo del paper) extraes los estadísticos del tamaño de efecto "
         "pedido SOLO si están EXPLÍCITOS o son derivables sin ambigüedad. " + guia + " Si un valor NO está en el "
         "texto, ponlo en null: NO lo inventes ni lo estimes. Devuelve SOLO JSON: " + campos +
         ' y además "confianza" (0 a 1) y "nota" (qué encontraste o por qué falta algún dato).'
     )
-    user = "TÍTULO: " + (titulo or "(sin título)") + "\n\nABSTRACT: " + ((abstract or "")[:6000] or "(sin abstract disponible)")
+    user = "TÍTULO: " + (titulo or "(sin título)") + "\n\nTEXTO (abstract o texto completo del paper): " + ((abstract or "")[:20000] or "(sin texto disponible)")
     try:
         crudo = ce._llamar_anthropic(system, user, max_tokens=800)
         d = _json_robusto(crudo)
