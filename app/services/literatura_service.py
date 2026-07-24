@@ -32,7 +32,7 @@ try:  # CA bundle explícito: evita fallos de verificación TLS en contenedores 
     _CTX = ssl.create_default_context(cafile=certifi.where())
 except Exception:
     _CTX = ssl.create_default_context()
-_MAILTO = "soporte@evalys.app"
+_MAILTO = "mispelis2020@gmail.com"   # pool cortés de OpenAlex/Crossref: debe ser un correo válido y resoluble
 _UA = f"Evalys/1.0 (https://evalys.app; mailto:{_MAILTO})"
 
 _PARTICULAS = {"de", "del", "la", "las", "los", "van", "von", "der", "den", "da", "di",
@@ -483,6 +483,23 @@ def buscar(query: str, rows: int = 8, anios: int | None = None) -> dict:
             "ventana_anios": anios or None, "desde_anio": desde_anio, "nota": nota}
 
 
+def _sjr_por_issn(issn) -> dict | None:
+    """Cuartil/SJR SCImago por ISSN (lookup LOCAL del CSV, sin OpenAlex). Sirve para enriquecer
+    el fallback de Crossref cuando OpenAlex no responde: restaura factor de impacto/indexación."""
+    if not issn:
+        return None
+    try:
+        from app.services import scimago_service
+        sjr = scimago_service.metrica(issn)
+        if not sjr:
+            return None
+        return {"cuartil": sjr.get("cuartil"), "sjr": sjr.get("sjr"),
+                "h_index_sjr": sjr.get("h_index_sjr"), "categorias": sjr.get("categorias"),
+                "pais_sjr": sjr.get("pais_sjr"), "fuente_metrica": "SCImago (por ISSN)"}
+    except Exception:
+        return None
+
+
 def buscar_corpus(query: str, anios: int | None = None, limite: int = 150) -> dict:
     """Corpus de candidatos para el tablero de cribado de una revisión sistemática.
 
@@ -532,7 +549,7 @@ def buscar_corpus(query: str, anios: int | None = None, limite: int = 150) -> di
             # Fallback: Crossref (otra reputación de egress; salva cuando OpenAlex throttlea la IP).
             cr = []
             try:
-                cr = _crossref(query, rows=min(limite, 80), desde_anio=desde_anio)
+                cr = _crossref(query, rows=min(limite, 150), desde_anio=desde_anio)
             except Exception as e2:
                 logger.warning("buscar_corpus · Crossref fallback también falló: %s", e2)
             if cr:
@@ -542,7 +559,8 @@ def buscar_corpus(query: str, anios: int | None = None, limite: int = 150) -> di
                     "pmid": r.get("pmid"), "pmcid": r.get("pmcid"),
                     "abstract": r.get("abstract"), "citas": r.get("citas"),
                     "oa": r.get("oa", False), "issn": r.get("issn"), "idioma": r.get("idioma"),
-                    "metricas": None, "autores_str": _apa_autores(r.get("autores", [])),
+                    "metricas": _sjr_por_issn(r.get("issn")),   # cuartil SJR local por ISSN (no necesita OpenAlex)
+                    "autores_str": _apa_autores(r.get("autores", [])),
                     "apa": formatear(r, "apa"), "vancouver": formatear(r, "vancouver"),
                     "bibtex": _bibtex(r), "ris": _ris(r),
                 } for r in cr]
