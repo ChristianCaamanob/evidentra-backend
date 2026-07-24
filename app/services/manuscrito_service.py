@@ -128,8 +128,14 @@ def redactar_capitulo(hechos: dict, tipo: str = "revision", cap: str = "introduc
         "Elsevier, Taylor & Francis, SAGE) en español académico, preciso y argumentado, APA 7. Escribes "
         "capítulos EXTENSOS y de fondo, no resúmenes. REGLA ABSOLUTA: usa SOLO los números y las "
         "referencias que se te entregan; jamás inventes cifras ni referencias ni resultados no dados. " + guia)
-    marco = ("una REVISIÓN SISTEMÁTICA con METAANÁLISIS" if tipo == "revision"
-             else "un ESTUDIO DE VALIDACIÓN / análisis de datos")
+    if tipo == "revision":
+        marco = "una REVISIÓN SISTEMÁTICA con METAANÁLISIS (reportada según PRISMA 2020)"
+    elif tipo == "experimental":
+        marco = ("un ESTUDIO EXPERIMENTAL / observacional primario (reportado según CONSORT si es ensayo "
+                 "controlado, o STROBE si es observacional). Trata hipótesis, diseño, VI/VD, análisis "
+                 "inferencial con tamaños de efecto e IC95%, y NO afirmes causalidad si el diseño no la soporta")
+    else:
+        marco = "un ESTUDIO DE VALIDACIÓN / análisis de datos"
     usuario = (f"Contexto: {marco}. Redacta el capítulo '{cap}'. Usa EXCLUSIVAMENTE estos hechos, cifras y "
                "referencias REALES:\n\n" + json.dumps(hechos, ensure_ascii=False)[:14000] + "\n\nDevuelve SOLO el JSON pedido.")
     if not os.environ.get("ANTHROPIC_API_KEY"):
