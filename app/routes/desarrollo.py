@@ -530,6 +530,13 @@ def editar_pregunta_desarrollo(item_id: UUID, payload: dict, db: Session = Depen
         it.area_conocimiento = (str(payload.get("area_conocimiento") or "").strip() or None)
     if "fuente_estandar" in payload:
         it.fuente_estandar = (str(payload.get("fuente_estandar") or "").strip() or None)
+    for _campo in ("tiempo_reflexion_seg", "tiempo_max_seg"):
+        if _campo in payload:
+            v = payload.get(_campo)
+            try:
+                setattr(it, _campo, (max(0, int(v)) if v not in (None, "") else None))
+            except (TypeError, ValueError):
+                pass
     if "weight" in payload:
         try:
             w = float(payload["weight"])
