@@ -373,6 +373,23 @@ def corpus(q: str = Query(..., min_length=2),
         raise
 
 
+@router.post("/investigacion/proponer-sesgo")
+def proponer_sesgo(payload: dict):
+    """PROPONE el riesgo de sesgo RoB 2 (5 dominios + global) desde título+abstract. La IA propone;
+    el investigador valida y corrige cada dominio (G1)."""
+    from app.services import investigador_ia_service as iia
+    return iia.proponer_sesgo(payload.get("titulo", ""), payload.get("abstract", ""))
+
+
+@router.post("/investigacion/extraer-efecto")
+def extraer_efecto(payload: dict):
+    """EXTRAE del abstract los estadísticos del tamaño de efecto (M/DE/N, eventos/n o r/n) para el
+    metaanálisis. Solo lo explícito; ausentes → null. El investigador verifica antes de calcular (G1)."""
+    from app.services import investigador_ia_service as iia
+    return iia.extraer_efecto(payload.get("titulo", ""), payload.get("abstract", ""),
+                              (payload.get("medida") or "smd"))
+
+
 @router.get("/{assessment_id}/psicometria/dimensionalidad")
 def psicometria_dimensionalidad(assessment_id: UUID, origen: str | None = None, db: Session = Depends(get_db)):
     """I7 - Dimensionalidad (KMO, Bartlett, analisis paralelo, EFA) + fiabilidad ampliada.
