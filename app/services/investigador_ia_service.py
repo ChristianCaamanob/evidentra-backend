@@ -28,16 +28,54 @@ def _disponible() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
+def _reparar_json_truncado(t: str) -> dict:
+    """Repara un JSON cortado a mitad (p. ej. por tope de tokens): recorta hasta el último objeto
+    completo y cierra los corchetes/llaves que quedaron abiertos."""
+    j = t.rfind("}")
+    if j < 0:
+        raise ValueError("JSON irreparable (sin '}')")
+    s = t[:j + 1]
+    stack = []
+    in_str = False
+    esc = False
+    for ch in s:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            stack.append("}")
+        elif ch == "[":
+            stack.append("]")
+        elif ch == "}" and stack and stack[-1] == "}":
+            stack.pop()
+        elif ch == "]" and stack and stack[-1] == "]":
+            stack.pop()
+    s = s + "".join(reversed(stack))            # cierra lo que quedó abierto (LIFO)
+    return json.loads(s)
+
+
 def _json_robusto(crudo: str) -> dict:
     t = (crudo or "").strip()
     if t.startswith("```"):
         t = t.split("```", 2)[1]
         if t.lstrip().startswith("json"):
             t = t.lstrip()[4:]
-    i, j = t.find("{"), t.rfind("}")
-    if i < 0 or j < 0:
+    i = t.find("{")
+    if i < 0:
         raise ValueError("sin objeto JSON")
-    return json.loads(t[i:j + 1])
+    t = t[i:]
+    j = t.rfind("}")
+    try:
+        return json.loads(t[:j + 1] if j >= 0 else t)
+    except (ValueError, json.JSONDecodeError):
+        return _reparar_json_truncado(t)     # respaldo: JSON truncado por tope de tokens
 
 
 def _norm_juicio(v: str, defecto: str = "dudas") -> str:
@@ -152,11 +190,13 @@ def proponer_variables(tema: str, estudios: list) -> dict:
         '"unidad_canonica":"..","sinonimos":[".."],"n_estudios":<entero>,"sensibilidad":<0-100>,'
         '"poolable":<true|false>,"unidades_dispares":[".."],"justificacion":".."}]}]}. '
         "sensibilidad = cuán central y discriminante es la variable para responder el tema (frecuencia entre "
-        "estudios + relevancia). unidades_dispares = unidades distintas vistas para la misma variable (a armonizar)."
+        "estudios + relevancia). unidades_dispares = unidades distintas vistas para la misma variable (a armonizar). "
+        "SÉ CONCISO para no exceder el límite: MÁXIMO 6 dominios y MÁXIMO 6 variables por dominio (las más "
+        "sensibles), 'justificacion' <= 140 caracteres, sin repetir variables entre dominios."
     )
     user = "TEMA DE INVESTIGACIÓN: " + (tema or "(no dado)") + "\n\nESTUDIOS:\n" + "\n".join(ests)
     try:
-        crudo = ce._llamar_anthropic(system, user, max_tokens=3000)
+        crudo = ce._llamar_anthropic(system, user, max_tokens=5000)
         d = _json_robusto(crudo)
         doms = []
         for dm in (d.get("dominios") or []):
