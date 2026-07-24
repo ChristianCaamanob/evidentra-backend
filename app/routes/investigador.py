@@ -434,6 +434,16 @@ def proponer_extraccion(payload: dict):
                                    payload.get("texto") or "")
 
 
+@router.post("/investigacion/extraer-variable")
+def extraer_variable(payload: dict):
+    """Extrae de un estudio los valores de una VARIABLE de interés declarada (agnóstico a disciplina).
+    Solo lo reportado; ausentes → null (nunca inventa). La IA propone; el investigador valida (G1)."""
+    from app.services import investigador_ia_service as iia
+    return iia.extraer_variable(payload.get("nombre") or "", payload.get("tipo") or "",
+                                payload.get("campos") or [], payload.get("titulo") or "",
+                                payload.get("texto") or "")
+
+
 @router.post("/investigacion/analizar-variable")
 def analizar_variable(payload: dict):
     """Motor de variables personalizadas: sintetiza CUALQUIER variable de interés con el método

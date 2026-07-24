@@ -117,6 +117,53 @@ def extraer_efecto(titulo: str, abstract: str, medida: str = "smd") -> dict:
         return {"ok": False, "error": str(e)[:200]}
 
 
+_VAR_CAMPO_DESC = {
+    "media": "media (promedio) del desenlace", "de": "desviación estándar (DE)", "n": "tamaño de muestra (n)",
+    "media1": "media del grupo 1", "de1": "DE del grupo 1", "n1": "n del grupo 1",
+    "media2": "media del grupo 2", "de2": "DE del grupo 2", "n2": "n del grupo 2",
+    "eventos": "número de casos con el evento/desenlace", "r": "coeficiente de correlación r",
+    "estimador": "estimador de efecto reportado", "ee": "error estándar (EE) del estimador",
+}
+
+
+def extraer_variable(nombre: str, tipo: str, campos: list, titulo: str, texto: str) -> dict:
+    """Extrae del TEXTO los valores numéricos de una VARIABLE de interés declarada por el investigador
+    (agnóstico a disciplina). Solo lo explícito/derivable sin ambigüedad; ausentes → null (nunca inventa). G1."""
+    if not _disponible():
+        return {"ok": False, "disponible": False}
+    from app.services import correccion_experta_service as ce
+    campos = [str(c) for c in (campos or [])]
+    if not campos:
+        return {"ok": False, "error": "sin campos"}
+    esquema = "{" + ",".join('"' + c + '":<' + _VAR_CAMPO_DESC.get(c, c) + " | null>" for c in campos) + "}"
+    system = (
+        "Eres extractor de datos para metaanálisis. Del TEXTO (abstract o texto completo del paper) extraes, "
+        "para la VARIABLE DE INTERÉS indicada, los valores numéricos pedidos SOLO si están EXPLÍCITOS o son "
+        "derivables sin ambigüedad. Si un valor NO está en el texto, ponlo en null: NO lo inventes ni lo "
+        'estimes. Devuelve SOLO JSON: {"campos":' + esquema + ',"confianza":<0 a 1>,"nota":"qué hallaste o por qué falta"}.'
+    )
+    user = ("VARIABLE DE INTERÉS: «" + (nombre or "") + "» (tipo: " + (tipo or "") + ")\n\nTÍTULO: "
+            + (titulo or "(sin título)") + "\n\nTEXTO (abstract o texto completo):\n"
+            + ((texto or "")[:20000] or "(sin texto disponible)"))
+    try:
+        crudo = ce._llamar_anthropic(system, user, max_tokens=700)
+        d = _json_robusto(crudo)
+        src = d.get("campos") if isinstance(d.get("campos"), dict) else d
+        out = {}
+        for c in campos:
+            v = src.get(c)
+            try:
+                out[c] = None if v in (None, "", "null", "NA", "N/A") else float(v)
+            except (TypeError, ValueError):
+                out[c] = None
+        return {"ok": True, "campos": out, "confianza": d.get("confianza"),
+                "nota": str(d.get("nota", ""))[:300], "motor": "IA (" + ce.MODELO_EXPERTO + ")",
+                "aviso": "Extracción IA — verifica cada cifra contra el paper antes de sintetizar (G1)."}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("extraer_variable falló: %s", str(e)[:150])
+        return {"ok": False, "error": str(e)[:200]}
+
+
 def proponer_appraisal(tool_nombre: str, items: list, titulo: str, texto: str) -> dict:
     """Propone la valoración crítica ítem por ítem para CUALQUIER herramienta (JBI por diseño, o RoB 2),
     desde el título + texto (abstract o texto completo). Respuestas: si/no/poco/na. G1: el investigador valida."""
