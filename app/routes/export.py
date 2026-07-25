@@ -36,9 +36,9 @@ def exportar_informe(formato: str, body: dict):
     """Exportación transversal DOCX/PDF/XLSX para CUALQUIER módulo. El cliente arma el contenido:
     docx/pdf → {titulo, secciones:[{heading,nivel,texto}], tablas:[{titulo,headers,rows}]};
     xlsx → {hojas:[{nombre,headers,rows}]}. `filename` opcional. Accesible a profesor/investigador/director."""
-    if formato not in ("docx", "pdf", "xlsx"):
+    if formato not in ("docx", "pdf", "xlsx", "pptx"):
         from app.core.errors import unprocessable
-        raise unprocessable("Formato no soportado (docx | pdf | xlsx).")
+        raise unprocessable("Formato no soportado (docx | pdf | xlsx | pptx).")
     fn = re.sub(r"[^A-Za-z0-9_\-]", "_", str(body.get("filename") or "informe"))[:80]
     try:
         data, media = exportador_service.exportar(formato, body)

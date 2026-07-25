@@ -188,10 +188,68 @@ def to_pdf(doc: dict) -> bytes:
     return buf.getvalue()
 
 
+def to_pptx(payload: dict) -> bytes:
+    """Genera una presentación .pptx (16:9). Payload orientado a diapositivas:
+    {titulo, subtitulo, slides:[{titulo, bullets:[..]} | {titulo, texto:".."}]}.
+    Si no hay `slides`, cae a `secciones` (una diapositiva por sección)."""
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+
+    prs = Presentation()
+    prs.slide_width = Inches(13.333)
+    prs.slide_height = Inches(7.5)
+    # Portada
+    s = prs.slides.add_slide(prs.slide_layouts[0])
+    try:
+        s.shapes.title.text = str(payload.get("titulo") or "Material de clase")
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        if len(s.placeholders) > 1:
+            s.placeholders[1].text = str(payload.get("subtitulo") or "")
+    except Exception:  # noqa: BLE001
+        pass
+
+    slides = payload.get("slides")
+    if not slides:
+        slides = [{"titulo": sec.get("heading", ""), "texto": sec.get("texto", "")}
+                  for sec in (payload.get("secciones") or [])]
+
+    content_layout = prs.slide_layouts[1]
+    for sl in (slides or []):
+        bullets = sl.get("bullets")
+        if not bullets and sl.get("texto"):
+            bullets = [ln.strip() for ln in str(sl["texto"]).split("\n") if ln.strip()]
+        bullets = [str(b) for b in (bullets or []) if str(b).strip()]
+        chunks = [bullets[i:i + 9] for i in range(0, len(bullets), 9)] or [[]]
+        for ci, chunk in enumerate(chunks):
+            sc = prs.slides.add_slide(content_layout)
+            try:
+                sc.shapes.title.text = str(sl.get("titulo") or "") + ("" if ci == 0 else " (cont.)")
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                tf = sc.placeholders[1].text_frame if len(sc.placeholders) > 1 else None
+            except Exception:  # noqa: BLE001
+                tf = None
+            if tf is not None:
+                tf.word_wrap = True
+                for i, b in enumerate(chunk):
+                    p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+                    p.text = b
+                    p.level = 0
+                    for run in p.runs:
+                        run.font.size = Pt(18)
+    buf = io.BytesIO()
+    prs.save(buf)
+    return buf.getvalue()
+
+
 MEDIA = {
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "pdf": "application/pdf",
+    "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 }
 
 
@@ -202,4 +260,6 @@ def exportar(formato: str, payload: dict) -> tuple[bytes, str]:
         return to_docx(payload), MEDIA["docx"]
     if formato == "pdf":
         return to_pdf(payload), MEDIA["pdf"]
+    if formato == "pptx":
+        return to_pptx(payload), MEDIA["pptx"]
     raise ValueError("formato no soportado")
