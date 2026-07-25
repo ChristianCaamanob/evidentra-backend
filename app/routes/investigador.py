@@ -434,6 +434,15 @@ def proponer_extraccion(payload: dict):
                                    payload.get("texto") or "")
 
 
+@router.post("/investigacion/llevar-al-aula")
+def llevar_al_aula(payload: dict):
+    """Puente investigación → aula: transforma un artículo del corpus en material didáctico (lectura
+    adaptada, caso de estudio, debate o ítems de evaluación). La IA propone; el docente valida (G1)."""
+    from app.services import investigador_ia_service as iia
+    return iia.transformar_a_clase(payload.get("tipo") or "lectura", payload.get("nivel") or "pregrado",
+                                   payload.get("titulo") or "", payload.get("texto") or "")
+
+
 @router.post("/investigacion/proponer-variables")
 def proponer_variables(payload: dict):
     """Árbol de variables sensibles: la IA mina las variables de interés del corpus, las agrupa por

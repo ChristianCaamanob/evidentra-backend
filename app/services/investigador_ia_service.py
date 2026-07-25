@@ -231,6 +231,53 @@ def proponer_variables(tema: str, estudios: list) -> dict:
         return {"ok": False, "error": str(e)[:200]}
 
 
+_AULA_PROMPTS = {
+    "lectura": ('Convierte el artículo en una LECTURA ADAPTADA para estudiantes de {nivel}: resumen claro y '
+                'didáctico (sin jerga innecesaria), con puntos clave y glosario. Devuelve SOLO JSON: '
+                '{"titulo":"..","resumen_adaptado":"..(300-500 palabras)","puntos_clave":["..",".."],'
+                '"glosario":[{"termino":"..","definicion":".."}],"preguntas_guia":["..",".."]}.'),
+    "caso": ('Convierte el artículo en un CASO DE ESTUDIO para {nivel}: contexto, situación con datos, y '
+             'preguntas para resolver en clase. Devuelve SOLO JSON: {"titulo":"..","contexto":"..",'
+             '"situacion":"..","preguntas":["..",".."],"objetivos_aprendizaje":["..",".."]}.'),
+    "debate": ('Diseña un DEBATE de aula para {nivel} a partir del artículo: tema, posturas contrapuestas con '
+               'argumentos y preguntas disparadoras. Devuelve SOLO JSON: {"tema":"..","posturas":[{"nombre":"..",'
+               '"argumentos":["..",".."]}],"preguntas_disparadoras":["..",".."],"reglas":".."}.'),
+    "items": ('Redacta ítems de evaluación de opción múltiple (4 opciones A-D, una correcta) para {nivel} '
+              'basados en el artículo, con justificación. Devuelve SOLO JSON: {"items":[{"enunciado":"..",'
+              '"opciones":[{"letra":"A","texto":".."},{"letra":"B","texto":".."},{"letra":"C","texto":".."},'
+              '{"letra":"D","texto":".."}],"correcta":"A","justificacion":".."}]}. Genera 3-5 ítems.'),
+}
+
+
+def transformar_a_clase(tipo: str, nivel: str, titulo: str, texto: str) -> dict:
+    """Puente investigación → aula: transforma un artículo del corpus en material didáctico (lectura
+    adaptada, caso de estudio, debate o ítems de evaluación), anclado al contenido del artículo. G1."""
+    tipo = (tipo or "lectura").strip().lower()
+    if tipo not in _AULA_PROMPTS:
+        return {"ok": False, "error": "tipo no válido"}
+    if not _disponible():
+        return {"ok": False, "disponible": False}
+    from app.services import correccion_experta_service as ce
+    nivel = (nivel or "pregrado").strip()
+    system = (
+        "Eres un docente universitario experto en diseño instruccional. Transformas un artículo de "
+        "investigación en material didáctico riguroso pero accesible, ANCLADO al contenido del artículo (no "
+        "inventes hallazgos que el texto no contenga). Escribe en español salvo que el texto esté en otro "
+        "idioma. El docente revisa, ajusta y valida (G1).\n\n" + _AULA_PROMPTS[tipo].replace("{nivel}", nivel)
+    )
+    user = ("NIVEL: " + nivel + "\n\nTÍTULO: " + (titulo or "(sin título)")
+            + "\n\nTEXTO (abstract o texto completo):\n" + ((texto or "")[:20000] or "(sin texto disponible)"))
+    try:
+        crudo = ce._llamar_anthropic(system, user, max_tokens=2600)
+        d = _json_robusto(crudo)
+        return {"ok": True, "tipo": tipo, "nivel": nivel, "contenido": d,
+                "motor": "IA (" + ce.MODELO_EXPERTO + ")",
+                "aviso": "Material de clase propuesto por IA — revísalo y ajústalo antes de usarlo (G1)."}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("transformar_a_clase falló: %s", str(e)[:150])
+        return {"ok": False, "error": str(e)[:200]}
+
+
 def extraer_variable(nombre: str, tipo: str, campos: list, titulo: str, texto: str) -> dict:
     """Extrae del TEXTO los valores numéricos de una VARIABLE de interés declarada por el investigador
     (agnóstico a disciplina). Solo lo explícito/derivable sin ambigüedad; ausentes → null (nunca inventa). G1."""
