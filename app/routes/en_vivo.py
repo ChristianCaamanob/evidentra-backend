@@ -53,6 +53,20 @@ def crear_sesion(assessment_id: UUID, request: Request, payload: dict | None = N
             **ev._config_dict(s)}
 
 
+@router.post("/assessments/{assessment_id}/en-vivo-auditorio", dependencies=[Depends(req_profesor)])
+def crear_sesion_auditorio(assessment_id: UUID, request: Request, payload: dict | None = None,
+                           db: Session = Depends(get_db)):
+    """Modo Auditorio: abre una sala cuyas preguntas son las diapositivas marcadas (ad-hoc y/o del
+    banco). payload = {items:[{tipo, correcta, nopc, qn}], ...config igual que Modo en vivo}."""
+    payload = payload or {}
+    s = ev.crear_sesion_auditorio(db, assessment_id, payload.get("items") or [], config=payload)
+    base = settings.public_app_url or request.headers.get("origin") or ""
+    enlace = ev.join_url(s.codigo, base)
+    return {**_sesion_dict(s), "join_url": enlace,
+            "qr": ev.qr_data_url(enlace if base else s.codigo),
+            **ev._config_dict(s)}
+
+
 @router.get("/assessments/{assessment_id}/en-vivo/historial", dependencies=[Depends(req_profesor)])
 def historial(assessment_id: UUID, db: Session = Depends(get_db)):
     """Salas en vivo anteriores de esta evaluación (código, fecha, estado, participantes). Permite

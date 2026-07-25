@@ -65,6 +65,10 @@ class SesionEnVivo(UUIDMixin, Base):
     seb_config_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
     # Atención por cámara (consentida, en-dispositivo, solo eventos — nunca video). OFF por defecto.
     atencion_camara: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    # Modo Auditorio: si NO es NULL, la sala corrige contra ESTA lista de preguntas (ad-hoc de las
+    # diapositivas marcadas) en vez de la pauta del assessment. Cada ítem ya viene con la forma de
+    # _items_contenido (ordinal/correcta/letras/opciones/…). NULL = sala normal de Modo en vivo (intacta).
+    auditorio_items_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     participantes = relationship("ParticipanteVivo", back_populates="sesion",

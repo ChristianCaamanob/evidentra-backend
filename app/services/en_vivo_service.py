@@ -105,6 +105,95 @@ def _items_contenido(db, assessment_id, version: str) -> list:
     return out
 
 
+# ── Modo Auditorio · preguntas ad-hoc de las diapositivas ────────────────────────────
+def _item_auditorio_adhoc(correcta, nopc) -> dict:
+    """Ítem ad-hoc definido en la diapositiva: N botones (A..) + letra correcta (o '' = encuesta).
+    El enunciado va en la imagen proyectada, así que aquí queda vacío (solo botonera)."""
+    try:
+        n = max(2, min(5, int(nopc or 4)))
+    except (TypeError, ValueError):
+        n = 4
+    letras = ["A", "B", "C", "D", "E"][:n]
+    c = str(correcta or "").strip().upper()
+    if c not in letras:
+        c = ""
+    return {"correcta": c, "enunciado": "", "imagen": None, "opciones": [], "letras": letras,
+            "tiene_opciones": False, "justificacion": None, "ra": None, "bloom": None,
+            "unidad": None, "weight": 1.0}
+
+
+def crear_sesion_auditorio(db, assessment_id, items_in: list, config: dict | None = None) -> SesionEnVivo:
+    """Abre una sala cuyas preguntas son las diapositivas marcadas del auditorio.
+
+    Cada diapo-pregunta es 'adhoc' (opciones definidas ahí) o 'banco' (referencia a un ítem de la
+    pauta por su nº de pregunta). La sala corrige contra ESTA lista — nunca toca la pauta real.
+    """
+    cfg = config or {}
+    version = str(cfg.get("version", "A")).upper()
+    banco = None
+    resolved: list = []
+    for spec in (items_in or []):
+        spec = spec or {}
+        tipo = str(spec.get("tipo", "adhoc")).lower()
+        if tipo == "banco":
+            if banco is None:                          # resuelve la pauta solo si hace falta
+                try:
+                    banco = _items_contenido(db, assessment_id, version)
+                except Exception:                      # pauta no validada → cae a ad-hoc
+                    banco = []
+            match = next((it for it in banco if str(it.get("qn")) == str(spec.get("qn"))), None)
+            if match:
+                resolved.append({k: match.get(k) for k in (
+                    "correcta", "enunciado", "imagen", "opciones", "letras", "tiene_opciones",
+                    "justificacion", "ra", "bloom", "unidad", "weight")})
+                continue
+        resolved.append(_item_auditorio_adhoc(spec.get("correcta"), spec.get("nopc")))
+    if not resolved:
+        raise conflict("El auditorio no tiene diapositivas-pregunta para lanzar.")
+    for i, it in enumerate(resolved, start=1):
+        it["ordinal"] = i
+        it["qn"] = i
+    modo = RITMO_ALUMNO if str(cfg.get("modo_ritmo", "")).lower() == RITMO_ALUMNO else RITMO_DOCENTE
+    s = SesionEnVivo(assessment_id=str(assessment_id), codigo=_generar_codigo(db),
+                     estado=ESTADO_LOBBY, pregunta_actual=0, n_preguntas=len(resolved),
+                     version=version,
+                     retro_alumno=bool(cfg.get("retro_alumno")),
+                     revelar_correccion=bool(cfg.get("revelar_correccion", True)),
+                     mascota_motivacional=bool(cfg.get("mascota_motivacional", True)),
+                     duracion_min=max(0, int(cfg.get("duracion_min") or 0)),
+                     modo_ritmo=modo, shuffle_preguntas=False, shuffle_opciones=False,
+                     requiere_seb=bool(cfg.get("requiere_seb")),
+                     atencion_camara=bool(cfg.get("atencion_camara")),
+                     auditorio_items_json=resolved)
+    db.add(s); db.commit(); db.refresh(s)
+    return s
+
+
+def _items_auditorio(raw) -> list:
+    """Normaliza la lista guardada del auditorio a la forma de _items_contenido (defensivo)."""
+    out = []
+    for i, it in enumerate(raw or [], start=1):
+        it = dict(it or {})
+        letras = it.get("letras") or ["A", "B", "C", "D"]
+        out.append({"ordinal": i, "qn": it.get("qn", i),
+                    "correcta": str(it.get("correcta", "")).strip().upper(),
+                    "enunciado": it.get("enunciado", ""), "imagen": it.get("imagen"),
+                    "opciones": it.get("opciones") or [],
+                    "letras": letras, "tiene_opciones": bool(it.get("opciones")),
+                    "justificacion": it.get("justificacion"), "ra": it.get("ra"),
+                    "bloom": it.get("bloom"), "unidad": it.get("unidad"),
+                    "weight": it.get("weight") or 1.0})
+    return out
+
+
+def _items_sesion(db, s) -> list:
+    """Ítems que corrige ESTA sala: los del auditorio si existen, o la pauta del assessment."""
+    aud = getattr(s, "auditorio_items_json", None)
+    if aud:
+        return _items_auditorio(aud)
+    return _items_contenido(db, uuid.UUID(s.assessment_id), s.version)
+
+
 def _gen_layout(items: list, shuffle_p: bool, shuffle_o: bool, rng: random.Random) -> dict:
     """Distribución personal (barajado) de un participante.
 
@@ -251,6 +340,10 @@ def _persistir_scans(db, s: SesionEnVivo) -> int:
 
     Devuelve cuántos escaneos se crearon (0 si ya existían = idempotente, o si nadie jugó).
     """
+    # El auditorio corre preguntas ad-hoc que NO son la pauta del assessment: no volcamos su
+    # matriz a la psicometría real del ramo (evita doble conteo / contaminación de la evaluación).
+    if getattr(s, "auditorio_items_json", None):
+        return 0
     aid = uuid.UUID(s.assessment_id)
     # Idempotencia por SESIÓN (robusta y portable): el student_identifier ahora puede ser el
     # RUT del alumno real, así que ya no basta el prefijo; buscamos por la marca de sesión en
@@ -428,7 +521,7 @@ def unir(db, codigo: str, alias: str, student_id: str | None = None,
         else:
             student_id = None   # id que no existe en la nómina: no lo ligamos
     # Distribución personal (barajado por-alumno) fijada al entrar: estable durante la sesión.
-    items = _items_contenido(db, uuid.UUID(s.assessment_id), s.version)
+    items = _items_sesion(db, s)
     layout = _gen_layout(items, s.shuffle_preguntas, s.shuffle_opciones, random.Random())
     p = ParticipanteVivo(sesion_id=s.id, alias=alias,
                          student_id=str(student_id) if student_id else None,
@@ -483,7 +576,7 @@ def responder(db, codigo: str, participante_id, token: str,
     if _tiempo_agotado(s, p):
         raise conflict("Se acabó el tiempo. Tu evaluación se cerró automáticamente.")
 
-    items = _items_contenido(db, uuid.UUID(s.assessment_id), s.version)
+    items = _items_sesion(db, s)
     ordinal = _ordinal_actual(s, p, len(items))
     if not (1 <= ordinal <= len(items)):
         raise conflict("No hay una pregunta activa para ti.")
@@ -583,7 +676,7 @@ def estado_participante(db, codigo: str, participante_id, token: str) -> dict:
     """
     s = _sesion(db, codigo)
     p = _participante(db, s, participante_id, token)
-    items = _items_contenido(db, uuid.UUID(s.assessment_id), s.version)
+    items = _items_sesion(db, s)
     n = len(items)
     respondidas = db.query(RespuestaVivo).filter(RespuestaVivo.participante_id == p.id).count()
 
@@ -644,7 +737,7 @@ def estado_participante(db, codigo: str, participante_id, token: str) -> dict:
 
 def resultados(db, codigo: str) -> dict:
     s = _sesion(db, codigo)
-    items = _items_contenido(db, uuid.UUID(s.assessment_id), s.version)
+    items = _items_sesion(db, s)
     n = len(items)
     parts = db.query(ParticipanteVivo).filter(ParticipanteVivo.sesion_id == s.id).all()
     resp = db.query(RespuestaVivo).filter(RespuestaVivo.sesion_id == s.id).all()
@@ -659,7 +752,7 @@ def resultados(db, codigo: str) -> dict:
         n_ok = sum(1 for r in rs if r.correcta)
         # Distribución por alternativa (para el drill-down): texto + n + % + si es la correcta.
         textos = {str(o.get("letra", "")).strip().upper(): o.get("texto", "") for o in item["opciones"]}
-        letras = item["letras"] if item["tiene_opciones"] else ["A", "B", "C", "D"]
+        letras = item.get("letras") or ["A", "B", "C", "D"]   # letras propias del ítem (adhoc: A..nopc)
         opciones = [{"letra": L, "texto": textos.get(L, ""), "n": dist.get(L, 0),
                      "pct": round(dist.get(L, 0) / ncnt * 100, 1) if ncnt else 0.0,
                      "correcta": L == item["correcta"]} for L in letras]
@@ -707,7 +800,7 @@ def mi_resultado(db, codigo: str, participante_id, token: str) -> dict:
     if not s.retro_alumno:
         return {"habilitado": False, "estado": s.estado}
 
-    items = _items_contenido(db, uuid.UUID(s.assessment_id), s.version)
+    items = _items_sesion(db, s)
     mis = {r.question_number: r for r in db.query(RespuestaVivo).filter(
         RespuestaVivo.participante_id == p.id).all()}
 
@@ -781,7 +874,7 @@ def informe_en_vivo(db, codigo: str) -> dict:
     y resultados por Resultado de Aprendizaje (RA). Python puro (sin numpy), sobre la matriz
     de correctitud participante×ítem. Base para exportar a Word/PDF/Excel."""
     s = _sesion(db, codigo)
-    items = _items_contenido(db, uuid.UUID(s.assessment_id), s.version)
+    items = _items_sesion(db, s)
     n_items = len(items)
     parts = db.query(ParticipanteVivo).filter(ParticipanteVivo.sesion_id == s.id).all()
     resp = db.query(RespuestaVivo).filter(RespuestaVivo.sesion_id == s.id).all()

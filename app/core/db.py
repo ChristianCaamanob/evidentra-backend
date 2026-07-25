@@ -515,6 +515,7 @@ _COLUMNAS_ADITIVAS = {
         "requiere_seb": "BOOLEAN NOT NULL DEFAULT false",
         "seb_config_key": "VARCHAR(80)",
         "atencion_camara": "BOOLEAN NOT NULL DEFAULT false",
+        "auditorio_items_json": "JSON",
     },
     "participantes_vivo": {
         "layout_json": "JSON",
