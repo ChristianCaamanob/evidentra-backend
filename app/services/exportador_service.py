@@ -202,6 +202,8 @@ def to_pptx(payload: dict) -> bytes:
 
     INK = RGBColor(0x0F, 0x1B, 0x2D)
     ACCENT = RGBColor(0x14, 0xB8, 0xA6)
+    ACCENT2 = RGBColor(0x7C, 0x5C, 0xFF)
+    CARDLINE = RGBColor(0xDD, 0xE4, 0xEC)
     PAPER = RGBColor(0xFF, 0xFF, 0xFF)
     SOFT = RGBColor(0xF5, 0xF8, 0xFB)
     SLATE = RGBColor(0x2E, 0x3F, 0x57)
@@ -280,8 +282,7 @@ def to_pptx(payload: dict) -> bytes:
         deck.append({"titulo": "En esta sesión", "bullets": titles, "_agenda": True})
     deck.extend(slides)
 
-    total = 0
-    for sl in deck:
+    def _split(sl):
         raw = sl.get("bullets")
         prose = False
         if not raw and sl.get("texto"):
@@ -290,48 +291,93 @@ def to_pptx(payload: dict) -> bytes:
                 raw = [ln.strip() for ln in txt.split("\n") if ln.strip()]
             else:
                 raw = [txt.strip()]; prose = True
-        items = [str(b) for b in (raw or []) if str(b).strip()]
-        total += max(1, (len(items) + 5) // 6) if not prose else 1
+        return [str(b) for b in (raw or []) if str(b).strip()], prose
 
-    idx = 0
+    # Aplana el mazo en UNIDADES de diapositiva (respetando chunking y layout 'duo').
+    units = []
     for sl in deck:
         title = str(sl.get("titulo") or "")
-        raw = sl.get("bullets")
-        prose = False
-        if not raw and sl.get("texto"):
-            txt = str(sl["texto"])
-            if "\n" in txt.strip():
-                raw = [ln.strip() for ln in txt.split("\n") if ln.strip()]
-            else:
-                raw = [txt.strip()]; prose = True
-        items = [str(b) for b in (raw or []) if str(b).strip()]
+        kicker = str(sl.get("kicker") or "")
+        if sl.get("layout") == "duo" and sl.get("cols"):
+            units.append({"kind": "duo", "title": title, "kicker": kicker, "cols": sl["cols"]})
+            continue
+        items, prose = _split(sl)
         chunks = [items[i:i + 6] for i in range(0, len(items), 6)] or [[]]
         for ci, chunk in enumerate(chunks):
-            idx += 1
-            sc = prs.slides.add_slide(blank)
-            rect(sc, 0, 0, W, H, SOFT, to_back=True)
-            rect(sc, 0, 0, W, 1.35, INK)                 # banda de encabezado
-            rect(sc, 0, 1.35, W, 0.09, ACCENT)           # franja de acento
-            th = box(sc, 0.9, 0.28, 10.6, 0.85, anchor=MSO_ANCHOR.MIDDLE, fit=True)
-            run(th.paragraphs[0], title + ("" if ci == 0 else " (cont.)"), 24, PAPER, True)
-            tn = box(sc, 11.6, 0.42, 1.4, 0.6); pn = tn.paragraphs[0]; pn.alignment = PP_ALIGN.RIGHT
-            run(pn, str(idx) + " / " + str(total), 11, LIGHTINK, True)
-            rect(sc, 0.9, 1.95, 0.06, 4.55, ACCENT)      # regla vertical de acento
-            body = box(sc, 1.25, 1.85, 11.1, 4.75, anchor=MSO_ANCHOR.TOP, fit=True)
+            units.append({"kind": "std", "title": title + ("" if ci == 0 else " (cont.)"),
+                          "kicker": kicker, "items": chunk, "prose": prose})
+    total = len(units)
+
+    def header(sc, title, kicker, idx):
+        rect(sc, 0, 0, W, 1.5, INK)
+        rect(sc, 0, 1.5, W, 0.09, ACCENT)
+        yt = 0.34
+        if kicker:
+            kb = box(sc, 0.9, 0.24, 10.4, 0.34)
+            run(kb.paragraphs[0], kicker.upper(), 11, ACCENT, True)
+            yt = 0.62
+        th = box(sc, 0.9, yt, 10.5, 0.78, anchor=MSO_ANCHOR.TOP, fit=True)
+        run(th.paragraphs[0], title, 22, PAPER, True)
+        tn = box(sc, 11.5, 0.52, 1.5, 0.55); pn = tn.paragraphs[0]; pn.alignment = PP_ALIGN.RIGHT
+        run(pn, str(idx) + " / " + str(total), 11, LIGHTINK, True)
+
+    def card(sc, x, y, w, h, hcolor, htext, bullets):
+        c = sc.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x), Inches(y), Inches(w), Inches(h))
+        c.fill.solid(); c.fill.fore_color.rgb = PAPER
+        c.line.color.rgb = CARDLINE; c.line.width = Pt(1)
+        try:
+            c.shadow.inherit = False
+        except Exception:  # noqa: BLE001
+            pass
+        hh = 0.66
+        hs = sc.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x), Inches(y), Inches(w), Inches(hh))
+        hs.fill.solid(); hs.fill.fore_color.rgb = hcolor; _no_border(hs)
+        ht = box(sc, x + 0.28, y + 0.05, w - 0.56, hh - 0.08, anchor=MSO_ANCHOR.MIDDLE, fit=True)
+        run(ht.paragraphs[0], htext, 15, PAPER, True)
+        bt = box(sc, x + 0.3, y + hh + 0.16, w - 0.6, h - hh - 0.34, anchor=MSO_ANCHOR.TOP, fit=True)
+        first = True
+        for b in bullets:
+            p = bt.paragraphs[0] if first else bt.add_paragraph()
+            first = False
+            p.space_after = Pt(8); p.line_spacing = 1.05
+            run(p, "▸  ", 13, hcolor, True)
+            run(p, str(b), 13, SLATE)
+
+    idx = 0
+    for u in units:
+        idx += 1
+        sc = prs.slides.add_slide(blank)
+        rect(sc, 0, 0, W, H, SOFT, to_back=True)
+        header(sc, u["title"], u["kicker"], idx)
+        if u["kind"] == "duo":
+            cols = (u["cols"] or [])[:2]
+            colors = [ACCENT, ACCENT2]
+            xs = [0.9, 6.9]
+            for k, col in enumerate(cols):
+                card(sc, xs[k], 1.95, 5.55, 4.5, colors[k],
+                     str(col.get("titulo") or ("Postura " + ("A" if k == 0 else "B"))),
+                     [str(b) for b in (col.get("bullets") or []) if str(b).strip()])
+            if len(cols) == 2:
+                vb = sc.shapes.add_shape(MSO_SHAPE.OVAL, Inches(W / 2 - 0.42), Inches(3.85), Inches(0.84), Inches(0.84))
+                vb.fill.solid(); vb.fill.fore_color.rgb = INK; _no_border(vb)
+                vt = box(sc, W / 2 - 0.42, 3.95, 0.84, 0.64, anchor=MSO_ANCHOR.MIDDLE)
+                pv = vt.paragraphs[0]; pv.alignment = PP_ALIGN.CENTER; run(pv, "VS", 16, PAPER, True)
+        else:
+            rect(sc, 0.9, 2.1, 0.06, 4.4, ACCENT)
+            body = box(sc, 1.25, 2.0, 11.1, 4.6, anchor=MSO_ANCHOR.TOP, fit=True)
             first = True
-            for b in chunk:
+            for b in u["items"]:
                 p = body.paragraphs[0] if first else body.add_paragraph()
                 first = False
-                p.space_after = Pt(12)
-                p.line_spacing = 1.05
-                if prose:
+                p.space_after = Pt(12); p.line_spacing = 1.08
+                if u["prose"]:
                     run(p, b, 17, SLATE)
                 else:
                     run(p, "▸  ", 18, ACCENT, True)
                     run(p, b, 18, SLATE)
-            if fuente:
-                fb = box(sc, 0.9, 6.98, 11.5, 0.35)
-                run(fb.paragraphs[0], "Evalys · " + fuente[:95], 9, MUTED)
+        if fuente:
+            fb = box(sc, 0.9, 6.98, 11.5, 0.35)
+            run(fb.paragraphs[0], "Evalys · " + fuente[:95], 9, MUTED)
 
     buf = io.BytesIO()
     prs.save(buf)
