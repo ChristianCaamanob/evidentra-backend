@@ -189,57 +189,150 @@ def to_pdf(doc: dict) -> bytes:
 
 
 def to_pptx(payload: dict) -> bytes:
-    """Genera una presentación .pptx (16:9). Payload orientado a diapositivas:
-    {titulo, subtitulo, slides:[{titulo, bullets:[..]} | {titulo, texto:".."}]}.
-    Si no hay `slides`, cae a `secciones` (una diapositiva por sección)."""
+    """Genera una presentación .pptx DISEÑADA (16:9, plantilla Evalys): portada, agenda,
+    diapositivas de contenido con banda de encabezado, viñetas estilizadas, pie con fuente y
+    numeración, y auto-ajuste del texto. Payload:
+    {titulo, subtitulo, fuente, slides:[{titulo, bullets:[..]} | {titulo, texto:".."}]}.
+    Si no hay `slides`, cae a `secciones`."""
     from pptx import Presentation
     from pptx.util import Inches, Pt
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN, MSO_ANCHOR, MSO_AUTO_SIZE
+    from pptx.enum.shapes import MSO_SHAPE
+
+    INK = RGBColor(0x0F, 0x1B, 0x2D)
+    ACCENT = RGBColor(0x14, 0xB8, 0xA6)
+    PAPER = RGBColor(0xFF, 0xFF, 0xFF)
+    SOFT = RGBColor(0xF5, 0xF8, 0xFB)
+    SLATE = RGBColor(0x2E, 0x3F, 0x57)
+    MUTED = RGBColor(0x8A, 0x99, 0xAD)
+    LIGHTINK = RGBColor(0xAB, 0xBC, 0xD0)
+    W, H = 13.333, 7.5
+    FONT = "Calibri"
 
     prs = Presentation()
-    prs.slide_width = Inches(13.333)
-    prs.slide_height = Inches(7.5)
-    # Portada
-    s = prs.slides.add_slide(prs.slide_layouts[0])
-    try:
-        s.shapes.title.text = str(payload.get("titulo") or "Material de clase")
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        if len(s.placeholders) > 1:
-            s.placeholders[1].text = str(payload.get("subtitulo") or "")
-    except Exception:  # noqa: BLE001
-        pass
+    prs.slide_width = Inches(W)
+    prs.slide_height = Inches(H)
+    blank = prs.slide_layouts[6]
+
+    def _no_border(shp):
+        shp.line.fill.background()
+        try:
+            shp.shadow.inherit = False
+        except Exception:  # noqa: BLE001
+            pass
+
+    def rect(slide, x, y, w, h, color, to_back=False):
+        r = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(x), Inches(y), Inches(w), Inches(h))
+        r.fill.solid(); r.fill.fore_color.rgb = color
+        _no_border(r)
+        if to_back:
+            sp = r._element
+            sp.getparent().remove(sp)
+            slide.shapes._spTree.insert(2, sp)
+        return r
+
+    def box(slide, x, y, w, h, anchor=None, fit=False):
+        tb = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
+        tf = tb.text_frame
+        tf.word_wrap = True
+        if anchor is not None:
+            tf.vertical_anchor = anchor
+        if fit:
+            try:
+                tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+            except Exception:  # noqa: BLE001
+                pass
+        return tf
+
+    def run(p, text, size, color, bold=False):
+        r = p.add_run(); r.text = text
+        f = r.font; f.size = Pt(size); f.bold = bold; f.name = FONT; f.color.rgb = color
+        return r
+
+    titulo = str(payload.get("titulo") or "Material de clase")
+    subtitulo = str(payload.get("subtitulo") or "")
+    fuente = str(payload.get("fuente") or "")
 
     slides = payload.get("slides")
     if not slides:
         slides = [{"titulo": sec.get("heading", ""), "texto": sec.get("texto", "")}
                   for sec in (payload.get("secciones") or [])]
+    slides = slides or []
 
-    content_layout = prs.slide_layouts[1]
-    for sl in (slides or []):
-        bullets = sl.get("bullets")
-        if not bullets and sl.get("texto"):
-            bullets = [ln.strip() for ln in str(sl["texto"]).split("\n") if ln.strip()]
-        bullets = [str(b) for b in (bullets or []) if str(b).strip()]
-        chunks = [bullets[i:i + 9] for i in range(0, len(bullets), 9)] or [[]]
+    # ── Portada ──
+    s = prs.slides.add_slide(blank)
+    rect(s, 0, 0, W, H, INK, to_back=True)
+    rect(s, 0, 0, 0.32, H, ACCENT)                       # barra lateral de acento
+    tf = box(s, 1.0, 0.95, 11.5, 0.5); run(tf.paragraphs[0], "MATERIAL DE CLASE · EVALYS", 13, ACCENT, True)
+    rect(s, 1.03, 1.55, 1.7, 0.09, ACCENT)               # subrayado
+    tf = box(s, 0.97, 2.0, 11.4, 3.3, anchor=MSO_ANCHOR.TOP, fit=True)
+    run(tf.paragraphs[0], titulo, 40, PAPER, True)
+    if subtitulo:
+        tf = box(s, 1.0, 5.5, 11.4, 1.0, fit=True); run(tf.paragraphs[0], subtitulo, 18, LIGHTINK)
+    if fuente:
+        tf = box(s, 1.0, 6.85, 11.4, 0.4); run(tf.paragraphs[0], "Fuente: " + fuente[:110], 10, MUTED)
+
+    # Agenda (roadmap) si hay suficientes secciones
+    titles = [str(sl.get("titulo") or "") for sl in slides if str(sl.get("titulo") or "").strip()]
+    deck = []
+    if len(titles) >= 3:
+        deck.append({"titulo": "En esta sesión", "bullets": titles, "_agenda": True})
+    deck.extend(slides)
+
+    total = 0
+    for sl in deck:
+        raw = sl.get("bullets")
+        prose = False
+        if not raw and sl.get("texto"):
+            txt = str(sl["texto"])
+            if "\n" in txt.strip():
+                raw = [ln.strip() for ln in txt.split("\n") if ln.strip()]
+            else:
+                raw = [txt.strip()]; prose = True
+        items = [str(b) for b in (raw or []) if str(b).strip()]
+        total += max(1, (len(items) + 5) // 6) if not prose else 1
+
+    idx = 0
+    for sl in deck:
+        title = str(sl.get("titulo") or "")
+        raw = sl.get("bullets")
+        prose = False
+        if not raw and sl.get("texto"):
+            txt = str(sl["texto"])
+            if "\n" in txt.strip():
+                raw = [ln.strip() for ln in txt.split("\n") if ln.strip()]
+            else:
+                raw = [txt.strip()]; prose = True
+        items = [str(b) for b in (raw or []) if str(b).strip()]
+        chunks = [items[i:i + 6] for i in range(0, len(items), 6)] or [[]]
         for ci, chunk in enumerate(chunks):
-            sc = prs.slides.add_slide(content_layout)
-            try:
-                sc.shapes.title.text = str(sl.get("titulo") or "") + ("" if ci == 0 else " (cont.)")
-            except Exception:  # noqa: BLE001
-                pass
-            try:
-                tf = sc.placeholders[1].text_frame if len(sc.placeholders) > 1 else None
-            except Exception:  # noqa: BLE001
-                tf = None
-            if tf is not None:
-                tf.word_wrap = True
-                for i, b in enumerate(chunk):
-                    p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
-                    p.text = b
-                    p.level = 0
-                    for run in p.runs:
-                        run.font.size = Pt(18)
+            idx += 1
+            sc = prs.slides.add_slide(blank)
+            rect(sc, 0, 0, W, H, SOFT, to_back=True)
+            rect(sc, 0, 0, W, 1.35, INK)                 # banda de encabezado
+            rect(sc, 0, 1.35, W, 0.09, ACCENT)           # franja de acento
+            th = box(sc, 0.9, 0.28, 10.6, 0.85, anchor=MSO_ANCHOR.MIDDLE, fit=True)
+            run(th.paragraphs[0], title + ("" if ci == 0 else " (cont.)"), 24, PAPER, True)
+            tn = box(sc, 11.6, 0.42, 1.4, 0.6); pn = tn.paragraphs[0]; pn.alignment = PP_ALIGN.RIGHT
+            run(pn, str(idx) + " / " + str(total), 11, LIGHTINK, True)
+            rect(sc, 0.9, 1.95, 0.06, 4.55, ACCENT)      # regla vertical de acento
+            body = box(sc, 1.25, 1.85, 11.1, 4.75, anchor=MSO_ANCHOR.TOP, fit=True)
+            first = True
+            for b in chunk:
+                p = body.paragraphs[0] if first else body.add_paragraph()
+                first = False
+                p.space_after = Pt(12)
+                p.line_spacing = 1.05
+                if prose:
+                    run(p, b, 17, SLATE)
+                else:
+                    run(p, "▸  ", 18, ACCENT, True)
+                    run(p, b, 18, SLATE)
+            if fuente:
+                fb = box(sc, 0.9, 6.98, 11.5, 0.35)
+                run(fb.paragraphs[0], "Evalys · " + fuente[:95], 9, MUTED)
+
     buf = io.BytesIO()
     prs.save(buf)
     return buf.getvalue()
