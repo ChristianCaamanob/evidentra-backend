@@ -60,12 +60,48 @@ def ver_agente(course_id: UUID, request: Request, solo_pendientes: bool = False,
         enlace = sil.join_url(data["agente"]["codigo"], base)
         data["agente"]["join_url"] = enlace
         data["agente"]["qr"] = _qr(enlace if base else data["agente"]["codigo"])
+        cod_ay = data["agente"].get("ayudante_codigo")
+        if cod_ay:
+            ay = sil.ayudante_url(cod_ay, base)
+            data["agente"]["ayudante_join_url"] = ay
+            data["agente"]["ayudante_qr"] = _qr(ay) if base else ""
     return data
 
 
 @router.post("/silabo/mensaje/{mensaje_id}/responder", dependencies=[Depends(req_profesor)])
 def responder(mensaje_id: UUID, payload: dict, db: Session = Depends(get_db)):
-    return sil.responder_docente(db, mensaje_id, (payload or {}).get("respuesta", ""))
+    return sil.responder_docente(db, mensaje_id, (payload or {}).get("respuesta", ""), quien="docente")
+
+
+# ── Nivel 2 · Ayudante (opcional) ─────────────────────────────────────────────────────
+@router.post("/courses/{course_id}/silabo/ayudante", dependencies=[Depends(req_profesor)])
+def config_ayudante(course_id: UUID, request: Request, payload: dict, db: Session = Depends(get_db)):
+    a = sil.configurar_ayudante(db, course_id, activo=bool((payload or {}).get("activo")))
+    base = settings.public_app_url or request.headers.get("origin") or ""
+    enlace = sil.ayudante_url(a.ayudante_codigo, base) if a.ayudante_codigo else ""
+    return {"ayudante_activo": a.ayudante_activo, "ayudante_codigo": a.ayudante_codigo,
+            "join_url": enlace, "qr": _qr(enlace) if (enlace and base) else ""}
+
+
+@router.get("/ayudante/{codigo}")
+def ayudante_info(codigo: str, db: Session = Depends(get_db)):
+    a = sil.agente_por_ayudante_codigo(db, codigo)
+    return {"codigo": codigo, "activo": a.ayudante_activo, "nombre_curso": a.nombre_curso}
+
+
+@router.get("/ayudante/{codigo}/turno")
+def ayudante_turno(codigo: str, db: Session = Depends(get_db)):
+    return sil.tablero_ayudante(db, codigo)
+
+
+@router.post("/ayudante/mensaje/{mensaje_id}/responder")
+def ayudante_responder(mensaje_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    return sil.responder_docente(db, mensaje_id, (payload or {}).get("respuesta", ""), quien="ayudante")
+
+
+@router.post("/ayudante/mensaje/{mensaje_id}/subir")
+def ayudante_subir(mensaje_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    return sil.subir_al_profesor(db, mensaje_id, (payload or {}).get("motivo", ""))
 
 
 @router.post("/silabo/mensaje/{mensaje_id}/estado", dependencies=[Depends(req_profesor)])

@@ -30,6 +30,9 @@ class SilaboAgente(UUIDMixin, TimestampMixin, Base):
     contexto: Mapped[str] = mapped_column(Text, default="")                    # sílabo/reglas/fechas
     activo: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     config: Mapped[dict | None] = mapped_column(JSON, nullable=True)           # tono, alcance, etc.
+    # Nivel 2 · Ayudante (opcional): si está activo, lo que escala pasa PRIMERO por el ayudante.
+    ayudante_activo: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    ayudante_codigo: Mapped[str | None] = mapped_column(String(12), nullable=True, index=True)
 
     mensajes = relationship("MensajeSilabo", back_populates="agente", cascade="all, delete-orphan")
 
@@ -53,6 +56,9 @@ class MensajeSilabo(UUIDMixin, TimestampMixin, Base):
     estado: Mapped[str] = mapped_column(String(24), default=MSG_RESPONDIDA,
                                         server_default=MSG_RESPONDIDA, nullable=False)
     necesita_docente: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    nivel: Mapped[int] = mapped_column(Integer, default=3, server_default="3", nullable=False)   # 2=ayudante, 3=profesor
+    respondido_por: Mapped[str | None] = mapped_column(String(16), nullable=True)  # ia | ayudante | docente
+    motivo_escalamiento: Mapped[str | None] = mapped_column(String(255), nullable=True)  # por qué el ayudante subió
     vence_ts: Mapped[int | None] = mapped_column(Integer, nullable=True)        # epoch: plazo visible para el alumno
     respuesta_docente: Mapped[str | None] = mapped_column(Text, nullable=True)
 

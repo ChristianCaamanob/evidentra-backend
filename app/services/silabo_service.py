@@ -78,6 +78,47 @@ def join_url(codigo: str, base: str) -> str:
     return f"{base}/app.html?silabo={codigo}" if base else codigo
 
 
+# ── Nivel 2 · Ayudante (opcional) ─────────────────────────────────────────────────────
+def configurar_ayudante(db: Session, course_id, activo: bool) -> SilaboAgente:
+    a = agente_de_curso(db, course_id)
+    if not a:
+        raise conflict("Primero configure y publique el agente del curso.")
+    a.ayudante_activo = bool(activo)
+    if activo and not a.ayudante_codigo:
+        a.ayudante_codigo = _generar_codigo(db)
+    db.commit(); db.refresh(a)
+    return a
+
+
+def ayudante_url(codigo: str, base: str) -> str:
+    base = (base or "").rstrip("/")
+    return f"{base}/app.html?ayudante={codigo}" if base else codigo
+
+
+def agente_por_ayudante_codigo(db: Session, codigo: str) -> SilaboAgente:
+    a = db.query(SilaboAgente).filter(SilaboAgente.ayudante_codigo == str(codigo).upper()).first()
+    if not a:
+        raise not_found("Tablero de ayudante no encontrado.")
+    return a
+
+
+def _escalar_vencidos(db: Session, a: SilaboAgente) -> None:
+    """Vencimiento automático: los pendientes de NIVEL 2 que pasaron su plazo suben solos al profesor."""
+    ahora = _ahora()
+    venc = (db.query(MensajeSilabo)
+            .filter(MensajeSilabo.agente_id == a.id, MensajeSilabo.estado == MSG_PENDIENTE,
+                    MensajeSilabo.nivel == 2).all())
+    cambios = 0
+    for m in venc:
+        if m.vence_ts and m.vence_ts <= ahora:
+            m.nivel = 3
+            m.vence_ts = ahora + _PLAZO_DOCENTE_H * 3600
+            m.motivo_escalamiento = (m.motivo_escalamiento or "Sin respuesta del ayudante en el plazo")
+            cambios += 1
+    if cambios:
+        db.commit()
+
+
 # ── taxonomía de intención (Antesala) · política y destino por tipo ───────────────────
 # Tipos que la IA NUNCA responde con contenido: se arman para el profesor.
 _TIPOS_A_DOCENTE = ("fuera_corpus", "evaluativa", "riesgo_clinico")
@@ -85,6 +126,7 @@ _TIPOS_A_DOCENTE = ("fuera_corpus", "evaluativa", "riesgo_clinico")
 # docente por este canal): salud, justificaciones y denuncias/ética/acoso.
 _TIPOS_DERIVACION = ("personal_salud", "justificacion", "denuncia")
 _PLAZO_DOCENTE_H = 48   # horas visibles del reloj para el alumno (Fase 3: horas hábiles + auto-subida)
+_PLAZO_AYUDANTE_H = 24  # nivel 2: si el ayudante no responde en 24 h, sube solo al profesor
 
 
 def _derivacion_texto(a: SilaboAgente) -> str:
@@ -205,10 +247,20 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
             tipo, respuesta, categoria, urgencia, necesita, cita = _clasificar_y_responder(a, pregunta, intentos)
 
     estado = MSG_PENDIENTE if necesita else MSG_RESPONDIDA
-    vence = (_ahora() + _PLAZO_DOCENTE_H * 3600) if necesita else None
+    # Nivel de escalamiento: si hay ayudante activo, lo pendiente pasa PRIMERO por el ayudante (nivel 2, 24 h);
+    # si no, va directo al profesor (nivel 3, 48 h). Lo ya respondido no escala.
+    if necesita:
+        nivel = 2 if a.ayudante_activo else 3
+        vence = _ahora() + (_PLAZO_AYUDANTE_H if nivel == 2 else _PLAZO_DOCENTE_H) * 3600
+        respondido_por = None
+    else:
+        nivel = 1
+        vence = None
+        respondido_por = "docente" if cache_hit else "ia"
     m = MensajeSilabo(agente_id=a.id, alias=(alias or None), device_id=(device_id or None),
                       pregunta=pregunta, respuesta_ia=respuesta, tipo=tipo, categoria=categoria, cita=cita,
-                      urgencia=urgencia, necesita_docente=bool(necesita), estado=estado, vence_ts=vence)
+                      urgencia=urgencia, necesita_docente=bool(necesita), estado=estado, vence_ts=vence,
+                      nivel=nivel, respondido_por=respondido_por)
     db.add(m); db.commit(); db.refresh(m)
     return {"respuesta": respuesta, "necesita_docente": bool(necesita), "tipo": tipo, "cache": cache_hit,
             "cita": cita, "categoria": categoria, "urgencia": urgencia, "mensaje_id": str(m.id), "vence_ts": vence}
@@ -329,6 +381,7 @@ def mis_consultas(db: Session, codigo: str, device_id: str) -> dict:
         out.append({"id": str(m.id), "pregunta": m.pregunta, "respuesta_ia": m.respuesta_ia,
                     "respuesta_docente": m.respuesta_docente, "estado": m.estado, "tipo": m.tipo,
                     "cita": getattr(m, "cita", None),
+                    "respondido_por": getattr(m, "respondido_por", None),
                     "necesita_docente": m.necesita_docente, "segundos_restantes": restante,
                     "fecha": m.created_at.isoformat() if getattr(m, "created_at", None) else None})
     return {"nombre_curso": a.nombre_curso, "consultas": out}
@@ -349,9 +402,10 @@ def bandeja(db: Session, course_id, solo_pendientes: bool = False) -> dict:
     a = agente_de_curso(db, course_id)
     if not a:
         return {"agente": None, "mensajes": [], "conteos": {}, "derivadas": [], "derivadas_conteo": {}}
+    _escalar_vencidos(db, a)                             # nivel-2 vencidos suben solos al profesor
     q = db.query(MensajeSilabo).filter(MensajeSilabo.agente_id == a.id)
     msgs = q.order_by(MensajeSilabo.created_at.desc()).limit(400).all()
-    conteos = {"total": 0, "pendientes": 0, "por_categoria": {}}
+    conteos = {"total": 0, "pendientes": 0, "por_categoria": {}, "con_ayudante": 0}
     salida, derivadas, der_conteo = [], [], {}
     for m in msgs:
         if getattr(m, "tipo", None) in _TIPOS_DERIVACION:
@@ -361,6 +415,8 @@ def bandeja(db: Session, course_id, solo_pendientes: bool = False) -> dict:
         conteos["total"] += 1
         if m.estado == MSG_PENDIENTE:
             conteos["pendientes"] += 1
+            if getattr(m, "nivel", 3) == 2:
+                conteos["con_ayudante"] += 1
         conteos["por_categoria"][m.categoria or "otro"] = conteos["por_categoria"].get(m.categoria or "otro", 0) + 1
         if solo_pendientes and m.estado != MSG_PENDIENTE:
             continue
@@ -386,13 +442,14 @@ def bandeja(db: Session, course_id, solo_pendientes: bool = False) -> dict:
             "derivadas": derivadas, "derivadas_conteo": der_conteo}
 
 
-def responder_docente(db: Session, mensaje_id, respuesta: str) -> dict:
+def responder_docente(db: Session, mensaje_id, respuesta: str, quien: str = "docente") -> dict:
     m = db.query(MensajeSilabo).filter(MensajeSilabo.id == _uuid(mensaje_id)).first()
     if not m:
         raise not_found("Mensaje no encontrado.")
     resp = (respuesta or "").strip()
     m.respuesta_docente = resp
     m.estado = MSG_RESUELTA
+    m.respondido_por = quien
     # "Un clic responde a los N": aplica la MISMA respuesta a todos los pendientes equivalentes.
     t = _tokens(m.pregunta)
     n = 1
@@ -404,10 +461,52 @@ def responder_docente(db: Session, mensaje_id, respuesta: str) -> dict:
             if _es_equivalente(t, o.pregunta):
                 o.respuesta_docente = resp
                 o.estado = MSG_RESUELTA
+                o.respondido_por = quien
                 n += 1
     db.commit(); db.refresh(m)
     d = _msg_dict(m); d["respondidos"] = n
     return d
+
+
+def subir_al_profesor(db: Session, mensaje_id, motivo: str) -> dict:
+    """El ayudante sube una consulta al profesor (nivel 2 → 3) con un motivo obligatorio."""
+    motivo = (motivo or "").strip()
+    if not motivo:
+        raise conflict("Indique en una línea por qué la sube al profesor.")
+    m = db.query(MensajeSilabo).filter(MensajeSilabo.id == _uuid(mensaje_id)).first()
+    if not m:
+        raise not_found("Mensaje no encontrado.")
+    m.nivel = 3
+    m.motivo_escalamiento = motivo[:255]
+    m.vence_ts = _ahora() + _PLAZO_DOCENTE_H * 3600
+    db.commit(); db.refresh(m)
+    return _msg_dict(m)
+
+
+def tablero_ayudante(db: Session, codigo: str) -> dict:
+    """Cola del ayudante (nivel 2): pendientes agrupados. Sube solos los vencidos antes de listar."""
+    a = agente_por_ayudante_codigo(db, codigo)
+    if not a.ayudante_activo:
+        raise conflict("El tablero de ayudante no está activo.")
+    _escalar_vencidos(db, a)
+    pend = (db.query(MensajeSilabo)
+            .filter(MensajeSilabo.agente_id == a.id, MensajeSilabo.estado == MSG_PENDIENTE,
+                    MensajeSilabo.nivel == 2)
+            .order_by(MensajeSilabo.created_at.asc()).limit(200).all())
+    dicts = [_msg_dict(m) for m in pend]
+    # agrupa equivalentes (mismo "1 clic responde a los N")
+    reps, usados = [], set()
+    for d in dicts:
+        if d["id"] in usados:
+            continue
+        t = _tokens(d["pregunta"])
+        n = 1
+        for e in dicts:
+            if e["id"] != d["id"] and e["id"] not in usados and _es_equivalente(t, e["pregunta"]):
+                n += 1; usados.add(e["id"])
+        usados.add(d["id"]); d["equivalentes"] = n
+        reps.append(d)
+    return {"nombre_curso": a.nombre_curso, "consultas": reps}
 
 
 _FAQ_HEADER = "# Preguntas ya resueltas por el docente (fuente canónica)"
@@ -459,7 +558,9 @@ def _uuid(x):
 def _agente_dict(a: SilaboAgente) -> dict:
     return {"id": str(a.id), "codigo": a.codigo, "activo": a.activo,
             "nombre_curso": a.nombre_curso, "tiene_contexto": bool((a.contexto or "").strip()),
-            "contexto": a.contexto or "", "config": a.config or {}}
+            "contexto": a.contexto or "", "config": a.config or {},
+            "ayudante_activo": bool(getattr(a, "ayudante_activo", False)),
+            "ayudante_codigo": getattr(a, "ayudante_codigo", None)}
 
 
 def _msg_dict(m: MensajeSilabo) -> dict:
@@ -471,5 +572,7 @@ def _msg_dict(m: MensajeSilabo) -> dict:
             "cita": getattr(m, "cita", None),
             "categoria": m.categoria, "urgencia": m.urgencia,
             "estado": m.estado, "necesita_docente": m.necesita_docente,
+            "nivel": getattr(m, "nivel", 3), "respondido_por": getattr(m, "respondido_por", None),
+            "motivo_escalamiento": getattr(m, "motivo_escalamiento", None),
             "respuesta_docente": m.respuesta_docente, "segundos_restantes": restante,
             "fecha": m.created_at.isoformat() if getattr(m, "created_at", None) else None}

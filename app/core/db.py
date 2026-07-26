@@ -560,11 +560,18 @@ _COLUMNAS_ADITIVAS = {
     "scans": {
         "origen": "VARCHAR(20)",
     },
+    "silabo_agentes": {
+        "ayudante_activo": "BOOLEAN NOT NULL DEFAULT false",
+        "ayudante_codigo": "VARCHAR(12)",
+    },
     "silabo_mensajes": {
         "device_id": "VARCHAR(64)",
         "tipo": "VARCHAR(40)",
         "vence_ts": "INTEGER",
         "cita": "TEXT",
+        "nivel": "INTEGER NOT NULL DEFAULT 3",
+        "respondido_por": "VARCHAR(16)",
+        "motivo_escalamiento": "VARCHAR(255)",
     },
 }
 
