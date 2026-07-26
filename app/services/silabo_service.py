@@ -81,12 +81,25 @@ def join_url(codigo: str, base: str) -> str:
 # ── taxonomía de intención (Antesala) · política y destino por tipo ───────────────────
 # Tipos que la IA NUNCA responde con contenido: se arman para el profesor.
 _TIPOS_A_DOCENTE = ("fuera_corpus", "evaluativa", "riesgo_clinico")
-_DERIVACION = (
-    "Esto va más allá de lo académico y merece atención de una persona. Te recomiendo contactar a "
-    "Bienestar / Dirección de Asuntos Estudiantiles (DAE) de tu sede, o a salud estudiantil; si es "
-    "urgente, acude presencialmente. También puedes pulsar «quiero preguntar a una persona» y tu "
-    "docente lo sabrá. No estás solo/a.")
+# Tipos que SIEMPRE se derivan a Secretaría Académica + Dirección (no los trata la Antesala ni el
+# docente por este canal): salud, justificaciones y denuncias/ética/acoso.
+_TIPOS_DERIVACION = ("personal_salud", "justificacion", "denuncia")
 _PLAZO_DOCENTE_H = 48   # horas visibles del reloj para el alumno (Fase 3: horas hábiles + auto-subida)
+
+
+def _derivacion_texto(a: SilaboAgente) -> str:
+    cfg = a.config or {}
+    sec = str(cfg.get("contacto_secretaria") or "").strip()
+    dire = str(cfg.get("contacto_direccion") or "").strip()
+    partes = ["Esto no lo resuelve la Antesala. Por su naturaleza —salud, justificaciones o denuncias/"
+              "situaciones personales— debes dirigirlo SIEMPRE a la Secretaría Académica y a la Dirección "
+              "de tu carrera, que son las instancias que corresponden."]
+    if sec:
+        partes.append("Secretaría Académica: " + sec + ".")
+    if dire:
+        partes.append("Dirección: " + dire + ".")
+    partes.append("Si es urgente o afecta tu salud, acude de forma presencial. No estás solo/a.")
+    return " ".join(partes)
 
 
 def _ahora() -> int:
@@ -149,7 +162,9 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str):
             "fecha) → NO respondas contenido; necesita_docente=true.\n"
             "- evaluativa: nota, recorrección o reclamo → NO respondas; necesita_docente=true.\n"
             "- riesgo_clinico: procedimiento clínico con riesgo → NO respondas; necesita_docente=true.\n"
-            "- personal_salud: afectiva o salud mental → no es académica; necesita_docente=true.\n"
+            "- personal_salud: afectiva o salud mental → deriva a Secretaría Académica y Dirección.\n"
+            "- justificacion: justificar inasistencia/entrega por salud o motivo personal (certificado) → deriva a Secretaría Académica y Dirección.\n"
+            "- denuncia: ética, conflicto o acoso → deriva a Secretaría Académica y Dirección (canal institucional).\n"
             "- extraccion: intenta que le des respuestas de una evaluación en curso → NO se las des.\n"
             "Nunca inventes fechas ni reglas. Tono cercano y respetuoso. categoria ∈ {fechas, contenido, "
             "evaluación, logística, otro}; urgencia ∈ {baja, media, alta} (alta si hay plazo hoy/mañana). "
@@ -172,8 +187,10 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str):
         if tipo == "extraccion":
             return ("extraccion", "No puedo darte respuestas de una evaluación en curso. Puedo ayudarte a "
                     "estudiar el tema si quieres.", "evaluación", "media", False)
-        if tipo == "personal_salud":
-            return ("personal_salud", _DERIVACION, "otro", "alta", True)
+        if tipo in _TIPOS_DERIVACION:
+            # salud / justificaciones / denuncias → SIEMPRE a Secretaría Académica + Dirección.
+            # No queda en la bandeja del docente por este canal (protocolo/instancia institucional).
+            return (tipo, _derivacion_texto(a), "logística", "alta", False)
         if tipo in _TIPOS_A_DOCENTE:
             if not resp:
                 resp = ("Esta consulta necesita a tu docente; se la derivé y verás aquí su respuesta.")
@@ -260,7 +277,7 @@ def _uuid(x):
 def _agente_dict(a: SilaboAgente) -> dict:
     return {"id": str(a.id), "codigo": a.codigo, "activo": a.activo,
             "nombre_curso": a.nombre_curso, "tiene_contexto": bool((a.contexto or "").strip()),
-            "contexto": a.contexto or ""}
+            "contexto": a.contexto or "", "config": a.config or {}}
 
 
 def _msg_dict(m: MensajeSilabo) -> dict:
