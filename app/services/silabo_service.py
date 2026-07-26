@@ -107,6 +107,72 @@ def _ahora() -> int:
     return int(time.time())
 
 
+# ── similitud semántica ligera (sin embeddings): Jaccard de tokens normalizados ───────
+import unicodedata as _ud
+
+_STOP = {"a", "al", "ante", "aqui", "asi", "el", "la", "los", "las", "un", "una", "unos", "unas",
+         "de", "del", "en", "y", "o", "u", "que", "cual", "cuales", "cuanto", "cuanta", "cuantos",
+         "cuantas", "como", "para", "por", "con", "sin", "se", "su", "sus", "mi", "mis", "es", "son",
+         "hay", "tiene", "tienen", "cuando", "donde", "quien", "cuál", "qué", "cómo", "sobre", "esta",
+         "este", "esto", "estas", "estos", "me", "te", "lo", "le", "les", "yo", "tu", "si", "no", "mas",
+         "muy", "ya", "he", "ha", "va", "vale"}
+
+
+def _tokens(texto: str) -> set:
+    t = _ud.normalize("NFKD", (texto or "").lower())
+    t = "".join(c for c in t if not _ud.combining(c))       # sin tildes
+    t = "".join(c if c.isalnum() or c.isspace() else " " for c in t)
+    return {w for w in t.split() if len(w) > 2 and w not in _STOP}
+
+
+_UMBRAL_SIM = 0.5   # ≥ 0.5 de Jaccard Y ≥ 2 palabras-tema en común = equivalente
+
+
+def _jaccard(a: set, b: set) -> float:
+    """Similitud PRECISION-FIRST: exige ≥ 2 palabras de contenido en común (evita fusionar dos
+    preguntas por un solo término compartido). Nota: es LÉXICO — capta redacciones parecidas, no
+    sinónimos profundos (eso requiere embeddings, mejora futura)."""
+    if not a or not b or len(a & b) < 2:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def _es_equivalente(t_a: set, texto_b: str) -> bool:
+    return _jaccard(t_a, _tokens(texto_b)) >= _UMBRAL_SIM
+
+
+def _buscar_cache(db: Session, a: SilaboAgente, pregunta: str):
+    """Consistencia + economía: si una pregunta equivalente YA fue respondida y sigue vigente,
+    devuelve la MISMA respuesta (prefiere la del docente). Invalida si el contexto se editó
+    después (a.updated_at) o si la respuesta venció."""
+    t_q = _tokens(pregunta)
+    if not t_q:
+        return None
+    corte = getattr(a, "updated_at", None)
+    ahora = _ahora()
+    recientes = (db.query(MensajeSilabo)
+                 .filter(MensajeSilabo.agente_id == a.id)
+                 .order_by(MensajeSilabo.created_at.desc()).limit(300).all())
+    mejor, mejor_sim = None, 0.0
+    for m in recientes:
+        # AUTO-CACHE seguro: solo reusa la respuesta CANÓNICA del DOCENTE (no auto-reusa la de la IA,
+        # que en léxico podría confundir "cuándo/dónde"). Es la consistencia que pide el diseño.
+        if not (m.respuesta_docente or "").strip():
+            continue
+        if corte and getattr(m, "created_at", None) and m.created_at < corte:
+            continue                                        # contexto cambió después
+        if getattr(m, "vence_ts", None) and m.vence_ts and m.vence_ts <= ahora:
+            continue                                        # respuesta vencida
+        sim = _jaccard(t_q, _tokens(m.pregunta))
+        if sim > mejor_sim and sim >= _UMBRAL_SIM:
+            mejor, mejor_sim = m, sim
+    if not mejor:
+        return None
+    return {"respuesta": mejor.respuesta_docente,
+            "tipo": getattr(mejor, "tipo", "conceptual") or "conceptual",
+            "categoria": mejor.categoria or "otro", "por_docente": True}
+
+
 # ── pregunta del alumno (público) ────────────────────────────────────────────────────
 def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
               device_id: str | None = None, escalar: bool = False) -> dict:
@@ -119,6 +185,7 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
     if len(pregunta) > 1000:
         pregunta = pregunta[:1000]
 
+    cache_hit = False
     if escalar:
         # Botón "quiero preguntar a una persona": salta la IA y arma para el docente.
         tipo, respuesta, categoria, urgencia, necesita = (
@@ -126,7 +193,14 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
             "Listo: le pasé su consulta a su docente. Puede seguir su estado y su respuesta aquí.",
             "otro", "media", True)
     else:
-        tipo, respuesta, categoria, urgencia, necesita = _clasificar_y_responder(a, pregunta)
+        cache = _buscar_cache(db, a, pregunta)
+        if cache:
+            # Consistencia: una pregunta equivalente ya respondida → la MISMA respuesta, sin re-inferir.
+            tipo, respuesta, categoria, urgencia, necesita = (
+                cache["tipo"], cache["respuesta"], cache["categoria"], "baja", False)
+            cache_hit = True
+        else:
+            tipo, respuesta, categoria, urgencia, necesita = _clasificar_y_responder(a, pregunta)
 
     estado = MSG_PENDIENTE if necesita else MSG_RESPONDIDA
     vence = (_ahora() + _PLAZO_DOCENTE_H * 3600) if necesita else None
@@ -134,7 +208,7 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
                       pregunta=pregunta, respuesta_ia=respuesta, tipo=tipo, categoria=categoria,
                       urgencia=urgencia, necesita_docente=bool(necesita), estado=estado, vence_ts=vence)
     db.add(m); db.commit(); db.refresh(m)
-    return {"respuesta": respuesta, "necesita_docente": bool(necesita), "tipo": tipo,
+    return {"respuesta": respuesta, "necesita_docente": bool(necesita), "tipo": tipo, "cache": cache_hit,
             "categoria": categoria, "urgencia": urgencia, "mensaje_id": str(m.id), "vence_ts": vence}
 
 
@@ -255,7 +329,24 @@ def bandeja(db: Session, course_id, solo_pendientes: bool = False) -> dict:
         if solo_pendientes and m.estado != MSG_PENDIENTE:
             continue
         salida.append(_msg_dict(m))
-    return {"agente": _agente_dict(a), "mensajes": salida, "conteos": conteos,
+    # Agrupar equivalentes ENTRE LOS PENDIENTES: se muestra un representante por grupo con el nº de
+    # equivalentes (para "un clic responde a los N"). Los ya resueltos/respondidos pasan sin agrupar.
+    pend = [d for d in salida if d["estado"] == MSG_PENDIENTE]
+    otros = [d for d in salida if d["estado"] != MSG_PENDIENTE]
+    reps, usados = [], set()
+    for d in pend:
+        if d["id"] in usados:
+            continue
+        t = _tokens(d["pregunta"])
+        grupo = [d]
+        for e in pend:
+            if e["id"] != d["id"] and e["id"] not in usados and _es_equivalente(t, e["pregunta"]):
+                grupo.append(e); usados.add(e["id"])
+        usados.add(d["id"])
+        d["equivalentes"] = len(grupo)
+        d["equivalentes_alias"] = [g.get("alias") for g in grupo if g.get("alias")]
+        reps.append(d)
+    return {"agente": _agente_dict(a), "mensajes": reps + otros, "conteos": conteos,
             "derivadas": derivadas, "derivadas_conteo": der_conteo}
 
 
@@ -263,10 +354,24 @@ def responder_docente(db: Session, mensaje_id, respuesta: str) -> dict:
     m = db.query(MensajeSilabo).filter(MensajeSilabo.id == _uuid(mensaje_id)).first()
     if not m:
         raise not_found("Mensaje no encontrado.")
-    m.respuesta_docente = (respuesta or "").strip()
+    resp = (respuesta or "").strip()
+    m.respuesta_docente = resp
     m.estado = MSG_RESUELTA
+    # "Un clic responde a los N": aplica la MISMA respuesta a todos los pendientes equivalentes.
+    t = _tokens(m.pregunta)
+    n = 1
+    if t:
+        otros = (db.query(MensajeSilabo)
+                 .filter(MensajeSilabo.agente_id == m.agente_id, MensajeSilabo.estado == MSG_PENDIENTE,
+                         MensajeSilabo.id != m.id).limit(400).all())
+        for o in otros:
+            if _es_equivalente(t, o.pregunta):
+                o.respuesta_docente = resp
+                o.estado = MSG_RESUELTA
+                n += 1
     db.commit(); db.refresh(m)
-    return _msg_dict(m)
+    d = _msg_dict(m); d["respondidos"] = n
+    return d
 
 
 def marcar_estado(db: Session, mensaje_id, estado: str) -> dict:
