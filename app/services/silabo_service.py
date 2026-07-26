@@ -170,7 +170,7 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str):
             "evaluación, logística, otro}; urgencia ∈ {baja, media, alta} (alta si hay plazo hoy/mañana). "
             'Devuelve SOLO JSON: {"tipo":"..","respuesta":"..","categoria":"..","urgencia":"..","necesita_docente":true|false}.'
         )
-        ctx = (a.contexto or "")[:9000]
+        ctx = (a.contexto or "")[:20000]
         user = "CONTEXTO DEL CURSO:\n" + ctx + "\n\nPREGUNTA DEL ESTUDIANTE:\n" + pregunta
         d = _json_robusto(ce._llamar_anthropic(system, user, max_tokens=900))
         tipo = str(d.get("tipo", "otro")).lower().strip()
