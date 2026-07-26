@@ -73,6 +73,11 @@ def estado(mensaje_id: UUID, payload: dict, db: Session = Depends(get_db)):
     return sil.marcar_estado(db, mensaje_id, (payload or {}).get("estado", ""))
 
 
+@router.post("/silabo/mensaje/{mensaje_id}/al-contexto", dependencies=[Depends(req_profesor)])
+def al_contexto(mensaje_id: UUID, db: Session = Depends(get_db)):
+    return sil.agregar_al_contexto(db, mensaje_id)
+
+
 # ── público (alumno, sin login) ──────────────────────────────────────────────────────
 @router.get("/silabo/{codigo}")
 def info_publica(codigo: str, db: Session = Depends(get_db)):

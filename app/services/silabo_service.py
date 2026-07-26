@@ -410,6 +410,32 @@ def responder_docente(db: Session, mensaje_id, respuesta: str) -> dict:
     return d
 
 
+_FAQ_HEADER = "# Preguntas ya resueltas por el docente (fuente canónica)"
+
+
+def agregar_al_contexto(db: Session, mensaje_id) -> dict:
+    """El corpus crece por uso: promueve una consulta ya respondida a FUENTE del contexto, para que
+    la IA responda futuras preguntas parecidas por sí sola (y las cite). Cerrar el círculo (doc #11)."""
+    m = db.query(MensajeSilabo).filter(MensajeSilabo.id == _uuid(mensaje_id)).first()
+    if not m:
+        raise not_found("Mensaje no encontrado.")
+    a = db.query(SilaboAgente).filter(SilaboAgente.id == m.agente_id).first()
+    if not a:
+        raise not_found("Agente no encontrado.")
+    resp = (m.respuesta_docente or m.respuesta_ia or "").strip()
+    preg = (m.pregunta or "").strip()
+    if not resp or not preg:
+        raise conflict("La consulta aún no tiene respuesta para agregar.")
+    ctx = a.contexto or ""
+    if preg and preg in ctx:
+        return {"ok": True, "ya": True}                     # ya estaba
+    if _FAQ_HEADER not in ctx:
+        ctx = ctx.rstrip() + "\n\n" + _FAQ_HEADER + "\n"
+    a.contexto = ctx.rstrip() + "\n\nP: " + preg + "\nR: " + resp
+    db.commit(); db.refresh(a)
+    return {"ok": True, "agregado": True}
+
+
 def marcar_estado(db: Session, mensaje_id, estado: str) -> dict:
     if estado not in (MSG_RESPONDIDA, MSG_PENDIENTE, MSG_RESUELTA):
         raise conflict("Estado no válido.")
