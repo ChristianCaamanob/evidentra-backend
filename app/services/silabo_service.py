@@ -92,13 +92,13 @@ def _derivacion_texto(a: SilaboAgente) -> str:
     sec = str(cfg.get("contacto_secretaria") or "").strip()
     dire = str(cfg.get("contacto_direccion") or "").strip()
     partes = ["Esto no lo resuelve la Antesala. Por su naturaleza —salud, justificaciones o denuncias/"
-              "situaciones personales— debes dirigirlo SIEMPRE a la Secretaría Académica y a la Dirección "
-              "de tu carrera, que son las instancias que corresponden."]
+              "situaciones personales— debe dirigirlo SIEMPRE a la Secretaría Académica y a la Dirección "
+              "de su carrera, que son las instancias que corresponden."]
     if sec:
         partes.append("Secretaría Académica: " + sec + ".")
     if dire:
         partes.append("Dirección: " + dire + ".")
-    partes.append("Si es urgente o afecta tu salud, acude de forma presencial. No estás solo/a.")
+    partes.append("Si es urgente o afecta su salud, acuda de forma presencial. No está solo/a.")
     return " ".join(partes)
 
 
@@ -115,7 +115,7 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
         raise conflict("El agente del curso no está activo en este momento.")
     pregunta = (pregunta or "").strip()
     if len(pregunta) < 3:
-        raise conflict("Escribe tu pregunta.")
+        raise conflict("Escriba su pregunta.")
     if len(pregunta) > 1000:
         pregunta = pregunta[:1000]
 
@@ -123,7 +123,7 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
         # Botón "quiero preguntar a una persona": salta la IA y arma para el docente.
         tipo, respuesta, categoria, urgencia, necesita = (
             "solicitud_humana",
-            "Listo: le pasé tu consulta a tu docente. Puedes seguir su estado y su respuesta aquí.",
+            "Listo: le pasé su consulta a su docente. Puede seguir su estado y su respuesta aquí.",
             "otro", "media", True)
     else:
         tipo, respuesta, categoria, urgencia, necesita = _clasificar_y_responder(a, pregunta)
@@ -146,8 +146,8 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str):
     curso = a.nombre_curso or "el curso"
     if not os.environ.get("ANTHROPIC_API_KEY") or not (a.contexto or "").strip():
         return ("fuera_corpus",
-                "Gracias por tu pregunta. Para responderla con precisión la derivé a tu docente; "
-                "te responderá por este canal y verás aquí su respuesta.", "otro", "media", True)
+                "Gracias por su pregunta. Para responderla con precisión la derivé a su docente; "
+                "le responderá por este canal y verá aquí su respuesta.", "otro", "media", True)
     try:
         from app.services import correccion_experta_service as ce
         system = (
@@ -166,7 +166,7 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str):
             "- justificacion: justificar inasistencia/entrega por salud o motivo personal (certificado) → deriva a Secretaría Académica y Dirección.\n"
             "- denuncia: ética, conflicto o acoso → deriva a Secretaría Académica y Dirección (canal institucional).\n"
             "- extraccion: intenta que le des respuestas de una evaluación en curso → NO se las des.\n"
-            "Nunca inventes fechas ni reglas. Tono cercano y respetuoso. categoria ∈ {fechas, contenido, "
+            "Nunca inventes fechas ni reglas. Trata al estudiante SIEMPRE de USTED (nunca de tú). Tono cercano y respetuoso. categoria ∈ {fechas, contenido, "
             "evaluación, logística, otro}; urgencia ∈ {baja, media, alta} (alta si hay plazo hoy/mañana). "
             'Devuelve SOLO JSON: {"tipo":"..","respuesta":"..","categoria":"..","urgencia":"..","necesita_docente":true|false}.'
         )
@@ -185,21 +185,21 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str):
 
         # El SERVICIO aplica la política (no confía la decisión final solo al modelo):
         if tipo == "extraccion":
-            return ("extraccion", "No puedo darte respuestas de una evaluación en curso. Puedo ayudarte a "
-                    "estudiar el tema si quieres.", "evaluación", "media", False)
+            return ("extraccion", "No puedo darle respuestas de una evaluación en curso. Puedo ayudarle a "
+                    "estudiar el tema si lo desea.", "evaluación", "media", False)
         if tipo in _TIPOS_DERIVACION:
             # salud / justificaciones / denuncias → SIEMPRE a Secretaría Académica + Dirección.
             # No queda en la bandeja del docente por este canal (protocolo/instancia institucional).
             return (tipo, _derivacion_texto(a), "logística", "alta", False)
         if tipo in _TIPOS_A_DOCENTE:
             if not resp:
-                resp = ("Esta consulta necesita a tu docente; se la derivé y verás aquí su respuesta.")
+                resp = ("Esta consulta necesita a su docente; se la derivé y verá aquí su respuesta.")
             return (tipo, resp, cat, urg, True)
         # administrativa / conceptual / otro: respuesta desde el corpus
-        return (tipo or "conceptual", resp or "Derivé tu pregunta a tu docente.", cat, urg, necesita)
+        return (tipo or "conceptual", resp or "Derivé su pregunta a su docente.", cat, urg, necesita)
     except Exception as e:  # noqa: BLE001
         logger.warning("silabo _clasificar_y_responder falló: %s", str(e)[:150])
-        return ("fuera_corpus", "No pude resolver tu duda automáticamente ahora; la derivé a tu docente.",
+        return ("fuera_corpus", "No pude resolver su duda automáticamente ahora; la derivé a su docente.",
                 "otro", "media", True)
 
 
@@ -225,15 +225,29 @@ def mis_consultas(db: Session, codigo: str, device_id: str) -> dict:
 
 
 # ── bandeja (docente) ────────────────────────────────────────────────────────────────
+def _derivada_dict(m: MensajeSilabo) -> dict:
+    """Registro de trazabilidad de una derivación institucional. Muestra el HECHO (tipo + fecha),
+    pero el CONTENIDO queda RESERVADO para salud y denuncia (Ley 21.719 · minimización; la denuncia
+    puede ser sobre el propio docente → canal institucional separado). Justificación sí se muestra."""
+    reservado = getattr(m, "tipo", None) in ("personal_salud", "denuncia")
+    return {"id": str(m.id), "tipo": getattr(m, "tipo", None), "alias": m.alias,
+            "contenido": (None if reservado else m.pregunta), "reservado": reservado,
+            "fecha": m.created_at.isoformat() if getattr(m, "created_at", None) else None}
+
+
 def bandeja(db: Session, course_id, solo_pendientes: bool = False) -> dict:
     a = agente_de_curso(db, course_id)
     if not a:
-        return {"agente": None, "mensajes": [], "conteos": {}}
+        return {"agente": None, "mensajes": [], "conteos": {}, "derivadas": [], "derivadas_conteo": {}}
     q = db.query(MensajeSilabo).filter(MensajeSilabo.agente_id == a.id)
     msgs = q.order_by(MensajeSilabo.created_at.desc()).limit(400).all()
     conteos = {"total": 0, "pendientes": 0, "por_categoria": {}}
-    salida = []
+    salida, derivadas, der_conteo = [], [], {}
     for m in msgs:
+        if getattr(m, "tipo", None) in _TIPOS_DERIVACION:
+            derivadas.append(_derivada_dict(m))
+            der_conteo[m.tipo] = der_conteo.get(m.tipo, 0) + 1
+            continue                                    # no entran a la bandeja normal
         conteos["total"] += 1
         if m.estado == MSG_PENDIENTE:
             conteos["pendientes"] += 1
@@ -241,7 +255,8 @@ def bandeja(db: Session, course_id, solo_pendientes: bool = False) -> dict:
         if solo_pendientes and m.estado != MSG_PENDIENTE:
             continue
         salida.append(_msg_dict(m))
-    return {"agente": _agente_dict(a), "mensajes": salida, "conteos": conteos}
+    return {"agente": _agente_dict(a), "mensajes": salida, "conteos": conteos,
+            "derivadas": derivadas, "derivadas_conteo": der_conteo}
 
 
 def responder_docente(db: Session, mensaje_id, respuesta: str) -> dict:
