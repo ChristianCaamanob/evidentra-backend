@@ -838,6 +838,40 @@ def mi_resultado(db, codigo: str, participante_id, token: str) -> dict:
     }
 
 
+def mi_informe_payload(db, codigo: str, participante_id, token: str) -> dict:
+    """Informe PERSONAL descargable del alumno (al cerrar el certamen): nota, % logro y detalle
+    por pregunta. Auth por participante_id + token (sin login). Payload para exportador_service."""
+    res = mi_resultado(db, codigo, participante_id, token)
+    if not res.get("habilitado"):
+        raise conflict("El informe del alumno no está habilitado para esta sala.")
+    s = _sesion(db, codigo)
+    ass = db.query(Assessment).filter(Assessment.id == uuid.UUID(s.assessment_id)).first()
+    evalname = getattr(ass, "name", None) or "Evaluación"
+    alias = res.get("alias") or "Estudiante"
+    estado = "Aprobado" if res.get("aprobado") else "No aprobado"
+    resumen = (f"{alias} respondió {res['n_preguntas']} pregunta(s): {res['correctas']} correcta(s) y "
+               f"{res['incorrectas']} incorrecta(s), con un {res['pct_logro']}% de logro. "
+               f"Nota: {res['nota']} ({res['nota_label']}) — {estado} (umbral {res['umbral']}%).")
+    revelar = bool(res.get("revelar"))
+    rows = []
+    for d in res.get("detalle", []):
+        mi = d.get("mi_letra") or "—"
+        corr = (d.get("correcta_letra") or "—") if revelar else "—"
+        resul = "Correcta" if d["ok"] else ("Incorrecta" if d.get("respondida") else "Sin responder")
+        rows.append([str(d["numero"]), mi, corr, resul, d.get("ra") or ""])
+    secciones = [{"titulo": "Resumen", "parrafos": [resumen]}]
+    if revelar:
+        js = [f"Pregunta {d['numero']}: {d.get('justificacion')}" for d in res.get("detalle", [])
+              if (not d["ok"]) and d.get("respondida") and d.get("justificacion")]
+        if js:
+            secciones.append({"titulo": "Para repasar", "parrafos": js})
+    return {"titulo": f"Mi resultado · {evalname}",
+            "subtitulo": f"{alias} · Sala {codigo}",
+            "secciones": secciones,
+            "tablas": [{"titulo": "Detalle por pregunta",
+                        "headers": ["Nº", "Mi respuesta", "Correcta", "Resultado", "RA"], "rows": rows}]}
+
+
 # ── informe de la sala (psicometría + resultados de aprendizaje) ──────────────────────
 def _media(xs):
     return sum(xs) / len(xs) if xs else 0.0

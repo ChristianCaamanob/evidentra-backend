@@ -26,7 +26,8 @@ from app.models.asistencia import (
     MARCA_PRESENTE, MARCA_REVISADO,
 )
 
-BUCKET_SEG = 8                     # el QR rota cada 8 s (más margen para latencia móvil)
+BUCKET_SEG = 2                     # el QR rota cada 2 s (rotación rápida = anti-compartir)
+_TOLERANCIA_SEG = 12               # aceptar la marca hasta ~12 s tarde (latencia móvil + ceremonia passkey)
 _ALFABETO = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
@@ -216,7 +217,8 @@ def verificar_desafio(s: SesionAsistencia, token: str, bucket) -> tuple[bool, st
     except (TypeError, ValueError):
         return False, "Desafío inválido."
     actual = _bucket_actual()
-    for cand in (actual, actual - 1, actual - 2):     # tolerancia de 2 buckets (~16-24 s) por latencia móvil
+    n_atras = max(1, _TOLERANCIA_SEG // BUCKET_SEG)   # nº de buckets hacia atrás que cubren la tolerancia
+    for cand in range(actual, actual - n_atras - 1, -1):
         if bucket == cand and hmac.compare_digest(str(token or ""), _firmar(s.secreto, str(s.id), cand)):
             return True, ""
     return False, "El código QR venció; escanea el que está en pantalla."

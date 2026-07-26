@@ -220,6 +220,20 @@ def mi_resultado(codigo: str, participante_id: str, token: str, db: Session = De
     return ev.mi_resultado(db, codigo, participante_id, token)
 
 
+@router.post("/en-vivo/{codigo}/mi-informe/{formato}")
+def mi_informe_export(codigo: str, formato: str, payload: dict, db: Session = Depends(get_db)):
+    """Descarga del informe PERSONAL del alumno (sin login; auth por participante_id + token)."""
+    if formato not in ("docx", "pdf", "xlsx"):
+        from app.core.errors import unprocessable
+        raise unprocessable("Formato no soportado (docx | pdf | xlsx).")
+    data_payload = ev.mi_informe_payload(db, codigo, (payload or {}).get("participante_id"),
+                                         (payload or {}).get("token"))
+    data, media = exportador_service.exportar(formato, data_payload)
+    fn = re.sub(r"[^A-Za-z0-9_\-]", "_", f"mi_resultado_{codigo}")[:80]
+    return Response(content=data, media_type=media,
+                    headers={"Content-Disposition": f'attachment; filename="{fn}.{formato}"'})
+
+
 # ── integridad (LV8): telemetría del alumno + panel/cierre del docente ────────────────
 @router.post("/en-vivo/{codigo}/evento")
 def integridad_evento(codigo: str, payload: dict, db: Session = Depends(get_db)):
