@@ -62,6 +62,66 @@ _PROMPTS = {
 }
 
 
+_PROMPT_ESTUDIO = (
+    "Eres un tutor académico cercano que ayuda a UN ESTUDIANTE a estudiar justo lo que aún no domina, "
+    "a partir de los temas donde falló en su evaluación. Para cada tema/resultado de aprendizaje débil, "
+    "explica en una frase POR QUÉ importa y da 2-3 ESTRATEGIAS DE ESTUDIO concretas y accionables (qué "
+    "revisar, cómo practicar, una técnica o recurso). Tono motivador, en primera persona hacia el "
+    "estudiante ('puedes…'), nunca punitivo. No inventes contenidos que no estén en los temas dados. "
+    "Escribe en español. Devuelve SOLO JSON: "
+    '{"intro":"..","temas":[{"tema":"..","por_que":"..","estrategias":["..",".."]}],"cierre":".."}.'
+)
+
+
+def _estrategias_fallback(debilidades: list) -> dict:
+    """Plan de estudio genérico (sin IA): siempre disponible como respaldo."""
+    temas = []
+    for d in (debilidades or [])[:8]:
+        nombre = d.get("tema") or d.get("ra") or "Tema por reforzar"
+        temas.append({"tema": nombre,
+                      "por_que": "Aparece en preguntas que respondiste incorrectamente.",
+                      "estrategias": [
+                          "Repasa los apuntes y el material de clase de este tema y subraya las ideas clave.",
+                          "Practica ejercicios o preguntas similares y compara tus respuestas con la solución.",
+                          "Explica el concepto con tus palabras o a un compañero (técnica de Feynman): si te trabas, ahí está el vacío."]})
+    return {"intro": "Un plan breve para reforzar lo que quedó pendiente.",
+            "temas": temas,
+            "cierre": "Estudia poco y seguido; vuelve a intentar preguntas del tema hasta responderlas con seguridad."}
+
+
+def proponer_estrategias_estudio(debilidades: list, contexto: dict) -> dict:
+    """Estrategias de estudio para el ALUMNO a partir de los temas donde falló. Best-effort:
+    si no hay IA (o falla), devuelve un plan de respaldo genérico. Nunca lanza."""
+    debilidades = debilidades or []
+    contexto = contexto or {}
+    if not debilidades:
+        return {"ok": True, "contenido": {"intro": "", "temas": [], "cierre": ""}, "motor": "—"}
+    if not _disponible():
+        return {"ok": True, "contenido": _estrategias_fallback(debilidades), "motor": "plantilla"}
+    try:
+        from app.services import correccion_experta_service as ce
+        system = _PROMPT_ESTUDIO
+        partes = ["EVALUACIÓN: " + str(contexto.get("evaluacion", "(sin nombre)")),
+                  "CURSO/MATERIA: " + str(contexto.get("curso", "(no dado)")),
+                  "", "TEMAS QUE EL ESTUDIANTE AÚN NO DOMINA (de sus respuestas incorrectas):"]
+        for d in debilidades[:8]:
+            nombre = d.get("tema") or d.get("ra") or "Tema"
+            extra = []
+            if d.get("ra"):
+                extra.append("RA " + str(d.get("ra")))
+            if d.get("bloom"):
+                extra.append("nivel " + str(d.get("bloom")))
+            if d.get("unidad"):
+                extra.append("unidad " + str(d.get("unidad")))
+            partes.append("- " + str(nombre) + (" (" + " · ".join(extra) + ")" if extra else "")
+                          + (": " + str(d.get("detalle")) if d.get("detalle") else ""))
+        crudo = ce._llamar_anthropic(system, "\n".join(partes), max_tokens=2000)
+        return {"ok": True, "contenido": _json_robusto(crudo), "motor": "IA (" + ce.MODELO_EXPERTO + ")"}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("proponer_estrategias_estudio falló: %s", str(e)[:150])
+        return {"ok": True, "contenido": _estrategias_fallback(debilidades), "motor": "plantilla"}
+
+
 def proponer_remediacion(tipo: str, debilidad: dict, contexto: dict, n_items: int = 3) -> dict:
     tipo = (tipo or "repaso").strip().lower()
     if tipo not in _PROMPTS:

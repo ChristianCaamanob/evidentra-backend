@@ -838,38 +838,141 @@ def mi_resultado(db, codigo: str, participante_id, token: str) -> dict:
     }
 
 
+def _ra_textos(db, course_id) -> dict:
+    """Mapa learning_outcome_id / código → {code, text, unidad} para nombrar los RA en el informe."""
+    out = {}
+    if not course_id:
+        return out
+    try:
+        from app.models.curriculo import LearningOutcome
+        cid = course_id if not isinstance(course_id, str) else uuid.UUID(course_id)
+        for lo in db.query(LearningOutcome).filter(LearningOutcome.course_id == cid).all():
+            info = {"code": lo.code, "text": lo.text, "unidad": lo.unidad}
+            out[str(lo.id)] = info
+            if lo.code:
+                out[str(lo.code)] = info
+    except Exception:
+        pass
+    return out
+
+
 def mi_informe_payload(db, codigo: str, participante_id, token: str) -> dict:
-    """Informe PERSONAL descargable del alumno (al cerrar el certamen): nota, % logro y detalle
-    por pregunta. Auth por participante_id + token (sin login). Payload para exportador_service."""
+    """Informe PERSONAL descargable del alumno (al cerrar): puntaje, nota (escala + exigencia), detalle
+    por pregunta, CONOCIMIENTOS por reforzar (RA de las incorrectas) y ESTRATEGIAS DE ESTUDIO (IA, con
+    respaldo de plantilla). Auth por participante_id + token (sin login). Payload para exportador_service."""
     res = mi_resultado(db, codigo, participante_id, token)
     if not res.get("habilitado"):
         raise conflict("El informe del alumno no está habilitado para esta sala.")
     s = _sesion(db, codigo)
     ass = db.query(Assessment).filter(Assessment.id == uuid.UUID(s.assessment_id)).first()
     evalname = getattr(ass, "name", None) or "Evaluación"
+    course_id = getattr(ass, "course_id", None) if ass else None
+    curso_nombre = ""
+    try:
+        from app.models.course import Course
+        c = db.query(Course).filter(Course.id == course_id).first() if course_id else None
+        curso_nombre = getattr(c, "name", "") or ""
+    except Exception:
+        pass
+    ra_map = _ra_textos(db, course_id)
     alias = res.get("alias") or "Estudiante"
-    estado = "Aprobado" if res.get("aprobado") else "No aprobado"
-    resumen = (f"{alias} respondió {res['n_preguntas']} pregunta(s): {res['correctas']} correcta(s) y "
-               f"{res['incorrectas']} incorrecta(s), con un {res['pct_logro']}% de logro. "
-               f"Nota: {res['nota']} ({res['nota_label']}) — {estado} (umbral {res['umbral']}%).")
+    aprobado = res.get("aprobado")
+    estado = "Aprobado" if aprobado else "No aprobado"
     revelar = bool(res.get("revelar"))
+
+    def _ra_nombre(ra):
+        if not ra:
+            return "—"
+        info = ra_map.get(str(ra))
+        if info:
+            return (info.get("code") + " · " if info.get("code") else "") + (info.get("text") or "")[:90]
+        return str(ra)
+
+    # ── Detalle por pregunta ──
     rows = []
     for d in res.get("detalle", []):
         mi = d.get("mi_letra") or "—"
         corr = (d.get("correcta_letra") or "—") if revelar else "—"
-        resul = "Correcta" if d["ok"] else ("Incorrecta" if d.get("respondida") else "Sin responder")
-        rows.append([str(d["numero"]), mi, corr, resul, d.get("ra") or ""])
-    secciones = [{"titulo": "Resumen", "parrafos": [resumen]}]
+        resul = "✓ Correcta" if d["ok"] else ("✗ Incorrecta" if d.get("respondida") else "— Sin responder")
+        rows.append([str(d["numero"]), mi, corr, resul, (_ra_nombre(d.get("ra")) if d.get("ra") else "—")])
+
+    # ── Conocimientos por reforzar: agrupa las INCORRECTAS respondidas por RA (o unidad) ──
+    debil_map = {}
+    for d in res.get("detalle", []):
+        if d["ok"] or not d.get("respondida"):
+            continue
+        key = str(d.get("ra")) if d.get("ra") else ("__u:" + (d.get("unidad") or "General"))
+        g = debil_map.setdefault(key, {"ra": d.get("ra"), "bloom": set(), "unidad": d.get("unidad"),
+                                       "preguntas": [], "enunciados": []})
+        g["preguntas"].append(d["numero"])
+        if d.get("bloom"):
+            g["bloom"].add(str(d["bloom"]))
+        if d.get("enunciado"):
+            g["enunciados"].append(str(d["enunciado"]))
+    debilidades, reforzar_rows, reforzar_parrafos = [], [], []
+    for _k, g in debil_map.items():
+        info = ra_map.get(str(g["ra"])) if g["ra"] else None
+        tema = (info or {}).get("text") or (("RA " + str(g["ra"])) if g["ra"] else (g["unidad"] or "Tema general"))
+        bloom = ", ".join(sorted(g["bloom"])) if g["bloom"] else ""
+        code = (info or {}).get("code") or (str(g["ra"]) if g["ra"] else "")
+        debilidades.append({"tema": tema, "ra": code or None, "bloom": bloom,
+                            "unidad": g["unidad"] or (info or {}).get("unidad"),
+                            "detalle": " / ".join(g["enunciados"][:2])})
+        reforzar_rows.append([code or "—", tema[:110], ", ".join("P" + str(p) for p in g["preguntas"]), bloom or "—"])
+        metas = [x for x in [("RA " + code) if code else "", bloom, ("unidad " + g["unidad"]) if g["unidad"] else ""] if x]
+        reforzar_parrafos.append("• " + tema + ("  (" + " · ".join(metas) + ")" if metas else ""))
+
+    # ── Estrategias de estudio (IA best-effort; respaldo de plantilla; nunca lanza) ──
+    estr = {}
+    try:
+        from app.services import pedagogia_ia_service
+        estr = pedagogia_ia_service.proponer_estrategias_estudio(
+            debilidades, {"evaluacion": evalname, "curso": curso_nombre}) or {}
+    except Exception:
+        estr = {}
+    cont = (estr.get("contenido") or {}) if isinstance(estr, dict) else {}
+
+    # ── Armado de secciones ──
+    def _sec(heading, parrafos):
+        return {"heading": heading, "nivel": 1, "texto": "\n".join(str(p) for p in parrafos if p)}
+
+    resumen = (f"{alias} respondió {res['n_preguntas']} pregunta(s): {res['correctas']} correcta(s) y "
+               f"{res['incorrectas']} incorrecta(s).")
+    nota_txt = (f"Puntaje de logro: {res['pct_logro']}%. Nota: {res['nota']} ({res['nota_label']}) en escala "
+                f"{res.get('escala', '')}, con exigencia {res['umbral']}%. Resultado: {estado}.")
+    secciones = [_sec("Tu puntaje y nota", [resumen, nota_txt])]
+
+    if reforzar_parrafos:
+        secciones.append(_sec("Conocimientos por reforzar",
+                              ["Estos son los temas asociados a las preguntas que respondiste incorrectamente:"] + reforzar_parrafos))
+
+    estr_parrafos = []
+    if cont.get("intro"):
+        estr_parrafos.append(str(cont["intro"]))
+    for t in (cont.get("temas") or []):
+        estr_parrafos.append("▸ " + str(t.get("tema", "")) + (": " + str(t.get("por_que")) if t.get("por_que") else ""))
+        for e in (t.get("estrategias") or []):
+            estr_parrafos.append("   – " + str(e))
+    if cont.get("cierre"):
+        estr_parrafos.append(str(cont["cierre"]))
+    if estr_parrafos:
+        secciones.append(_sec("Estrategias de estudio", estr_parrafos))
+
     if revelar:
         js = [f"Pregunta {d['numero']}: {d.get('justificacion')}" for d in res.get("detalle", [])
               if (not d["ok"]) and d.get("respondida") and d.get("justificacion")]
         if js:
-            secciones.append({"titulo": "Para repasar", "parrafos": js})
+            secciones.append(_sec("Por qué (revisión de las incorrectas)", js))
+
+    tablas = [{"titulo": "Detalle por pregunta",
+               "headers": ["Nº", "Mi respuesta", "Correcta", "Resultado", "RA"], "rows": rows}]
+    if reforzar_rows:
+        tablas.append({"titulo": "Conocimientos por reforzar (por RA)",
+                       "headers": ["RA", "Tema", "Preguntas", "Nivel"], "rows": reforzar_rows})
+
     return {"titulo": f"Mi resultado · {evalname}",
-            "subtitulo": f"{alias} · Sala {codigo}",
-            "secciones": secciones,
-            "tablas": [{"titulo": "Detalle por pregunta",
-                        "headers": ["Nº", "Mi respuesta", "Correcta", "Resultado", "RA"], "rows": rows}]}
+            "subtitulo": f"{alias} · {curso_nombre + ' · ' if curso_nombre else ''}Sala {codigo}",
+            "secciones": secciones, "tablas": tablas}
 
 
 # ── informe de la sala (psicometría + resultados de aprendizaje) ──────────────────────
