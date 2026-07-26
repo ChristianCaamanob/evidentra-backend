@@ -83,4 +83,10 @@ def info_publica(codigo: str, db: Session = Depends(get_db)):
 @router.post("/silabo/{codigo}/preguntar")
 def preguntar(codigo: str, payload: dict, db: Session = Depends(get_db)):
     payload = payload or {}
-    return sil.preguntar(db, codigo, payload.get("pregunta", ""), payload.get("alias"))
+    return sil.preguntar(db, codigo, payload.get("pregunta", ""), payload.get("alias"),
+                         device_id=payload.get("device_id"), escalar=bool(payload.get("escalar")))
+
+
+@router.get("/silabo/{codigo}/mis-consultas")
+def mis_consultas(codigo: str, device_id: str = "", db: Session = Depends(get_db)):
+    return sil.mis_consultas(db, codigo, device_id)

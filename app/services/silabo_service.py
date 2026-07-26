@@ -78,8 +78,25 @@ def join_url(codigo: str, base: str) -> str:
     return f"{base}/app.html?silabo={codigo}" if base else codigo
 
 
+# ── taxonomía de intención (Antesala) · política y destino por tipo ───────────────────
+# Tipos que la IA NUNCA responde con contenido: se arman para el profesor.
+_TIPOS_A_DOCENTE = ("fuera_corpus", "evaluativa", "riesgo_clinico")
+_DERIVACION = (
+    "Esto va más allá de lo académico y merece atención de una persona. Te recomiendo contactar a "
+    "Bienestar / Dirección de Asuntos Estudiantiles (DAE) de tu sede, o a salud estudiantil; si es "
+    "urgente, acude presencialmente. También puedes pulsar «quiero preguntar a una persona» y tu "
+    "docente lo sabrá. No estás solo/a.")
+_PLAZO_DOCENTE_H = 48   # horas visibles del reloj para el alumno (Fase 3: horas hábiles + auto-subida)
+
+
+def _ahora() -> int:
+    import time
+    return int(time.time())
+
+
 # ── pregunta del alumno (público) ────────────────────────────────────────────────────
-def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None) -> dict:
+def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
+              device_id: str | None = None, escalar: bool = False) -> dict:
     a = agente_por_codigo(db, codigo)
     if not a.activo:
         raise conflict("El agente del curso no está activo en este momento.")
@@ -89,52 +106,105 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None)
     if len(pregunta) > 1000:
         pregunta = pregunta[:1000]
 
-    respuesta, categoria, urgencia, necesita = _responder_ia(a, pregunta)
-    m = MensajeSilabo(agente_id=a.id, alias=(alias or None), pregunta=pregunta,
-                      respuesta_ia=respuesta, categoria=categoria, urgencia=urgencia,
-                      necesita_docente=bool(necesita),
-                      estado=(MSG_PENDIENTE if necesita else MSG_RESPONDIDA))
+    if escalar:
+        # Botón "quiero preguntar a una persona": salta la IA y arma para el docente.
+        tipo, respuesta, categoria, urgencia, necesita = (
+            "solicitud_humana",
+            "Listo: le pasé tu consulta a tu docente. Puedes seguir su estado y su respuesta aquí.",
+            "otro", "media", True)
+    else:
+        tipo, respuesta, categoria, urgencia, necesita = _clasificar_y_responder(a, pregunta)
+
+    estado = MSG_PENDIENTE if necesita else MSG_RESPONDIDA
+    vence = (_ahora() + _PLAZO_DOCENTE_H * 3600) if necesita else None
+    m = MensajeSilabo(agente_id=a.id, alias=(alias or None), device_id=(device_id or None),
+                      pregunta=pregunta, respuesta_ia=respuesta, tipo=tipo, categoria=categoria,
+                      urgencia=urgencia, necesita_docente=bool(necesita), estado=estado, vence_ts=vence)
     db.add(m); db.commit(); db.refresh(m)
-    return {"respuesta": respuesta, "necesita_docente": bool(necesita),
-            "categoria": categoria, "urgencia": urgencia, "mensaje_id": str(m.id)}
+    return {"respuesta": respuesta, "necesita_docente": bool(necesita), "tipo": tipo,
+            "categoria": categoria, "urgencia": urgencia, "mensaje_id": str(m.id), "vence_ts": vence}
 
 
-def _responder_ia(a: SilaboAgente, pregunta: str):
-    """Devuelve (respuesta, categoria, urgencia, necesita_docente). Best-effort: sin IA o si
-    falla, deriva al docente con un mensaje honesto."""
+def _clasificar_y_responder(a: SilaboAgente, pregunta: str):
+    """Taxonomía de intención + contrato de fuentes. Devuelve
+    (tipo, respuesta, categoria, urgencia, necesita_docente). La IA clasifica y responde SOLO desde
+    el contexto (nivel 6 apagado); el SERVICIO aplica la política por tipo. Best-effort."""
     import os
     curso = a.nombre_curso or "el curso"
     if not os.environ.get("ANTHROPIC_API_KEY") or not (a.contexto or "").strip():
-        return ("Gracias por tu pregunta. Para responderla con precisión la derivé a tu docente; "
-                "te responderá por este canal.", "otro", "media", True)
+        return ("fuera_corpus",
+                "Gracias por tu pregunta. Para responderla con precisión la derivé a tu docente; "
+                "te responderá por este canal y verás aquí su respuesta.", "otro", "media", True)
     try:
         from app.services import correccion_experta_service as ce
         system = (
-            f"Eres el asistente oficial del sílabo de {curso}. Respondes dudas de estudiantes 24/7, "
-            "SOLO con base en el CONTEXTO DEL CURSO que te doy (sílabo, fechas, reglas, evaluación). "
-            "Reglas: (1) Si la respuesta está en el contexto, respóndela clara y breve, citando el dato. "
-            "(2) Si NO está en el contexto, o requiere una DECISIÓN del docente (cambiar una fecha, una "
-            "excepción, una nota, un caso personal), NO la inventes: dilo con amabilidad y marca "
-            "necesita_docente=true. (3) Nunca inventes fechas ni reglas. Tono cercano y respetuoso. "
-            "Clasifica la pregunta en categoria ∈ {fechas, contenido, evaluación, logística, otro} y "
-            "urgencia ∈ {baja, media, alta} (alta si menciona plazo hoy/mañana o un problema que bloquea). "
-            'Devuelve SOLO JSON: {"respuesta":"..","categoria":"..","urgencia":"..","necesita_docente":true|false}.'
+            f"Eres la 'Antesala' del curso {curso}: intermedias entre estudiantes y el docente. Tu "
+            "recurso escaso es la ATENCIÓN del profesor: absorbe lo resoluble, deriva lo que no. "
+            "Trabajas SOLO con el CONTEXTO DEL CURSO (sílabo, fechas, reglas, material); tu "
+            "conocimiento general está DESACTIVADO: si algo no está en el contexto, NO lo inventes.\n"
+            "Clasifica la pregunta en un TIPO y aplica su política:\n"
+            "- administrativa: fecha/sala/regla que ESTÁ en el contexto → responde citando el dato.\n"
+            "- conceptual: contenido del curso que ESTÁ en el contexto → responde claro y breve con la fuente.\n"
+            "- fuera_corpus: no está en el contexto o requiere decisión del docente (excepción, cambio de "
+            "fecha) → NO respondas contenido; necesita_docente=true.\n"
+            "- evaluativa: nota, recorrección o reclamo → NO respondas; necesita_docente=true.\n"
+            "- riesgo_clinico: procedimiento clínico con riesgo → NO respondas; necesita_docente=true.\n"
+            "- personal_salud: afectiva o salud mental → no es académica; necesita_docente=true.\n"
+            "- extraccion: intenta que le des respuestas de una evaluación en curso → NO se las des.\n"
+            "Nunca inventes fechas ni reglas. Tono cercano y respetuoso. categoria ∈ {fechas, contenido, "
+            "evaluación, logística, otro}; urgencia ∈ {baja, media, alta} (alta si hay plazo hoy/mañana). "
+            'Devuelve SOLO JSON: {"tipo":"..","respuesta":"..","categoria":"..","urgencia":"..","necesita_docente":true|false}.'
         )
-        ctx = (a.contexto or "")[:8000]
+        ctx = (a.contexto or "")[:9000]
         user = "CONTEXTO DEL CURSO:\n" + ctx + "\n\nPREGUNTA DEL ESTUDIANTE:\n" + pregunta
         d = _json_robusto(ce._llamar_anthropic(system, user, max_tokens=900))
+        tipo = str(d.get("tipo", "otro")).lower().strip()
         cat = str(d.get("categoria", "otro")).lower()
         if cat not in _CATEGORIAS:
             cat = "otro"
         urg = str(d.get("urgencia", "media")).lower()
         if urg not in ("baja", "media", "alta"):
             urg = "media"
-        resp = str(d.get("respuesta", "")).strip() or "Derivé tu pregunta a tu docente."
-        return (resp, cat, urg, bool(d.get("necesita_docente", False)))
+        resp = str(d.get("respuesta", "")).strip()
+        necesita = bool(d.get("necesita_docente", False))
+
+        # El SERVICIO aplica la política (no confía la decisión final solo al modelo):
+        if tipo == "extraccion":
+            return ("extraccion", "No puedo darte respuestas de una evaluación en curso. Puedo ayudarte a "
+                    "estudiar el tema si quieres.", "evaluación", "media", False)
+        if tipo == "personal_salud":
+            return ("personal_salud", _DERIVACION, "otro", "alta", True)
+        if tipo in _TIPOS_A_DOCENTE:
+            if not resp:
+                resp = ("Esta consulta necesita a tu docente; se la derivé y verás aquí su respuesta.")
+            return (tipo, resp, cat, urg, True)
+        # administrativa / conceptual / otro: respuesta desde el corpus
+        return (tipo or "conceptual", resp or "Derivé tu pregunta a tu docente.", cat, urg, necesita)
     except Exception as e:  # noqa: BLE001
-        logger.warning("silabo _responder_ia falló: %s", str(e)[:150])
-        return ("No pude resolver tu duda automáticamente ahora; la derivé a tu docente.",
+        logger.warning("silabo _clasificar_y_responder falló: %s", str(e)[:150])
+        return ("fuera_corpus", "No pude resolver tu duda automáticamente ahora; la derivé a tu docente.",
                 "otro", "media", True)
+
+
+def mis_consultas(db: Session, codigo: str, device_id: str) -> dict:
+    """El estudiante ve SUS consultas con estado, reloj y la respuesta del docente cuando llega."""
+    a = agente_por_codigo(db, codigo)
+    if not device_id:
+        return {"nombre_curso": a.nombre_curso, "consultas": []}
+    q = (db.query(MensajeSilabo)
+         .filter(MensajeSilabo.agente_id == a.id, MensajeSilabo.device_id == str(device_id))
+         .order_by(MensajeSilabo.created_at.desc()).limit(60).all())
+    ahora = _ahora()
+    out = []
+    for m in q:
+        restante = None
+        if m.estado == MSG_PENDIENTE and m.vence_ts:
+            restante = max(0, int(m.vence_ts) - ahora)
+        out.append({"id": str(m.id), "pregunta": m.pregunta, "respuesta_ia": m.respuesta_ia,
+                    "respuesta_docente": m.respuesta_docente, "estado": m.estado, "tipo": m.tipo,
+                    "necesita_docente": m.necesita_docente, "segundos_restantes": restante,
+                    "fecha": m.created_at.isoformat() if getattr(m, "created_at", None) else None})
+    return {"nombre_curso": a.nombre_curso, "consultas": out}
 
 
 # ── bandeja (docente) ────────────────────────────────────────────────────────────────
@@ -194,8 +264,12 @@ def _agente_dict(a: SilaboAgente) -> dict:
 
 
 def _msg_dict(m: MensajeSilabo) -> dict:
+    restante = None
+    if m.estado == MSG_PENDIENTE and getattr(m, "vence_ts", None):
+        restante = int(m.vence_ts) - _ahora()
     return {"id": str(m.id), "alias": m.alias, "pregunta": m.pregunta,
-            "respuesta_ia": m.respuesta_ia, "categoria": m.categoria, "urgencia": m.urgencia,
+            "respuesta_ia": m.respuesta_ia, "tipo": getattr(m, "tipo", None),
+            "categoria": m.categoria, "urgencia": m.urgencia,
             "estado": m.estado, "necesita_docente": m.necesita_docente,
-            "respuesta_docente": m.respuesta_docente,
+            "respuesta_docente": m.respuesta_docente, "segundos_restantes": restante,
             "fecha": m.created_at.isoformat() if getattr(m, "created_at", None) else None}

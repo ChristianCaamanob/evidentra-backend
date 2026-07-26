@@ -560,6 +560,11 @@ _COLUMNAS_ADITIVAS = {
     "scans": {
         "origen": "VARCHAR(20)",
     },
+    "silabo_mensajes": {
+        "device_id": "VARCHAR(64)",
+        "tipo": "VARCHAR(40)",
+        "vence_ts": "INTEGER",
+    },
 }
 
 

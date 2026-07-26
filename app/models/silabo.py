@@ -8,7 +8,7 @@ docente cae, clasificado, en una bandeja para el docente (no lo satura de repeti
 """
 import uuid
 
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, Text, JSON, func
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, Text, JSON, Integer, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -40,13 +40,18 @@ class MensajeSilabo(UUIDMixin, TimestampMixin, Base):
 
     agente_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("silabo_agentes.id"), index=True)
     alias: Mapped[str | None] = mapped_column(String(80), nullable=True)       # opcional (sin login)
+    device_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)  # identidad local del alumno (localStorage)
     pregunta: Mapped[str] = mapped_column(Text)
     respuesta_ia: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Taxonomía de intención (la política/destino se deriva del tipo): administrativa / conceptual /
+    # fuera_corpus / evaluativa / riesgo_clinico / personal_salud / extraccion / otro.
+    tipo: Mapped[str | None] = mapped_column(String(40), nullable=True)
     categoria: Mapped[str | None] = mapped_column(String(40), nullable=True)   # fechas/contenido/evaluación/logística/otro
     urgencia: Mapped[str | None] = mapped_column(String(10), nullable=True)     # baja/media/alta
     estado: Mapped[str] = mapped_column(String(24), default=MSG_RESPONDIDA,
                                         server_default=MSG_RESPONDIDA, nullable=False)
     necesita_docente: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    vence_ts: Mapped[int | None] = mapped_column(Integer, nullable=True)        # epoch: plazo visible para el alumno
     respuesta_docente: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     agente = relationship("SilaboAgente", back_populates="mensajes")
