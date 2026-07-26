@@ -66,6 +66,8 @@ from app.routes.banco import router as banco_router
 api_router.include_router(banco_router)
 from app.routes.asistencia import router as asistencia_router
 api_router.include_router(asistencia_router)
+from app.routes.silabo import router as silabo_router
+api_router.include_router(silabo_router)
 from app.routes.director import router as director_router
 api_router.include_router(director_router)
 
