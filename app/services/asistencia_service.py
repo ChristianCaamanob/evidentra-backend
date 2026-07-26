@@ -26,7 +26,7 @@ from app.models.asistencia import (
     MARCA_PRESENTE, MARCA_REVISADO,
 )
 
-BUCKET_SEG = 2                     # el QR rota cada 2 s (rotación rápida = anti-compartir)
+BUCKET_SEG = 4                     # el QR rota cada 4 s (rápido = anti-compartir, con margen para escanear+firmar)
 _TOLERANCIA_SEG = 12               # aceptar la marca hasta ~12 s tarde (latencia móvil + ceremonia passkey)
 _ALFABETO = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
