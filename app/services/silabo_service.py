@@ -170,7 +170,8 @@ def _buscar_cache(db: Session, a: SilaboAgente, pregunta: str):
         return None
     return {"respuesta": mejor.respuesta_docente,
             "tipo": getattr(mejor, "tipo", "conceptual") or "conceptual",
-            "categoria": mejor.categoria or "otro", "por_docente": True}
+            "categoria": mejor.categoria or "otro", "por_docente": True,
+            "cita": getattr(mejor, "cita", None)}
 
 
 # ── pregunta del alumno (público) ────────────────────────────────────────────────────
@@ -185,7 +186,7 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
     if len(pregunta) > 1000:
         pregunta = pregunta[:1000]
 
-    cache_hit = False
+    cache_hit, cita = False, None
     if escalar:
         # Botón "quiero preguntar a una persona": salta la IA y arma para el docente.
         tipo, respuesta, categoria, urgencia, necesita = (
@@ -198,21 +199,35 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
             # Consistencia: una pregunta equivalente ya respondida → la MISMA respuesta, sin re-inferir.
             tipo, respuesta, categoria, urgencia, necesita = (
                 cache["tipo"], cache["respuesta"], cache["categoria"], "baja", False)
-            cache_hit = True
+            cita = cache.get("cita"); cache_hit = True
         else:
-            tipo, respuesta, categoria, urgencia, necesita = _clasificar_y_responder(a, pregunta)
+            intentos = _intentos_equivalentes(db, a, pregunta, device_id)
+            tipo, respuesta, categoria, urgencia, necesita, cita = _clasificar_y_responder(a, pregunta, intentos)
 
     estado = MSG_PENDIENTE if necesita else MSG_RESPONDIDA
     vence = (_ahora() + _PLAZO_DOCENTE_H * 3600) if necesita else None
     m = MensajeSilabo(agente_id=a.id, alias=(alias or None), device_id=(device_id or None),
-                      pregunta=pregunta, respuesta_ia=respuesta, tipo=tipo, categoria=categoria,
+                      pregunta=pregunta, respuesta_ia=respuesta, tipo=tipo, categoria=categoria, cita=cita,
                       urgencia=urgencia, necesita_docente=bool(necesita), estado=estado, vence_ts=vence)
     db.add(m); db.commit(); db.refresh(m)
     return {"respuesta": respuesta, "necesita_docente": bool(necesita), "tipo": tipo, "cache": cache_hit,
-            "categoria": categoria, "urgencia": urgencia, "mensaje_id": str(m.id), "vence_ts": vence}
+            "cita": cita, "categoria": categoria, "urgencia": urgencia, "mensaje_id": str(m.id), "vence_ts": vence}
 
 
-def _clasificar_y_responder(a: SilaboAgente, pregunta: str):
+def _intentos_equivalentes(db: Session, a: SilaboAgente, pregunta: str, device_id: str | None) -> int:
+    """Cuántas veces ESTE dispositivo ya preguntó algo equivalente (regla de rendición)."""
+    if not device_id:
+        return 0
+    t = _tokens(pregunta)
+    if not t:
+        return 0
+    prev = (db.query(MensajeSilabo)
+            .filter(MensajeSilabo.agente_id == a.id, MensajeSilabo.device_id == str(device_id))
+            .order_by(MensajeSilabo.created_at.desc()).limit(40).all())
+    return sum(1 for m in prev if _es_equivalente(t, m.pregunta))
+
+
+def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0):
     """Taxonomía de intención + contrato de fuentes. Devuelve
     (tipo, respuesta, categoria, urgencia, necesita_docente). La IA clasifica y responde SOLO desde
     el contexto (nivel 6 apagado); el SERVICIO aplica la política por tipo. Best-effort."""
@@ -221,7 +236,23 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str):
     if not os.environ.get("ANTHROPIC_API_KEY") or not (a.contexto or "").strip():
         return ("fuera_corpus",
                 "Gracias por su pregunta. Para responderla con precisión la derivé a su docente; "
-                "le responderá por este canal y verá aquí su respuesta.", "otro", "media", True)
+                "le responderá por este canal y verá aquí su respuesta.", "otro", "media", True, None)
+    # Modo pedagógico (config del docente): guiado | mixto | directo | cerrado.
+    modo = str((a.config or {}).get("modo_pedagogico") or "directo").lower()
+    if modo not in ("guiado", "mixto", "directo", "cerrado"):
+        modo = "directo"
+    # Regla de rendición: si el estudiante ya intentó ≥2 veces algo equivalente, se responde DIRECTO.
+    rendido = intentos >= 2
+    modo_efectivo = "directo" if (rendido and modo in ("guiado", "mixto")) else modo
+    politica_modo = {
+        "guiado": "En preguntas CONCEPTUALES EVALUABLES: NO des la respuesta completa; da UNA pista mínima y "
+                  "devuelve la pregunta para que el estudiante razone. En administrativas/logísticas responde normal.",
+        "mixto": "En conceptuales evaluables: primero una pista; si el estudiante ya insistió o muestra frustración, resuelve completo.",
+        "directo": "Responde completo y claro, con el razonamiento, cuando esté en el contexto.",
+        "cerrado": "VENTANA DE EVALUACIÓN: responde SOLO logística (fechas, salas, reglas). NO respondas contenido evaluable; si lo piden, dilo con amabilidad.",
+    }[modo_efectivo]
+    rendicion = (" El estudiante ya intentó varias veces; ENTREGA la respuesta completa con el razonamiento (regla de rendición)."
+                 if rendido else " Si el texto muestra frustración clara, entrega la respuesta completa.")
     try:
         from app.services import correccion_experta_service as ce
         system = (
@@ -231,7 +262,7 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str):
             "conocimiento general está DESACTIVADO: si algo no está en el contexto, NO lo inventes.\n"
             "Clasifica la pregunta en un TIPO y aplica su política:\n"
             "- administrativa: fecha/sala/regla que ESTÁ en el contexto → responde citando el dato.\n"
-            "- conceptual: contenido del curso que ESTÁ en el contexto → responde claro y breve con la fuente.\n"
+            "- conceptual: contenido del curso que ESTÁ en el contexto → responde según el MODO PEDAGÓGICO.\n"
             "- fuera_corpus: no está en el contexto o requiere decisión del docente (excepción, cambio de "
             "fecha) → NO respondas contenido; necesita_docente=true.\n"
             "- evaluativa: nota, recorrección o reclamo → NO respondas; necesita_docente=true.\n"
@@ -240,13 +271,16 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str):
             "- justificacion: justificar inasistencia/entrega por salud o motivo personal (certificado) → deriva a Secretaría Académica y Dirección.\n"
             "- denuncia: ética, conflicto o acoso → deriva a Secretaría Académica y Dirección (canal institucional).\n"
             "- extraccion: intenta que le des respuestas de una evaluación en curso → NO se las des.\n"
+            f"MODO PEDAGÓGICO = {modo_efectivo}. {politica_modo}{rendicion}\n"
+            "CONTRATO DE FUENTES: cuando respondas desde el contexto, incluye en 'cita' el FRAGMENTO EXACTO "
+            "(copiado literal, ≤ 240 caracteres) que sostiene tu respuesta; si no hay fragmento, cita = \"\".\n"
             "Nunca inventes fechas ni reglas. Trata al estudiante SIEMPRE de USTED (nunca de tú). Tono cercano y respetuoso. categoria ∈ {fechas, contenido, "
             "evaluación, logística, otro}; urgencia ∈ {baja, media, alta} (alta si hay plazo hoy/mañana). "
-            'Devuelve SOLO JSON: {"tipo":"..","respuesta":"..","categoria":"..","urgencia":"..","necesita_docente":true|false}.'
+            'Devuelve SOLO JSON: {"tipo":"..","respuesta":"..","cita":"..","categoria":"..","urgencia":"..","necesita_docente":true|false}.'
         )
         ctx = (a.contexto or "")[:20000]
         user = "CONTEXTO DEL CURSO:\n" + ctx + "\n\nPREGUNTA DEL ESTUDIANTE:\n" + pregunta
-        d = _json_robusto(ce._llamar_anthropic(system, user, max_tokens=900))
+        d = _json_robusto(ce._llamar_anthropic(system, user, max_tokens=1000))
         tipo = str(d.get("tipo", "otro")).lower().strip()
         cat = str(d.get("categoria", "otro")).lower()
         if cat not in _CATEGORIAS:
@@ -255,26 +289,27 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str):
         if urg not in ("baja", "media", "alta"):
             urg = "media"
         resp = str(d.get("respuesta", "")).strip()
+        cita = (str(d.get("cita", "")).strip() or None)
+        if cita and cita not in (a.contexto or ""):
+            cita = None                                     # solo aceptamos citas que SÍ están en el contexto
         necesita = bool(d.get("necesita_docente", False))
 
         # El SERVICIO aplica la política (no confía la decisión final solo al modelo):
         if tipo == "extraccion":
             return ("extraccion", "No puedo darle respuestas de una evaluación en curso. Puedo ayudarle a "
-                    "estudiar el tema si lo desea.", "evaluación", "media", False)
+                    "estudiar el tema si lo desea.", "evaluación", "media", False, None)
         if tipo in _TIPOS_DERIVACION:
-            # salud / justificaciones / denuncias → SIEMPRE a Secretaría Académica + Dirección.
-            # No queda en la bandeja del docente por este canal (protocolo/instancia institucional).
-            return (tipo, _derivacion_texto(a), "logística", "alta", False)
+            return (tipo, _derivacion_texto(a), "logística", "alta", False, None)
         if tipo in _TIPOS_A_DOCENTE:
             if not resp:
                 resp = ("Esta consulta necesita a su docente; se la derivé y verá aquí su respuesta.")
-            return (tipo, resp, cat, urg, True)
+            return (tipo, resp, cat, urg, True, None)
         # administrativa / conceptual / otro: respuesta desde el corpus
-        return (tipo or "conceptual", resp or "Derivé su pregunta a su docente.", cat, urg, necesita)
+        return (tipo or "conceptual", resp or "Derivé su pregunta a su docente.", cat, urg, necesita, cita)
     except Exception as e:  # noqa: BLE001
         logger.warning("silabo _clasificar_y_responder falló: %s", str(e)[:150])
         return ("fuera_corpus", "No pude resolver su duda automáticamente ahora; la derivé a su docente.",
-                "otro", "media", True)
+                "otro", "media", True, None)
 
 
 def mis_consultas(db: Session, codigo: str, device_id: str) -> dict:
@@ -293,6 +328,7 @@ def mis_consultas(db: Session, codigo: str, device_id: str) -> dict:
             restante = max(0, int(m.vence_ts) - ahora)
         out.append({"id": str(m.id), "pregunta": m.pregunta, "respuesta_ia": m.respuesta_ia,
                     "respuesta_docente": m.respuesta_docente, "estado": m.estado, "tipo": m.tipo,
+                    "cita": getattr(m, "cita", None),
                     "necesita_docente": m.necesita_docente, "segundos_restantes": restante,
                     "fecha": m.created_at.isoformat() if getattr(m, "created_at", None) else None})
     return {"nombre_curso": a.nombre_curso, "consultas": out}
@@ -406,6 +442,7 @@ def _msg_dict(m: MensajeSilabo) -> dict:
         restante = int(m.vence_ts) - _ahora()
     return {"id": str(m.id), "alias": m.alias, "pregunta": m.pregunta,
             "respuesta_ia": m.respuesta_ia, "tipo": getattr(m, "tipo", None),
+            "cita": getattr(m, "cita", None),
             "categoria": m.categoria, "urgencia": m.urgencia,
             "estado": m.estado, "necesita_docente": m.necesita_docente,
             "respuesta_docente": m.respuesta_docente, "segundos_restantes": restante,

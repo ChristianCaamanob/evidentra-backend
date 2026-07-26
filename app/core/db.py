@@ -564,6 +564,7 @@ _COLUMNAS_ADITIVAS = {
         "device_id": "VARCHAR(64)",
         "tipo": "VARCHAR(40)",
         "vence_ts": "INTEGER",
+        "cita": "TEXT",
     },
 }
 

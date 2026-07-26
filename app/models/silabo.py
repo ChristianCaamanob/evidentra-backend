@@ -43,6 +43,8 @@ class MensajeSilabo(UUIDMixin, TimestampMixin, Base):
     device_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)  # identidad local del alumno (localStorage)
     pregunta: Mapped[str] = mapped_column(Text)
     respuesta_ia: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Contrato de fuentes: fragmento EXACTO del contexto que sostiene la respuesta (o None).
+    cita: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Taxonomía de intención (la política/destino se deriva del tipo): administrativa / conceptual /
     # fuera_corpus / evaluativa / riesgo_clinico / personal_salud / extraccion / otro.
     tipo: Mapped[str | None] = mapped_column(String(40), nullable=True)
