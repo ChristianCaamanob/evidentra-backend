@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import secrets
 
 from sqlalchemy.orm import Session
@@ -279,6 +280,22 @@ def _intentos_equivalentes(db: Session, a: SilaboAgente, pregunta: str, device_i
     return sum(1 for m in prev if _es_equivalente(t, m.pregunta))
 
 
+# Meta-estudio: cómo estudiar/prepararse. Runi SIEMPRE puede responderlo (capa C), aunque el LLM falle.
+_META_ESTUDIO_RE = re.compile(
+    r"c[oó]mo\s+(estudi|prepar|repas|memoriz|aprend|organiz)|"
+    r"\b(estudiar|estudio|repasar|repaso|prepararme|preparar|memorizar|mnemot|"
+    r"plan de estudio|estrategi|t[eé]cnica|priorizar|organizar (mi|el) (tiempo|estudio)|"
+    r"por d[oó]nde (empiezo|parto|comienzo)|c[oó]mo me organiz)", re.I)
+def _es_meta_estudio(pregunta: str) -> bool:
+    return bool(_META_ESTUDIO_RE.search(pregunta or ""))
+_FALLBACK_ESTUDIO = (
+    "¡Con gusto! Un buen plan es: 1) divide el temario por unidades y prioriza según la ponderación de "
+    "cada evaluación; 2) estudia con la bibliografía obligatoria y practica con casos o ejercicios; y "
+    "3) haz repaso espaciado y autoevaluación (explícate el tema en voz alta). ¿Por qué unidad o tema "
+    "quieres partir? Te armo un plan más específico."
+)
+
+
 def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0):
     """Taxonomía de intención + contrato de fuentes. Devuelve
     (tipo, respuesta, categoria, urgencia, necesita_docente). La IA clasifica y responde SOLO desde
@@ -343,7 +360,17 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0):
         )
         ctx = (a.contexto or "")[:20000]
         user = "CONTEXTO DEL CURSO:\n" + ctx + "\n\nPREGUNTA DEL ESTUDIANTE:\n" + pregunta
-        d = _json_robusto(ce._llamar_anthropic(system, user, max_tokens=1000))
+        d, _ultimo_err = None, None
+        for _i in range(3):                                  # reintentos: no escales por un fallo transitorio del LLM
+            try:
+                d = _json_robusto(ce._llamar_anthropic(system, user, max_tokens=1000))
+                if d:
+                    break
+            except Exception as e:  # noqa: BLE001
+                _ultimo_err = e
+                logger.warning("silabo LLM intento %d/3 falló: %s", _i + 1, str(e)[:120])
+        if not d:
+            raise (_ultimo_err or RuntimeError("sin respuesta del modelo"))
         tipo = str(d.get("tipo", "otro")).lower().strip()
         cat = str(d.get("categoria", "otro")).lower()
         if cat not in _CATEGORIAS:
@@ -371,8 +398,13 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0):
         return (tipo or "conceptual", resp or "Derivé su pregunta a su docente.", cat, urg, necesita, cita)
     except Exception as e:  # noqa: BLE001
         logger.warning("silabo _clasificar_y_responder falló: %s", str(e)[:150])
-        return ("fuera_corpus", "No pude resolver su duda automáticamente ahora; la derivé a su docente.",
-                "otro", "media", True, None)
+        # Fallback INTELIGENTE: meta-estudio se responde igual (nunca se escala por un fallo del modelo);
+        # solo lo genuinamente no resoluble cae al docente.
+        if _es_meta_estudio(pregunta):
+            return ("conceptual", _FALLBACK_ESTUDIO, "contenido", "baja", False, None)
+        return ("fuera_corpus", "No pude resolver su duda ahora mismo; la reintento y, si sigue, la lleva "
+                "su docente. Mientras tanto, ¿puede reformularla o darme un poco más de detalle?",
+                "otro", "media", False, None)
 
 
 def mis_consultas(db: Session, codigo: str, device_id: str) -> dict:
