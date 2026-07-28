@@ -51,6 +51,7 @@ class MensajeSilabo(UUIDMixin, TimestampMixin, Base):
     # Trazabilidad del profesor: tema/RA al que apunta la consulta + fuente de la respuesta.
     tema: Mapped[str | None] = mapped_column(String(120), nullable=True)     # p.ej. "drenaje linfático de la mama"
     fuente: Mapped[str | None] = mapped_column(String(16), nullable=True)    # corpus | general | ninguna
+    confianza: Mapped[str | None] = mapped_column(String(8), nullable=True)  # baja|media|alta (autoevaluación del estudiante, metacognición)
     # Taxonomía de intención (la política/destino se deriva del tipo): administrativa / conceptual /
     # fuera_corpus / evaluativa / riesgo_clinico / personal_salud / extraccion / otro.
     tipo: Mapped[str | None] = mapped_column(String(40), nullable=True)

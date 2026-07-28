@@ -141,3 +141,19 @@ def preguntar(codigo: str, payload: dict, db: Session = Depends(get_db)):
 @router.get("/silabo/{codigo}/mis-consultas")
 def mis_consultas(codigo: str, device_id: str = "", db: Session = Depends(get_db)):
     return sil.mis_consultas(db, codigo, device_id)
+
+
+@router.get("/silabo/{codigo}/perfil")
+def perfil(codigo: str, device_id: str = "", db: Session = Depends(get_db)):
+    return sil.perfil_estudiante(db, codigo, device_id)
+
+
+@router.post("/silabo/{codigo}/confianza")
+def confianza(codigo: str, payload: dict, db: Session = Depends(get_db)):
+    payload = payload or {}
+    return sil.set_confianza(db, payload.get("mensaje_id"), payload.get("device_id"), payload.get("confianza", ""))
+
+
+@router.post("/silabo/{codigo}/borrar-memoria")
+def borrar_memoria(codigo: str, payload: dict, db: Session = Depends(get_db)):
+    return sil.borrar_memoria(db, codigo, (payload or {}).get("device_id", ""))

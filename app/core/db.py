@@ -574,6 +574,7 @@ _COLUMNAS_ADITIVAS = {
         "motivo_escalamiento": "VARCHAR(255)",
         "tema": "VARCHAR(120)",
         "fuente": "VARCHAR(16)",
+        "confianza": "VARCHAR(8)",
     },
 }
 

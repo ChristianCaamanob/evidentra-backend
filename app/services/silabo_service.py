@@ -83,6 +83,83 @@ def bitacora_estado(db: Session, course_id) -> dict:
             "ultimas": [{"ts": (b.created_at.isoformat() if b.created_at else None), "evento": b.evento,
                          "meta": b.meta or {}, "seudonimo": (b.seudonimo or "")[:8],
                          "hash": (b.hash or "")[:12]} for b in ults]}
+
+
+# ── Perfil longitudinal (memoria pedagógica del estudiante): transparente y BORRABLE. Backbone del seguimiento.
+def _iso_semana(dt):
+    try:
+        return dt.strftime("%G-S%V")
+    except Exception:
+        return "?"
+def _resumen_pedagogico(temas, total, vacios_temas, baja_conf) -> str:
+    if not total:
+        return ("Aún no tenemos historial juntos. Pregúntame lo que quieras y voy recordando en qué te "
+                "puedo ayudar mejor. Todo esto lo puedes revisar y borrar cuando quieras.")
+    top = [t["tema"] for t in temas[:2] if t["tema"] != "Sin clasificar"]
+    parts = ["Llevas " + str(total) + " consulta" + ("s" if total != 1 else "") +
+             (" — sobre todo de " + ", ".join(top) + "." if top else ".")]
+    if vacios_temas:
+        parts.append("Encontraste vacíos en " + ", ".join(vacios_temas[:2]) + ": ahí conviene reforzar.")
+    if baja_conf:
+        parts.append("Te sientes menos seguro en " + ", ".join(baja_conf[:2]) + ".")
+    return " ".join(parts)
+def perfil_estudiante(db: Session, codigo: str, device_id: str) -> dict:
+    a = agente_por_codigo(db, codigo)
+    if not device_id:
+        return {"nombre_curso": a.nombre_curso, "total": 0, "vacios": 0,
+                "resumen": _resumen_pedagogico([], 0, [], []), "temas": [], "por_semana": []}
+    msgs = (db.query(MensajeSilabo)
+            .filter(MensajeSilabo.agente_id == a.id, MensajeSilabo.device_id == str(device_id))
+            .order_by(MensajeSilabo.created_at.asc()).all())
+    acad = [m for m in msgs if (getattr(m, "tipo", None) or "") not in _TIPOS_NO_ACADEMICO]
+    temas = {}
+    for m in acad:
+        key = (getattr(m, "tema", None) or "").strip() or "Sin clasificar"
+        t = temas.get(key)
+        if not t:
+            t = temas[key] = {"tema": key, "total": 0, "vacios": 0, "confianza": None}
+        t["total"] += 1
+        if m.necesita_docente:
+            t["vacios"] += 1
+        if getattr(m, "confianza", None):
+            t["confianza"] = m.confianza          # última confianza declarada en ese tema
+    lista = sorted(temas.values(), key=lambda x: x["total"], reverse=True)
+    vacios_temas = [t["tema"] for t in lista if t["vacios"] > 0 and t["tema"] != "Sin clasificar"]
+    baja_conf = [t["tema"] for t in lista if t.get("confianza") == "baja" and t["tema"] != "Sin clasificar"]
+    sem = {}
+    for m in acad:
+        k = _iso_semana(m.created_at)
+        sem[k] = sem.get(k, 0) + 1
+    por_semana = [{"semana": k, "n": sem[k]} for k in sorted(sem.keys())][-8:]
+    total = len(acad)
+    return {"nombre_curso": a.nombre_curso, "total": total,
+            "vacios": sum(1 for m in acad if m.necesita_docente),
+            "resumen": _resumen_pedagogico(lista, total, vacios_temas, baja_conf),
+            "temas": lista[:12], "por_semana": por_semana,
+            "ultima": (acad[-1].created_at.isoformat() if acad else None)}
+def set_confianza(db: Session, mensaje_id, device_id, confianza) -> dict:
+    confianza = (confianza or "").strip().lower()
+    if confianza not in ("baja", "media", "alta"):
+        raise conflict("Confianza no válida.")
+    m = db.query(MensajeSilabo).filter(MensajeSilabo.id == _uuid(mensaje_id)).first()
+    if not m:
+        raise not_found("Consulta no encontrada.")
+    if device_id and m.device_id and str(m.device_id) != str(device_id):
+        raise conflict("Solo puedes marcar tu propia consulta.")
+    m.confianza = confianza
+    db.commit()
+    return {"ok": True, "confianza": confianza}
+def borrar_memoria(db: Session, codigo: str, device_id: str) -> dict:
+    """Derecho a borrar: elimina las consultas de ESE estudiante (su memoria). La BITÁCORA (auditoría,
+    seudonimizada y sin texto personal) se conserva por integridad — no expone al estudiante."""
+    a = agente_por_codigo(db, codigo)
+    if not device_id:
+        raise conflict("Falta identificar el dispositivo.")
+    n = (db.query(MensajeSilabo)
+         .filter(MensajeSilabo.agente_id == a.id, MensajeSilabo.device_id == str(device_id))
+         .delete(synchronize_session=False))
+    db.commit()
+    return {"borradas": int(n or 0)}
 _ALFABETO = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _CATEGORIAS = ("fechas", "contenido", "evaluación", "logística", "otro")
 
