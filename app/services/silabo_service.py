@@ -494,6 +494,59 @@ def bandeja(db: Session, course_id, solo_pendientes: bool = False) -> dict:
             "derivadas": derivadas, "derivadas_conteo": der_conteo}
 
 
+# ── Mapa de confusión (trazabilidad): agrupa las consultas por TEMA, las jerarquiza por volumen y marca
+# las BRECHAS (donde Runi tuvo que derivar) para que el profesor oriente los repasos. Protocolo §8.1.
+_TIPOS_NO_ACADEMICO = ("personal_salud", "denuncia", "justificacion", "solicitud_humana")
+def mapa_confusion(db: Session, course_id) -> dict:
+    a = agente_de_curso(db, course_id)
+    if not a:
+        return {"agente": None, "temas": [], "resumen": {"total": 0}}
+    msgs = (db.query(MensajeSilabo).filter(MensajeSilabo.agente_id == a.id)
+            .order_by(MensajeSilabo.created_at.desc()).limit(1500).all())
+    acad = [m for m in msgs if (getattr(m, "tipo", None) or "") not in _TIPOS_NO_ACADEMICO]
+    temas = {}
+    for m in acad:
+        key = (getattr(m, "tema", None) or "").strip() or "Sin clasificar"
+        t = temas.get(key)
+        if not t:
+            t = temas[key] = {"tema": key, "total": 0, "pendientes": 0, "resueltos": 0, "derivados": 0,
+                              "urgencia_alta": 0, "por_fuente": {"corpus": 0, "general": 0, "ninguna": 0},
+                              "categorias": {}, "ejemplos": []}
+        t["total"] += 1
+        if m.necesita_docente:
+            t["derivados"] += 1
+        if m.estado == MSG_PENDIENTE:
+            t["pendientes"] += 1
+        if getattr(m, "respuesta_docente", None):
+            t["resueltos"] += 1
+        if (m.urgencia or "") == "alta":
+            t["urgencia_alta"] += 1
+        f = (getattr(m, "fuente", None) or "general")
+        if f in t["por_fuente"]:
+            t["por_fuente"][f] += 1
+        cat = m.categoria or "otro"
+        t["categorias"][cat] = t["categorias"].get(cat, 0) + 1
+        if len(t["ejemplos"]) < 3:
+            t["ejemplos"].append((m.pregunta or "")[:160])
+    lista = sorted(temas.values(), key=lambda x: (x["total"], x["derivados"]), reverse=True)
+    for t in lista:
+        t["tasa_derivacion"] = round(t["derivados"] / t["total"], 2) if t["total"] else 0.0
+        t["categoria"] = (max(t["categorias"], key=t["categorias"].get) if t["categorias"] else "otro")
+        del t["categorias"]
+    total = len(acad)
+    derivados = sum(1 for m in acad if m.necesita_docente)
+    fuente_tot = {"corpus": 0, "general": 0, "ninguna": 0}
+    for m in acad:
+        f = (getattr(m, "fuente", None) or "general")
+        if f in fuente_tot:
+            fuente_tot[f] += 1
+    resumen = {"total": total, "temas": len(lista), "derivados": derivados,
+               "resueltos_runi": total - derivados,
+               "tasa_resolucion": round((total - derivados) / total, 2) if total else 0.0,
+               "por_fuente": fuente_tot}
+    return {"agente": _agente_dict(a), "temas": lista, "resumen": resumen}
+
+
 def responder_docente(db: Session, mensaje_id, respuesta: str, quien: str = "docente") -> dict:
     m = db.query(MensajeSilabo).filter(MensajeSilabo.id == _uuid(mensaje_id)).first()
     if not m:
