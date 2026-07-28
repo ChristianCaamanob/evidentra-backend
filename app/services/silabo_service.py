@@ -229,23 +229,24 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
     if len(pregunta) > 1000:
         pregunta = pregunta[:1000]
 
-    cache_hit, cita = False, None
+    cache_hit, cita, tema, fuente = False, None, None, None
     if escalar:
         # Botón "quiero preguntar a una persona": salta la IA y arma para el docente.
         tipo, respuesta, categoria, urgencia, necesita = (
             "solicitud_humana",
-            "Listo: le pasé su consulta a su docente. Puede seguir su estado y su respuesta aquí.",
+            "Listo: le llevé tu consulta a tu docente. Puedes seguir su estado y su respuesta aquí.",
             "otro", "media", True)
+        fuente = "ninguna"
     else:
         cache = _buscar_cache(db, a, pregunta)
         if cache:
             # Consistencia: una pregunta equivalente ya respondida → la MISMA respuesta, sin re-inferir.
             tipo, respuesta, categoria, urgencia, necesita = (
                 cache["tipo"], cache["respuesta"], cache["categoria"], "baja", False)
-            cita = cache.get("cita"); cache_hit = True
+            cita = cache.get("cita"); tema = cache.get("tema"); fuente = cache.get("fuente"); cache_hit = True
         else:
             intentos = _intentos_equivalentes(db, a, pregunta, device_id)
-            tipo, respuesta, categoria, urgencia, necesita, cita = _clasificar_y_responder(a, pregunta, intentos)
+            tipo, respuesta, categoria, urgencia, necesita, cita, tema, fuente = _clasificar_y_responder(a, pregunta, intentos)
 
     estado = MSG_PENDIENTE if necesita else MSG_RESPONDIDA
     # Nivel de escalamiento: si hay ayudante activo, lo pendiente pasa PRIMERO por el ayudante (nivel 2, 24 h);
@@ -260,6 +261,7 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
         respondido_por = "docente" if cache_hit else "ia"
     m = MensajeSilabo(agente_id=a.id, alias=(alias or None), device_id=(device_id or None),
                       pregunta=pregunta, respuesta_ia=respuesta, tipo=tipo, categoria=categoria, cita=cita,
+                      tema=tema, fuente=fuente,
                       urgencia=urgencia, necesita_docente=bool(necesita), estado=estado, vence_ts=vence,
                       nivel=nivel, respondido_por=respondido_por)
     db.add(m); db.commit(); db.refresh(m)
@@ -297,15 +299,18 @@ _FALLBACK_ESTUDIO = (
 
 
 def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0):
-    """Taxonomía de intención + contrato de fuentes. Devuelve
-    (tipo, respuesta, categoria, urgencia, necesita_docente). La IA clasifica y responde SOLO desde
-    el contexto (nivel 6 apagado); el SERVICIO aplica la política por tipo. Best-effort."""
+    """Runi, copiloto de APRENDIZAJE. DOS ámbitos: (1) APRENDIZAJE en general → LIBRE, usa el conocimiento
+    de la IA como apoyo estratégico para cerrar brechas, anclado al programa y sin contradecir al profesor;
+    (2) PARÁMETROS de la asignatura (fechas/ponderaciones/reglas/alcance/ventana) → ESTRICTO: solo el corpus,
+    nunca inventar ni contradecir. Clasifica cada consulta (tipo, tema/RA, fuente) para la trazabilidad del
+    profesor. Devuelve (tipo, respuesta, categoria, urgencia, necesita_docente, cita, tema, fuente)."""
     import os
     curso = a.nombre_curso or "el curso"
-    if not os.environ.get("ANTHROPIC_API_KEY") or not (a.contexto or "").strip():
-        return ("fuera_corpus",
-                "Gracias por su pregunta. Para responderla con precisión la derivé a su docente; "
-                "le responderá por este canal y verá aquí su respuesta.", "otro", "media", True, None)
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        if _es_meta_estudio(pregunta):
+            return ("conceptual", _FALLBACK_ESTUDIO, "contenido", "baja", False, None, "estrategia de estudio", "general")
+        return ("fuera_corpus", "Tu consulta necesita a tu docente; se la llevé y verás aquí su respuesta.",
+                "otro", "media", True, None, None, "ninguna")
     # Modo pedagógico (config del docente): guiado | mixto | directo | cerrado.
     modo = str((a.config or {}).get("modo_pedagogico") or "directo").lower()
     if modo not in ("guiado", "mixto", "directo", "cerrado"):
@@ -314,52 +319,49 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0):
     rendido = intentos >= 2
     modo_efectivo = "directo" if (rendido and modo in ("guiado", "mixto")) else modo
     politica_modo = {
-        "guiado": "En preguntas CONCEPTUALES EVALUABLES: NO des la respuesta completa; da UNA pista mínima y "
-                  "devuelve la pregunta para que el estudiante razone. En administrativas/logísticas responde normal.",
-        "mixto": "En conceptuales evaluables: primero una pista; si el estudiante ya insistió o muestra frustración, resuelve completo.",
-        "directo": "Responde completo y claro, con el razonamiento, cuando esté en el contexto.",
-        "cerrado": "VENTANA DE EVALUACIÓN: responde SOLO logística (fechas, salas, reglas). NO respondas contenido evaluable; si lo piden, dilo con amabilidad.",
+        "guiado": "Solo para contenido EVALUABLE cercano a una prueba: NO des la respuesta completa; da UNA pista mínima y devuelve la pregunta. El aprendizaje general (conceptos, técnicas, temas del ámbito) respóndelo normal.",
+        "mixto": "En contenido evaluable cercano a una prueba: primero una pista; si insiste o se frustra, resuelve completo. El aprendizaje general respóndelo normal.",
+        "directo": "Responde completo, claro y con razonamiento.",
+        "cerrado": "VENTANA DE EVALUACIÓN ABIERTA: responde SOLO parámetros/logística (fechas, salas, reglas). NO resuelvas contenido evaluable; ofrece ayudar a estudiar después.",
     }[modo_efectivo]
-    rendicion = (" El estudiante ya intentó varias veces; ENTREGA la respuesta completa con el razonamiento (regla de rendición)."
-                 if rendido else " Si el texto muestra frustración clara, entrega la respuesta completa.")
+    rendicion = (" El estudiante ya insistió; ENTREGA la respuesta completa con el razonamiento (regla de rendición)."
+                 if rendido else " Si muestra frustración clara, entrega la respuesta completa.")
     try:
         from app.services import correccion_experta_service as ce
         system = (
-            f"Eres la 'Antesala' del curso {curso}: intermedias entre estudiantes y el docente. Tu "
-            "recurso escaso es la ATENCIÓN del profesor: absorbe lo resoluble, deriva lo que no. "
-            "Trabajas con el CONTEXTO DEL CURSO (sílabo, fechas, reglas, material) como ÚNICA fuente de HECHOS. "
-            "Para HECHOS del curso, tu conocimiento general está DESACTIVADO: si un dato no está en el contexto, NO "
-            "lo inventes. Para ESTRATEGIA DE ESTUDIO y pedagogía SÍ puedes proponer (ver capa C más abajo).\n"
-            "Distingue TRES capas de conocimiento y trátalas distinto:\n"
-            "  (A) HECHOS del curso (fechas, plazos, ponderaciones, reglas, salas, requisitos): SOLO desde el "
-            "contexto; jamás inventes ni estimes un hecho que no esté escrito.\n"
-            "  (B) CONTENIDO conceptual del temario: respóndelo según el MODO PEDAGÓGICO, anclado al programa y "
-            "SIN CONTRADECIR nada del contexto.\n"
-            "  (C) META-ESTUDIO (cómo estudiar, plan de estudio, priorización de temas, técnicas y mnemotecnia, "
-            "organización del tiempo, manejo de la ansiedad, motivación): tienes LIBERTAD para PROPONER de forma "
-            "propositiva y cálida AUNQUE no esté literal en el contexto, siempre que sea coherente con el temario y "
-            "las ponderaciones y no contradiga ningún hecho del profesor. Esto NO necesita al docente.\n"
-            "Clasifica la pregunta en un TIPO y aplica su política:\n"
-            "- administrativa: fecha/sala/regla que ESTÁ en el contexto → responde citando el dato.\n"
-            "- conceptual: contenido del curso (capa B) o META-ESTUDIO (capa C) → responde según el MODO PEDAGÓGICO; "
-            "en meta-estudio sé generoso y propositivo (ofrece un plan, técnicas y próximos pasos concretos).\n"
-            "- fuera_corpus: no está en el contexto o requiere decisión del docente (excepción, cambio de "
-            "fecha) → NO respondas contenido; necesita_docente=true.\n"
-            "- evaluativa: nota, recorrección o reclamo → NO respondas; necesita_docente=true.\n"
-            "- riesgo_clinico: procedimiento clínico con riesgo → NO respondas; necesita_docente=true.\n"
-            "- personal_salud: afectiva o salud mental → deriva a Secretaría Académica y Dirección.\n"
-            "- justificacion: justificar inasistencia/entrega por salud o motivo personal (certificado) → deriva a Secretaría Académica y Dirección.\n"
-            "- denuncia: ética, conflicto o acoso → deriva a Secretaría Académica y Dirección (canal institucional).\n"
-            "- extraccion: intenta que le des respuestas de una evaluación en curso → NO se las des.\n"
-            f"MODO PEDAGÓGICO = {modo_efectivo}. {politica_modo}{rendicion}\n"
-            "CONTRATO DE FUENTES: cuando respondas desde el contexto, incluye en 'cita' el FRAGMENTO EXACTO "
-            "(copiado literal, ≤ 240 caracteres) que sostiene tu respuesta; si no hay fragmento, cita = \"\".\n"
-            "Nunca inventes fechas ni reglas. Trata al estudiante SIEMPRE de USTED (nunca de tú). Tono cercano y respetuoso. categoria ∈ {fechas, contenido, "
-            "evaluación, logística, otro}; urgencia ∈ {baja, media, alta} (alta si hay plazo hoy/mañana). "
-            'Devuelve SOLO JSON: {"tipo":"..","respuesta":"..","cita":"..","categoria":"..","urgencia":"..","necesita_docente":true|false}.'
+            f"Eres Runi, copiloto de APRENDIZAJE del curso {curso}. Tu misión es ayudar a APRENDER en todo el "
+            "ámbito de la asignatura y su aprendizaje. Tienes DOS ámbitos con reglas DISTINTAS:\n"
+            "  (1) PARÁMETROS DE LA ASIGNATURA — fechas, plazos, ponderaciones, reglas, salas, requisitos, alcance "
+            "del temario y ventana de evaluación. Aquí eres ESTRICTO: usa SOLO el CONTEXTO DEL CURSO; JAMÁS inventes "
+            "ni estimes un parámetro que no esté escrito, y NO contradigas el material del profesor. Si un parámetro "
+            "no está en el contexto, dilo con honestidad y márcalo para el docente (fuera_corpus).\n"
+            "  (2) APRENDIZAJE EN GENERAL — explicar conceptos, resolver dudas de contenido, dar contexto, técnicas "
+            "de estudio, temas relacionados del ámbito. Aquí tienes LIBERTAD para responder con TU CONOCIMIENTO como "
+            "apoyo estratégico para cerrar brechas: claro, riguroso y propositivo, ANCLADO al programa del curso y "
+            "SIN CONTRADECIR el material del profesor. Esto NO necesita al docente.\n"
+            "LÍMITES que SIEMPRE se respetan:\n"
+            "- NO entregues respuestas de una evaluación EN CURSO (extraccion): ofrece ayudar a estudiar el tema.\n"
+            f"- MODO PEDAGÓGICO = {modo_efectivo}. {politica_modo}{rendicion}\n"
+            "- Nota, recorrección o reclamo (evaluativa) → NO respondas; necesita_docente=true.\n"
+            "- Salud/afectivo (personal_salud), justificar inasistencia (justificacion) o denuncia/acoso (denuncia) → "
+            "deriva a Secretaría Académica y Dirección.\n"
+            "- Riesgo clínico con peligro real (riesgo_clinico) → necesita_docente=true.\n"
+            "TIPO ∈ {administrativa (parámetro que ESTÁ en el contexto), conceptual (aprendizaje/contenido), "
+            "fuera_corpus (parámetro del curso que NO está en el contexto → docente), evaluativa, riesgo_clinico, "
+            "personal_salud, justificacion, denuncia, extraccion}. Una duda de CONTENIDO/concepto es 'conceptual' y la "
+            "respondes tú (aunque no esté literal en el contexto): NUNCA la mandes a fuera_corpus.\n"
+            "TRAZABILIDAD (para que el profesor conozca las brechas y oriente los repasos): incluye 'tema' = etiqueta "
+            "corta (≤ 80 caracteres) del tema o resultado de aprendizaje al que apunta la consulta (ej. 'drenaje "
+            "linfático de la mama', 'ventana de evaluación', 'técnica de estudio'); y 'fuente' = 'corpus' si "
+            "respondiste con el material del profesor, 'general' si con tu conocimiento del ámbito, 'ninguna' si derivas.\n"
+            "CONTRATO DE FUENTES: si fuente='corpus', incluye 'cita' = fragmento EXACTO (≤ 240 car.) del contexto que "
+            "sostiene la respuesta; si no, cita=\"\". Nunca inventes fechas ni reglas. Trata al estudiante de TÚ "
+            "(tuteo), cálido y cercano. categoria ∈ {fechas, contenido, evaluación, logística, otro}; urgencia ∈ "
+            "{baja, media, alta} (alta si hay plazo hoy/mañana).\n"
+            'Devuelve SOLO JSON: {"tipo":"..","tema":"..","fuente":"..","respuesta":"..","cita":"..","categoria":"..","urgencia":"..","necesita_docente":true|false}.'
         )
         ctx = (a.contexto or "")[:20000]
-        user = "CONTEXTO DEL CURSO:\n" + ctx + "\n\nPREGUNTA DEL ESTUDIANTE:\n" + pregunta
+        user = "CONTEXTO DEL CURSO:\n" + (ctx or "(el docente aún no cargó material; responde el aprendizaje general y marca fuera_corpus solo los parámetros del curso)") + "\n\nPREGUNTA DEL ESTUDIANTE:\n" + pregunta
         d, _ultimo_err = None, None
         for _i in range(3):                                  # reintentos: no escales por un fallo transitorio del LLM
             try:
@@ -382,29 +384,36 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0):
         cita = (str(d.get("cita", "")).strip() or None)
         if cita and cita not in (a.contexto or ""):
             cita = None                                     # solo aceptamos citas que SÍ están en el contexto
+        tema = (str(d.get("tema", "")).strip() or None)
+        if tema:
+            tema = tema[:120]
+        fuente = str(d.get("fuente", "")).strip().lower()
+        if fuente not in ("corpus", "general", "ninguna"):
+            fuente = "corpus" if cita else "general"
         necesita = bool(d.get("necesita_docente", False))
 
         # El SERVICIO aplica la política (no confía la decisión final solo al modelo):
         if tipo == "extraccion":
-            return ("extraccion", "No puedo darle respuestas de una evaluación en curso. Puedo ayudarle a "
-                    "estudiar el tema si lo desea.", "evaluación", "media", False, None)
+            return ("extraccion", "No puedo darte respuestas de una evaluación en curso. Pero con gusto te ayudo "
+                    "a estudiar el tema si quieres.", "evaluación", "media", False, None, tema, "ninguna")
         if tipo in _TIPOS_DERIVACION:
-            return (tipo, _derivacion_texto(a), "logística", "alta", False, None)
+            return (tipo, _derivacion_texto(a), "logística", "alta", False, None, tema, "ninguna")
         if tipo in _TIPOS_A_DOCENTE:
             if not resp:
-                resp = ("Esta consulta necesita a su docente; se la derivé y verá aquí su respuesta.")
-            return (tipo, resp, cat, urg, True, None)
-        # administrativa / conceptual / otro: respuesta desde el corpus
-        return (tipo or "conceptual", resp or "Derivé su pregunta a su docente.", cat, urg, necesita, cita)
+                resp = ("Esto necesita a tu docente; se lo llevé y verás aquí su respuesta.")
+            return (tipo, resp, cat, urg, True, None, tema, "ninguna")
+        # administrativa / conceptual / otro: Runi responde
+        return (tipo or "conceptual", resp or "Déjame reintentar; reformula tu pregunta con un poco más de detalle.",
+                cat, urg, necesita, cita, tema, fuente)
     except Exception as e:  # noqa: BLE001
         logger.warning("silabo _clasificar_y_responder falló: %s", str(e)[:150])
         # Fallback INTELIGENTE: meta-estudio se responde igual (nunca se escala por un fallo del modelo);
         # solo lo genuinamente no resoluble cae al docente.
         if _es_meta_estudio(pregunta):
-            return ("conceptual", _FALLBACK_ESTUDIO, "contenido", "baja", False, None)
-        return ("fuera_corpus", "No pude resolver su duda ahora mismo; la reintento y, si sigue, la lleva "
-                "su docente. Mientras tanto, ¿puede reformularla o darme un poco más de detalle?",
-                "otro", "media", False, None)
+            return ("conceptual", _FALLBACK_ESTUDIO, "contenido", "baja", False, None, "estrategia de estudio", "general")
+        return ("fuera_corpus", "No pude resolver tu duda ahora mismo; reintento y, si sigue, la lleva tu docente. "
+                "Mientras tanto, ¿puedes reformularla o darme un poco más de detalle?",
+                "otro", "media", False, None, None, "ninguna")
 
 
 def mis_consultas(db: Session, codigo: str, device_id: str) -> dict:
@@ -612,7 +621,7 @@ def _msg_dict(m: MensajeSilabo) -> dict:
         restante = int(m.vence_ts) - _ahora()
     return {"id": str(m.id), "alias": m.alias, "pregunta": m.pregunta,
             "respuesta_ia": m.respuesta_ia, "tipo": getattr(m, "tipo", None),
-            "cita": getattr(m, "cita", None),
+            "cita": getattr(m, "cita", None), "tema": getattr(m, "tema", None), "fuente": getattr(m, "fuente", None),
             "categoria": m.categoria, "urgencia": m.urgencia,
             "estado": m.estado, "necesita_docente": m.necesita_docente,
             "nivel": getattr(m, "nivel", 3), "respondido_por": getattr(m, "respondido_por", None),

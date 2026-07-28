@@ -48,6 +48,9 @@ class MensajeSilabo(UUIDMixin, TimestampMixin, Base):
     respuesta_ia: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Contrato de fuentes: fragmento EXACTO del contexto que sostiene la respuesta (o None).
     cita: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Trazabilidad del profesor: tema/RA al que apunta la consulta + fuente de la respuesta.
+    tema: Mapped[str | None] = mapped_column(String(120), nullable=True)     # p.ej. "drenaje linfático de la mama"
+    fuente: Mapped[str | None] = mapped_column(String(16), nullable=True)    # corpus | general | ninguna
     # Taxonomía de intención (la política/destino se deriva del tipo): administrativa / conceptual /
     # fuera_corpus / evaluativa / riesgo_clinico / personal_salud / extraccion / otro.
     tipo: Mapped[str | None] = mapped_column(String(40), nullable=True)

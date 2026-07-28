@@ -572,6 +572,8 @@ _COLUMNAS_ADITIVAS = {
         "nivel": "INTEGER NOT NULL DEFAULT 3",
         "respondido_por": "VARCHAR(16)",
         "motivo_escalamiento": "VARCHAR(255)",
+        "tema": "VARCHAR(120)",
+        "fuente": "VARCHAR(16)",
     },
 }
 
