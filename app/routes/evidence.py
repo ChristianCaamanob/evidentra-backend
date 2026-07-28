@@ -1,31 +1,48 @@
-"""Evalys Evidence Core — expedientes científicos versionados (solo lectura pública).
+"""Evalys Evidence Core — expedientes científicos versionados.
 
-Son METADATOS DE PRODUCTO (constructo, procedimiento, evidencia con DOI/riesgo de sesgo, normas,
-limitaciones, versión, responsable) — no contienen datos personales. Por eso son de lectura pública:
-el distintivo "Respaldado por Evalys Evidence" debe poder mostrarse tanto al docente como al estudiante.
+Lectura pública (metadatos de producto, sin datos personales): el distintivo "Respaldado por Evalys
+Evidence" se muestra a docentes y estudiantes. Edición reservada al "responsable de aprobación"
+(rol director/creador): las ediciones se guardan en BD y se fusionan sobre el catálogo base del código.
 
-  GET /evidence/expedientes            -> índice (resumen de cada expediente)
-  GET /evidence/expedientes/{clave}    -> expediente completo (acepta alias, p. ej. 'omega' → fiabilidad)
+  GET  /evidence/expedientes            -> índice (base + ediciones de BD)
+  GET  /evidence/expedientes/{clave}    -> expediente completo (acepta alias, p. ej. 'omega')
+  PUT  /evidence/expedientes/{clave}    -> guarda una edición (req director) · versiona y firma
+  GET  /evidence/etica/escala           -> escala de consecuencias 0–5 (transparencia)
 """
-from fastapi import APIRouter
+import datetime
 
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from app.api.deps import get_db, requiere_rol
 from app.core.errors import not_found
+from app.models.teacher import Teacher, ROL_DIRECTOR
 from app.services import evidence_core_service as ec
 
 router = APIRouter(prefix="/evidence", tags=["evidence"])
 
+# "Responsable de aprobación": dirección académica (el creador siempre pasa).
+req_responsable = requiere_rol(ROL_DIRECTOR)
+
 
 @router.get("/expedientes")
-def expedientes():
-    return {"expedientes": ec.listar()}
+def expedientes(db: Session = Depends(get_db)):
+    return {"expedientes": ec.listar(db)}
 
 
 @router.get("/expedientes/{clave}")
-def expediente(clave: str):
-    e = ec.obtener(clave)
+def expediente(clave: str, db: Session = Depends(get_db)):
+    e = ec.obtener(clave, db)
     if not e:
         raise not_found("Expediente científico no encontrado.")
     return e
+
+
+@router.put("/expedientes/{clave}")
+def guardar_expediente(clave: str, payload: dict, db: Session = Depends(get_db),
+                       usuario: Teacher = Depends(req_responsable)):
+    fecha = datetime.date.today().isoformat()
+    return ec.guardar(db, clave, payload or {}, getattr(usuario, "email", None), fecha=fecha)
 
 
 @router.get("/etica/escala")

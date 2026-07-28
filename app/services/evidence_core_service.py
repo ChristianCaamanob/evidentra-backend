@@ -16,6 +16,8 @@ Fase futura: superponer resultados de validación interna continua desde la base
 """
 from __future__ import annotations
 
+import re
+
 # Jerarquía de certeza espejo de la de Runi (silabo_service): un único lenguaje de certeza en todo Evalys.
 NIVELES_CERTEZA = ("solida", "moderada", "preliminar", "insuficiente")
 
@@ -263,17 +265,103 @@ def _clave(clave: str) -> str | None:
     return _ALIAS.get(c)
 
 
-def obtener(clave: str) -> dict | None:
-    """Devuelve el expediente completo (con su clave) o None si no existe."""
+# Campos que el "responsable de aprobación" puede editar desde la app (el resto es estructural).
+CAMPOS_EDITABLES = ("titulo", "modulo", "certeza_global", "constructo", "fundamento", "procedimiento",
+                    "evidencia", "normas", "limitaciones", "poblacion_validada", "validacion_interna",
+                    "responsable")
+
+
+def _overrides(db) -> dict:
+    """Carga las ediciones guardadas en BD, indexadas por clave (o {} si no hay BD/tabla)."""
+    if db is None:
+        return {}
+    try:
+        from app.models.evidence import EvidenceExpediente
+        return {r.clave: r for r in db.query(EvidenceExpediente).all()}
+    except Exception:
+        return {}
+
+
+def _merge(clave: str, base: dict | None, row) -> dict:
+    """Fusiona el expediente base (código) con el override (BD manda)."""
+    d = dict(base or {})
+    if row is not None:
+        for k, v in (row.data or {}).items():
+            d[k] = v
+        if row.version:
+            d["version"] = row.version
+        if row.responsable:
+            d["responsable"] = row.responsable
+        d["_editado"] = True
+        d["_actualizado_por"] = row.actualizado_por
+        d["_actualizado"] = row.updated_at.isoformat() if getattr(row, "updated_at", None) else None
+    return {"clave": clave, **d}
+
+
+def obtener(clave: str, db=None) -> dict | None:
+    """Devuelve el expediente completo (base + override de BD), o None si no existe."""
     c = _clave(clave)
+    ov = _overrides(db)
     if not c:
-        return None
-    return {"clave": c, **_EXPEDIENTES[c]}
+        c = (clave or "").strip().lower()
+        if c not in ov:                                   # ni en código ni en BD
+            return None
+    return _merge(c, _EXPEDIENTES.get(c), ov.get(c))
 
 
-def listar() -> list[dict]:
-    """Resumen de todos los expedientes (para el índice del distintivo)."""
-    return [{"clave": k, "titulo": v["titulo"], "modulo": v["modulo"],
-             "certeza_global": v["certeza_global"], "n_estudios": len(v["evidencia"]),
-             "normas": v["normas"], "version": v["version"], "fecha": v["fecha"]}
-            for k, v in _EXPEDIENTES.items()]
+def listar(db=None) -> list[dict]:
+    """Resumen de todos los expedientes (código + los custom que existan solo en BD)."""
+    ov = _overrides(db)
+    claves = list(_EXPEDIENTES.keys()) + [k for k in ov if k not in _EXPEDIENTES]
+    out = []
+    for k in claves:
+        v = _merge(k, _EXPEDIENTES.get(k), ov.get(k))
+        out.append({"clave": k, "titulo": v.get("titulo"), "modulo": v.get("modulo"),
+                    "certeza_global": v.get("certeza_global"), "n_estudios": len(v.get("evidencia") or []),
+                    "normas": v.get("normas") or [], "version": v.get("version"), "fecha": v.get("fecha"),
+                    "editado": bool(v.get("_editado"))})
+    return out
+
+
+def _bump(v: str) -> str:
+    """Incrementa el último segmento numérico de una versión semántica (1.0.0 → 1.0.1)."""
+    parts = str(v or "1.0.0").split(".")
+    for i in range(len(parts) - 1, -1, -1):
+        if parts[i].isdigit():
+            parts[i] = str(int(parts[i]) + 1)
+            return ".".join(parts)
+    return (v or "1.0.0") + ".1"
+
+
+def guardar(db, clave: str, data: dict, editor_email: str | None,
+            fecha: str | None = None) -> dict:
+    """Upsert del override de un expediente por el responsable de aprobación. Filtra a los campos
+    editables, versiona (bump automático si no se especifica) y registra quién lo editó. Devuelve el
+    expediente fusionado. `fecha` (ISO) se pasa desde la ruta (los scripts no acceden a la hora)."""
+    from app.core.errors import not_found, conflict
+    from app.models.evidence import EvidenceExpediente
+
+    c = _clave(clave) or (clave or "").strip().lower()
+    if not c or not re.match(r"^[a-z0-9_]{3,64}$", c):
+        raise conflict("Clave de expediente no válida.")
+    if c not in _EXPEDIENTES and not (data or {}).get("titulo"):
+        raise not_found("Expediente no encontrado (para crear uno nuevo indica al menos 'titulo').")
+    data = {k: v for k, v in (data or {}).items() if k in CAMPOS_EDITABLES}
+
+    row = db.query(EvidenceExpediente).filter(EvidenceExpediente.clave == c).first()
+    base_ver = (row.version if row else None) or _EXPEDIENTES.get(c, {}).get("version") or "1.0.0"
+    nueva_ver = str(data.pop("version", None) or _bump(base_ver))
+    if row:
+        merged = dict(row.data or {}); merged.update(data)   # ediciones parciales se acumulan
+        row.data = merged
+        row.version = nueva_ver
+        row.responsable = data.get("responsable") or row.responsable
+        row.actualizado_por = editor_email
+    else:
+        row = EvidenceExpediente(clave=c, data=data, version=nueva_ver,
+                                 responsable=data.get("responsable"), actualizado_por=editor_email)
+        db.add(row)
+    if fecha:
+        row.data = {**(row.data or {}), "fecha": fecha}      # fecha de la última aprobación
+    db.commit(); db.refresh(row)
+    return _merge(c, _EXPEDIENTES.get(c), row)
