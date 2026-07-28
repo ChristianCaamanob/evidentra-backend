@@ -395,6 +395,28 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
             tipo, respuesta, categoria, urgencia, necesita, cita, tema, fuente, evidencia = \
                 _clasificar_y_responder(a, pregunta, intentos)
 
+    # ── Motor de ética: consecuencia 0–5 + Puerta 3 (verificación de SALIDA sobre la respuesta ya generada).
+    from app.services import etica_service as etica
+    _certeza = (evidencia or {}).get("certeza")
+    if cache_hit or escalar:
+        _p3 = {"veredicto": "ok"}                       # respuesta del docente / confirmación → de confianza
+    else:
+        _p3 = etica.puerta3_verificar(respuesta, a.contexto or "", tipo, cita, fuente, _certeza, necesita)
+        if _p3["veredicto"] == "detenido":
+            # PARADA SEGURA: la salida pudo fabricar un dato del curso. No se entrega; la confirma el docente.
+            necesita = True
+            respuesta = ("Prefiero no arriesgarme con este dato sin confirmarlo: se lo llevé a tu docente y "
+                         "verás aquí su respuesta.")
+            fuente = "ninguna"; cita = None
+            evidencia = _evidencia(decision="Verificación de salida (Puerta 3): el dato no estaba respaldado "
+                                            "por el material; lo confirma tu docente.",
+                                   necesita=True, fuente="ninguna", motivo="Puerta 3 detuvo la entrega")
+            _certeza = evidencia.get("certeza")
+    _consec = etica.clasificar_consecuencia(tipo, fuente, necesita, _certeza)
+    if evidencia is not None:
+        evidencia["consecuencia"] = etica.consecuencia_dict(_consec)
+        evidencia["puerta3"] = _p3["veredicto"]
+
     estado = MSG_PENDIENTE if necesita else MSG_RESPONDIDA
     # Nivel de escalamiento: si hay ayudante activo, lo pendiente pasa PRIMERO por el ayudante (nivel 2, 24 h);
     # si no, va directo al profesor (nivel 3, 48 h). Lo ya respondido no escala.
@@ -414,11 +436,12 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
     db.add(m)
     # Regla dura "sin bitácora no hay respuesta": la entrada de auditoría se confirma en la MISMA transacción
     # que el mensaje. Si no se puede escribir, el commit falla y el estudiante NO recibe respuesta (parada segura).
-    bitacora_append(db, a.id, device_id,
-                    ("derivacion" if necesita else "consulta"),
+    _evento = "parada" if _p3.get("veredicto") == "detenido" else ("derivacion" if necesita else "consulta")
+    bitacora_append(db, a.id, device_id, _evento,
                     {"tipo": tipo, "tema": tema, "fuente": fuente, "categoria": categoria,
                      "decision": ("derivado" if necesita else "respondido"), "nivel": nivel,
-                     "certeza": (evidencia or {}).get("certeza"), "cache": bool(cache_hit)},
+                     "certeza": (evidencia or {}).get("certeza"), "consecuencia": _consec,
+                     "puerta3": _p3.get("veredicto"), "cache": bool(cache_hit)},
                     contenido=((pregunta or "") + "\n" + (respuesta or "")))
     db.commit(); db.refresh(m)
     return {"respuesta": respuesta, "necesita_docente": bool(necesita), "tipo": tipo, "cache": cache_hit,

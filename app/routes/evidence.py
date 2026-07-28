@@ -26,3 +26,10 @@ def expediente(clave: str):
     if not e:
         raise not_found("Expediente científico no encontrado.")
     return e
+
+
+@router.get("/etica/escala")
+def escala_consecuencias():
+    """Escala de consecuencias 0–5 del motor de ética (transparencia; sin datos personales)."""
+    from app.services import etica_service as etica
+    return {"escala": etica.ESCALA_CONSECUENCIAS}
