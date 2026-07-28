@@ -1,0 +1,194 @@
+# =====================================================================
+# Runi · reglas éticas ejecutables
+# Este archivo se versiona. Cada cambio queda fechado y firmado, porque
+# el comité puede pedir qué reglas estaban vigentes en una fecha dada.
+# =====================================================================
+meta:
+  version: "1.0.0"
+  vigente_desde: "2026-08-01"
+  aprobado_por: "[Comité / Dirección de Carrera]"
+  responsable: "[Investigador o coordinador responsable]"
+  nota: >
+    Las reglas se ejecutan como código, no se entregan como instrucción al
+    modelo. Una instrucción se puede convencer; una regla ejecutada, no.
+
+# ---------------------------------------------------------------------
+# NIVELES DE CONSECUENCIA
+# ---------------------------------------------------------------------
+niveles:
+  0_parada_segura:
+    descripcion: "Falla del propio motor de ética, del corpus o de la bitácora"
+    accion: no_responder_y_escalar
+    mensaje: >
+      No puedo responder en este momento. Le estoy avisando al profesor.
+  1_aviso:
+    descripcion: "Primera solicitud fuera de norma"
+    accion: explicar_limite_y_ofrecer_alternativa
+    registro: agregado_sin_nombre
+  2_degradacion:
+    descripcion: "Insistencia dentro de la misma sesión"
+    accion: modo_restringido_solo_logistica
+    duracion: sesion
+  3_cierre_sesion:
+    descripcion: "Agresión, acoso o tercer intento de extracción"
+    accion: cerrar_con_explicacion_y_ruta_humana
+    registro: patron_agregado
+  4_bloqueo_temporal:
+    descripcion: "Reincidencia en sesiones distintas"
+    accion: bloquear
+    duracion_horas: 24
+    aviso_docente: agregado_sin_nombre
+  5_escalamiento_inmediato:
+    descripcion: "Riesgo personal, riesgo a terceros o denuncia"
+    accion: salir_del_flujo_automatico
+    plazo_respuesta_humana_horas: 48
+    fuera_de_turno: true
+
+# ---------------------------------------------------------------------
+# PUERTA 1 · INTENCIÓN (antes de recuperar nada del corpus)
+# ---------------------------------------------------------------------
+puerta_entrada:
+  - id: extraccion_evaluacion
+    descripcion: "Intenta obtener respuestas de una evaluación vigente"
+    señales: [ventana_evaluacion_activa, referencia_a_item, solicitud_de_alternativa_correcta]
+    primera_vez: 1_aviso
+    reincidencia_sesion: 2_degradacion
+    tercera: 3_cierre_sesion
+    registro: patron_agregado_del_curso
+    nunca: [responder, confirmar_parcialmente, dar_pista]
+
+  - id: agresion
+    descripcion: "Insulto, hostigamiento o lenguaje de odio hacia cualquier persona"
+    accion: 3_cierre_sesion
+    mensaje: >
+      Hasta aquí llego. Si algo te molestó del curso, hay vías para plantearlo
+      y te las dejo abajo.
+
+  - id: suplantacion
+    descripcion: "Pide que Runi hable como el profesor o emita decisiones docentes"
+    accion: 1_aviso
+    mensaje: >
+      Yo no soy el profesor y no puedo decidir por él. Esto se lo llevo.
+    escala: true
+
+  - id: inyeccion_instrucciones
+    descripcion: "Intenta alterar las reglas del sistema desde el mensaje"
+    accion: 1_aviso
+    registro: patron_agregado
+    nunca: [revelar_configuracion, revelar_corpus_completo, cambiar_modo]
+
+  - id: dato_personal_sensible
+    descripcion: "El estudiante escribe salud, orientación, situación familiar u otros"
+    accion: no_almacenar_literal
+    tratamiento: depurar_entidades_antes_de_registrar
+    respuesta: continuar_sin_referirse_al_dato
+
+  - id: consulta_clinica_personal
+    descripcion: "Pide orientación sobre su propia salud o la de un tercero"
+    accion: 1_aviso
+    mensaje: >
+      No puedo orientarte sobre tu salud. Para eso están salud estudiantil y
+      tu médico. Sobre la anatomía del tema, eso sí lo puedo ver contigo.
+
+  - id: riesgo_personal
+    descripcion: "Señales de daño a sí mismo o a terceros"
+    accion: 5_escalamiento_inmediato
+    modalidad_forzada: texto
+    nunca: [generar_respuesta_con_modelo, pedir_detalles, acompañar_emocionalmente,
+            diagnosticar, minimizar]
+    siempre: [entregar_rutas_de_apoyo, avisar_a_persona_responsable]
+
+  - id: denuncia
+    descripcion: "Acoso, discriminación, maltrato o irregularidad"
+    accion: 5_escalamiento_inmediato
+    modalidad_forzada: texto
+    nunca: [pedir_detalles, pedir_nombres, opinar, investigar, prometer_resultado]
+    siempre:
+      - acoger_sin_indagar
+      - entregar_ruta_principal
+      - entregar_ruta_alternativa_que_no_pase_por_el_profesor
+      - informar_plazo_de_48_horas
+    ruta_alternativa_obligatoria: true   # si no está configurada, el módulo no abre
+
+# ---------------------------------------------------------------------
+# PUERTA 2 · FUENTE (antes de generar)
+# ---------------------------------------------------------------------
+puerta_fuente:
+  conocimiento_general_del_modelo: apagado
+  umbral_confianza_minimo: 0.72
+  bajo_umbral: escalar_como_vacio
+  jerarquia_autoridad:
+    1: programa_y_reglamento
+    2: anuncios_del_profesor
+    3: guias_y_material_de_clase
+    4: bibliografia_obligatoria
+    5: bibliografia_complementaria
+    6: conocimiento_general      # desactivado
+  reglas_disciplinares:
+    terminologia: "Terminología Anatómica"
+    epónimos: prohibidos
+    equivalencia_eponimo: aclarar_una_sola_vez
+    ilustraciones_generadas_por_ia: prohibidas
+  cita_obligatoria: true
+  mostrar_fragmento_exacto: true
+
+# ---------------------------------------------------------------------
+# PUERTA 3 · SALIDA (antes de entregar)
+# ---------------------------------------------------------------------
+puerta_salida:
+  verificar:
+    - afirmacion_disciplinar_sin_cita
+    - contradiccion_con_corpus
+    - dato_personal_en_la_respuesta
+    - imitacion_del_profesor
+    - promesa_de_nota_o_de_resultado
+    - exceso_del_modo_pedagogico_vigente
+  si_falla: regenerar_una_vez
+  si_falla_de_nuevo: escalar_como_vacio
+  frases_prohibidas:
+    - "Como modelo de lenguaje"
+    - "Lamento que te sientas así"
+    - "Excelente pregunta"
+
+# ---------------------------------------------------------------------
+# MODO PEDAGÓGICO (se abre al acercarse la evaluación, no se cierra)
+# ---------------------------------------------------------------------
+modo_pedagogico:
+  durante_la_unidad:      guiado     # pista mínima, devuelve la pregunta
+  ultimos_tres_dias:      mixto      # guía primero, resuelve si insiste
+  visperas_24h:           directo    # respuesta completa con razonamiento
+  ventana_evaluacion:     cerrado    # solo logística
+  regla_de_rendicion:
+    intentos_maximos: 2
+    tambien_si: frustracion_detectada
+    accion: entregar_respuesta_completa_con_razonamiento
+    registrar: true                  # muchas rendiciones = contenido mal enseñado
+
+# ---------------------------------------------------------------------
+# BITÁCORA
+# ---------------------------------------------------------------------
+bitacora:
+  obligatoria: true
+  si_no_puede_escribir: 0_parada_segura   # sin bitácora no hay respuesta
+  encadenada_por_hash: true
+  solo_insercion: true
+  depurar_entidades_personales: true
+  retencion:
+    conversacion_completa_dias: 30
+    conversacion_seudonimizada: fin_de_semestre
+    vacios_agregados: permanente
+    vinculacion_seudonimo_matricula: fin_de_semestre
+
+# ---------------------------------------------------------------------
+# LÍMITES ESTRUCTURALES · no negociables por configuración
+# ---------------------------------------------------------------------
+nunca:
+  - poner_o_discutir_notas
+  - resolver_reclamos_de_evaluacion
+  - diagnosticar_clinica_o_psicologicamente
+  - responder_sin_fuente_del_corpus
+  - hablar_como_el_profesor_sin_sello_visible
+  - ser_el_unico_canal_disponible
+  - usarse_para_sancionar_a_un_estudiante
+  - almacenar_datos_biometricos
+  - entregar_al_docente_conversaciones_no_escaladas

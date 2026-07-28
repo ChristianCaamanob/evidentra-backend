@@ -73,6 +73,11 @@ def mapa(course_id: UUID, db: Session = Depends(get_db)):
     return sil.mapa_confusion(db, course_id)
 
 
+@router.get("/courses/{course_id}/silabo/bitacora", dependencies=[Depends(req_profesor)])
+def bitacora(course_id: UUID, db: Session = Depends(get_db)):
+    return sil.bitacora_estado(db, course_id)
+
+
 @router.post("/silabo/mensaje/{mensaje_id}/responder", dependencies=[Depends(req_profesor)])
 def responder(mensaje_id: UUID, payload: dict, db: Session = Depends(get_db)):
     return sil.responder_docente(db, mensaje_id, (payload or {}).get("respuesta", ""), quien="docente")

@@ -66,3 +66,19 @@ class MensajeSilabo(UUIDMixin, TimestampMixin, Base):
     respuesta_docente: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     agente = relationship("SilaboAgente", back_populates="mensajes")
+
+
+class RuniBitacora(UUIDMixin, TimestampMixin, Base):
+    """Bitácora de auditoría ENCADENADA POR HASH (append-only, sin datos personales). Cada entrada lleva
+    el hash de la anterior: alterar/borrar el pasado rompe la cadena (a prueba de manipulación). Regla dura:
+    'sin bitácora no hay respuesta' (se escribe en la MISMA transacción que el mensaje). Protocolo §3.4."""
+    __tablename__ = "runi_bitacora"
+
+    agente_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("silabo_agentes.id"), index=True)
+    seudonimo: Mapped[str | None] = mapped_column(String(64), nullable=True)       # hash(device), no el nombre
+    evento: Mapped[str] = mapped_column(String(32), default="consulta")            # consulta|derivacion|consecuencia|parada
+    meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)                 # tema/tipo/fuente/decision/nivel (sin texto sensible)
+    contenido_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)  # sha256 del contenido (prueba, no el texto)
+    prev_hash: Mapped[str] = mapped_column(String(80), default="")
+    hash: Mapped[str] = mapped_column(String(64), default="", index=True)
+    reglas_version: Mapped[str | None] = mapped_column(String(16), nullable=True)  # qué reglas gobernaban

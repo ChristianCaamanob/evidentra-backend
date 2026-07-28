@@ -15,10 +15,74 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import not_found, conflict
 from app.models.silabo import (
-    SilaboAgente, MensajeSilabo, MSG_RESPONDIDA, MSG_PENDIENTE, MSG_RESUELTA,
+    SilaboAgente, MensajeSilabo, RuniBitacora, MSG_RESPONDIDA, MSG_PENDIENTE, MSG_RESUELTA,
 )
 
+import hashlib
+import os as _os
+
 logger = logging.getLogger("evalys")
+
+# ── Bitácora encadenada por hash (auditable, sin datos personales). Regla dura: sin bitácora no hay respuesta.
+_REGLAS_PATH = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "config", "runi-reglas-eticas.yaml")
+_REGLAS_VER_CACHE = None
+def reglas_version() -> str:
+    global _REGLAS_VER_CACHE
+    if _REGLAS_VER_CACHE is None:
+        try:
+            t = open(_REGLAS_PATH, encoding="utf-8").read()
+            m = re.search(r'version:\s*"?([\d.]+)', t)
+            _REGLAS_VER_CACHE = m.group(1) if m else "0"
+        except Exception:
+            _REGLAS_VER_CACHE = "0"
+    return _REGLAS_VER_CACHE
+def _seudonimo(device_id) -> str:
+    if not device_id:
+        return "anon"
+    return hashlib.sha256(("runi::" + str(device_id)).encode("utf-8")).hexdigest()[:32]
+def _sha(*parts) -> str:
+    h = hashlib.sha256()
+    for p in parts:
+        h.update((p or "").encode("utf-8"))
+    return h.hexdigest()
+def _ultimo_hash(db: Session, agente_id) -> str:
+    last = (db.query(RuniBitacora).filter(RuniBitacora.agente_id == agente_id)
+            .order_by(RuniBitacora.created_at.desc()).first())
+    return last.hash if (last and last.hash) else ("GENESIS::" + str(agente_id))
+def bitacora_append(db: Session, agente_id, device_id, evento: str, meta: dict, contenido: str = "") -> RuniBitacora:
+    """Agrega una entrada a la cadena (NO hace commit; se confirma junto al mensaje → sin bitácora no hay respuesta)."""
+    prev = _ultimo_hash(db, agente_id)
+    seud = _seudonimo(device_id)
+    ver = reglas_version()
+    ch = _sha(contenido)
+    canon = json.dumps({"e": evento, "m": meta or {}, "c": ch, "s": seud, "v": ver}, sort_keys=True, ensure_ascii=False)
+    b = RuniBitacora(agente_id=agente_id, seudonimo=seud, evento=evento, meta=(meta or {}),
+                     contenido_hash=ch, prev_hash=prev, hash=_sha(prev, canon), reglas_version=ver)
+    db.add(b)
+    return b
+def verificar_bitacora(db: Session, agente_id) -> dict:
+    """Recorre la cadena y confirma que nadie la alteró (cada hash = sha256(prev + entrada canónica))."""
+    entradas = (db.query(RuniBitacora).filter(RuniBitacora.agente_id == agente_id)
+                .order_by(RuniBitacora.created_at.asc()).all())
+    prev = "GENESIS::" + str(agente_id)
+    for i, b in enumerate(entradas):
+        canon = json.dumps({"e": b.evento, "m": b.meta or {}, "c": b.contenido_hash, "s": b.seudonimo,
+                            "v": b.reglas_version}, sort_keys=True, ensure_ascii=False)
+        if b.prev_hash != prev or b.hash != _sha(prev, canon):
+            return {"ok": False, "entradas": len(entradas), "rota_en": i + 1}
+        prev = b.hash
+    return {"ok": True, "entradas": len(entradas)}
+def bitacora_estado(db: Session, course_id) -> dict:
+    a = agente_de_curso(db, course_id)
+    if not a:
+        return {"agente": None, "verificacion": {"ok": True, "entradas": 0}, "reglas_version": reglas_version(), "ultimas": []}
+    ults = (db.query(RuniBitacora).filter(RuniBitacora.agente_id == a.id)
+            .order_by(RuniBitacora.created_at.desc()).limit(25).all())
+    return {"agente": _agente_dict(a), "verificacion": verificar_bitacora(db, a.id),
+            "reglas_version": reglas_version(),
+            "ultimas": [{"ts": (b.created_at.isoformat() if b.created_at else None), "evento": b.evento,
+                         "meta": b.meta or {}, "seudonimo": (b.seudonimo or "")[:8],
+                         "hash": (b.hash or "")[:12]} for b in ults]}
 _ALFABETO = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _CATEGORIAS = ("fechas", "contenido", "evaluación", "logística", "otro")
 
@@ -264,7 +328,16 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
                       tema=tema, fuente=fuente,
                       urgencia=urgencia, necesita_docente=bool(necesita), estado=estado, vence_ts=vence,
                       nivel=nivel, respondido_por=respondido_por)
-    db.add(m); db.commit(); db.refresh(m)
+    db.add(m)
+    # Regla dura "sin bitácora no hay respuesta": la entrada de auditoría se confirma en la MISMA transacción
+    # que el mensaje. Si no se puede escribir, el commit falla y el estudiante NO recibe respuesta (parada segura).
+    bitacora_append(db, a.id, device_id,
+                    ("derivacion" if necesita else "consulta"),
+                    {"tipo": tipo, "tema": tema, "fuente": fuente, "categoria": categoria,
+                     "decision": ("derivado" if necesita else "respondido"), "nivel": nivel,
+                     "cache": bool(cache_hit)},
+                    contenido=((pregunta or "") + "\n" + (respuesta or "")))
+    db.commit(); db.refresh(m)
     return {"respuesta": respuesta, "necesita_docente": bool(necesita), "tipo": tipo, "cache": cache_hit,
             "cita": cita, "categoria": categoria, "urgencia": urgencia, "mensaje_id": str(m.id), "vence_ts": vence}
 
