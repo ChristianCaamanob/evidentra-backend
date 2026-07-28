@@ -582,7 +582,7 @@ def mis_consultas(db: Session, codigo: str, device_id: str) -> dict:
             restante = max(0, int(m.vence_ts) - ahora)
         out.append({"id": str(m.id), "pregunta": m.pregunta, "respuesta_ia": m.respuesta_ia,
                     "respuesta_docente": m.respuesta_docente, "estado": m.estado, "tipo": m.tipo,
-                    "cita": getattr(m, "cita", None),
+                    "cita": getattr(m, "cita", None), "confianza": getattr(m, "confianza", None),
                     "respondido_por": getattr(m, "respondido_por", None),
                     "necesita_docente": m.necesita_docente, "segundos_restantes": restante,
                     "fecha": m.created_at.isoformat() if getattr(m, "created_at", None) else None})
