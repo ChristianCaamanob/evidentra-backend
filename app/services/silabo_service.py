@@ -360,7 +360,7 @@ def _buscar_cache(db: Session, a: SilaboAgente, pregunta: str):
 
 # ── pregunta del alumno (público) ────────────────────────────────────────────────────
 def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
-              device_id: str | None = None, escalar: bool = False) -> dict:
+              device_id: str | None = None, escalar: bool = False, material: str | None = None) -> dict:
     a = agente_por_codigo(db, codigo)
     if not a.activo:
         raise conflict("El agente del curso no está activo en este momento.")
@@ -369,6 +369,9 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
         raise conflict("Escriba su pregunta.")
     if len(pregunta) > 1000:
         pregunta = pregunta[:1000]
+    # Carga universal (Fase 1): el estudiante adjunta MATERIAL DE ESTUDIO (texto extraído en su dispositivo,
+    # no se almacena aquí). Runi conversa sobre él como apoyo de aprendizaje, sin tratarlo como parámetro del curso.
+    material = (material or "").strip()[:16000] or None
 
     cache_hit, cita, tema, fuente, evidencia = False, None, None, None, None
     if escalar:
@@ -381,7 +384,8 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
         evidencia = _evidencia(decision="Tu docente responde tu consulta por este canal.",
                                necesita=True, fuente="ninguna")
     else:
-        cache = _buscar_cache(db, a, pregunta)
+        # Con material adjunto NO se reutiliza caché (la respuesta depende de ESE material del estudiante).
+        cache = None if material else _buscar_cache(db, a, pregunta)
         if cache:
             # Consistencia: una pregunta equivalente ya respondida → la MISMA respuesta, sin re-inferir.
             tipo, respuesta, categoria, urgencia, necesita = (
@@ -393,7 +397,7 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
         else:
             intentos = _intentos_equivalentes(db, a, pregunta, device_id)
             tipo, respuesta, categoria, urgencia, necesita, cita, tema, fuente, evidencia = \
-                _clasificar_y_responder(a, pregunta, intentos)
+                _clasificar_y_responder(a, pregunta, intentos, material=material)
 
     # ── Motor de ética: consecuencia 0–5 + Puerta 3 (verificación de SALIDA sobre la respuesta ya generada).
     from app.services import etica_service as etica
@@ -540,7 +544,7 @@ def _evidencia(hecho="", inferencia="", recomendacion="", decision="", *,
     return ev
 
 
-def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0):
+def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, material: str | None = None):
     """Runi, copiloto de APRENDIZAJE. DOS ámbitos: (1) APRENDIZAJE en general → LIBRE, usa el conocimiento
     de la IA como apoyo estratégico para cerrar brechas, anclado al programa y sin contradecir al profesor;
     (2) PARÁMETROS de la asignatura (fechas/ponderaciones/reglas/alcance/ventana) → ESTRICTO: solo el corpus,
@@ -611,12 +615,20 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0):
             "Vacío si no aplica.\n"
             "  • certeza ∈ {solida, moderada, preliminar, insuficiente} — sé HONESTO: 'solida' solo si lo respalda el "
             "material del curso; tu conocimiento general del ámbito es 'moderada' o 'preliminar', nunca 'solida'.\n"
+            "MATERIAL DE ESTUDIO DEL ESTUDIANTE: si viene un bloque 'MATERIAL DE ESTUDIO ADJUNTO', úsalo como apoyo "
+            "para EXPLICAR, resumir o responder sobre su contenido (ámbito de aprendizaje); puedes citarlo o apoyarte "
+            "en él. NO lo trates como parámetros del curso (fechas/reglas/ponderaciones siguen SOLO del contexto del "
+            "profesor). Si te apoyas en el material del estudiante, fuente='general' (no es el corpus del profesor).\n"
             'Devuelve SOLO JSON: {"tipo":"..","tema":"..","fuente":"..","respuesta":"..","cita":"..","categoria":"..",'
             '"urgencia":"..","necesita_docente":true|false,"hecho":"..","inferencia":"..","recomendacion":"..",'
             '"decision_docente":"..","certeza":".."}.'
         )
         ctx = (a.contexto or "")[:20000]
-        user = "CONTEXTO DEL CURSO:\n" + (ctx or "(el docente aún no cargó material; responde el aprendizaje general y marca fuera_corpus solo los parámetros del curso)") + "\n\nPREGUNTA DEL ESTUDIANTE:\n" + pregunta
+        user = "CONTEXTO DEL CURSO:\n" + (ctx or "(el docente aún no cargó material; responde el aprendizaje general y marca fuera_corpus solo los parámetros del curso)")
+        if material:
+            user += ("\n\nMATERIAL DE ESTUDIO ADJUNTO POR EL ESTUDIANTE (apoyo para explicar/estudiar; NO son "
+                     "parámetros del curso):\n" + material)
+        user += "\n\nPREGUNTA DEL ESTUDIANTE:\n" + pregunta
         d, _ultimo_err = None, None
         for _i in range(3):                                  # reintentos: no escales por un fallo transitorio del LLM
             try:
