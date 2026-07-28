@@ -575,6 +575,7 @@ _COLUMNAS_ADITIVAS = {
         "tema": "VARCHAR(120)",
         "fuente": "VARCHAR(16)",
         "confianza": "VARCHAR(8)",
+        "evidencia": "JSON",
     },
 }
 

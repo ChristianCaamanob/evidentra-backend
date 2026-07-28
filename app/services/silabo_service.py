@@ -370,7 +370,7 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
     if len(pregunta) > 1000:
         pregunta = pregunta[:1000]
 
-    cache_hit, cita, tema, fuente = False, None, None, None
+    cache_hit, cita, tema, fuente, evidencia = False, None, None, None, None
     if escalar:
         # Botón "quiero preguntar a una persona": salta la IA y arma para el docente.
         tipo, respuesta, categoria, urgencia, necesita = (
@@ -378,6 +378,8 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
             "Listo: le llevé tu consulta a tu docente. Puedes seguir su estado y su respuesta aquí.",
             "otro", "media", True)
         fuente = "ninguna"
+        evidencia = _evidencia(decision="Tu docente responde tu consulta por este canal.",
+                               necesita=True, fuente="ninguna")
     else:
         cache = _buscar_cache(db, a, pregunta)
         if cache:
@@ -385,9 +387,13 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
             tipo, respuesta, categoria, urgencia, necesita = (
                 cache["tipo"], cache["respuesta"], cache["categoria"], "baja", False)
             cita = cache.get("cita"); tema = cache.get("tema"); fuente = cache.get("fuente"); cache_hit = True
+            # La respuesta CANÓNICA del docente es evidencia sólida (él la confirmó).
+            evidencia = _evidencia(decision="Esta respuesta la confirmó tu docente.",
+                                   fuente="corpus", cita=(cita or respuesta), certeza_sug="solida")
         else:
             intentos = _intentos_equivalentes(db, a, pregunta, device_id)
-            tipo, respuesta, categoria, urgencia, necesita, cita, tema, fuente = _clasificar_y_responder(a, pregunta, intentos)
+            tipo, respuesta, categoria, urgencia, necesita, cita, tema, fuente, evidencia = \
+                _clasificar_y_responder(a, pregunta, intentos)
 
     estado = MSG_PENDIENTE if necesita else MSG_RESPONDIDA
     # Nivel de escalamiento: si hay ayudante activo, lo pendiente pasa PRIMERO por el ayudante (nivel 2, 24 h);
@@ -402,7 +408,7 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
         respondido_por = "docente" if cache_hit else "ia"
     m = MensajeSilabo(agente_id=a.id, alias=(alias or None), device_id=(device_id or None),
                       pregunta=pregunta, respuesta_ia=respuesta, tipo=tipo, categoria=categoria, cita=cita,
-                      tema=tema, fuente=fuente,
+                      tema=tema, fuente=fuente, evidencia=evidencia,
                       urgencia=urgencia, necesita_docente=bool(necesita), estado=estado, vence_ts=vence,
                       nivel=nivel, respondido_por=respondido_por)
     db.add(m)
@@ -412,11 +418,12 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
                     ("derivacion" if necesita else "consulta"),
                     {"tipo": tipo, "tema": tema, "fuente": fuente, "categoria": categoria,
                      "decision": ("derivado" if necesita else "respondido"), "nivel": nivel,
-                     "cache": bool(cache_hit)},
+                     "certeza": (evidencia or {}).get("certeza"), "cache": bool(cache_hit)},
                     contenido=((pregunta or "") + "\n" + (respuesta or "")))
     db.commit(); db.refresh(m)
     return {"respuesta": respuesta, "necesita_docente": bool(necesita), "tipo": tipo, "cache": cache_hit,
-            "cita": cita, "categoria": categoria, "urgencia": urgencia, "mensaje_id": str(m.id), "vence_ts": vence}
+            "cita": cita, "categoria": categoria, "urgencia": urgencia, "mensaje_id": str(m.id), "vence_ts": vence,
+            "evidencia": evidencia}
 
 
 def _intentos_equivalentes(db: Session, a: SilaboAgente, pregunta: str, device_id: str | None) -> int:
@@ -448,19 +455,83 @@ _FALLBACK_ESTUDIO = (
 )
 
 
+# ── Evidence Core · separación de planos + jerarquía de certeza ───────────────────────
+# Regla legal+científica: NUNCA presentar como equivalentes un HECHO del curso, una INFERENCIA de
+# Runi, una RECOMENDACIÓN y una DECISIÓN docente. Cada salida las separa y declara su certeza.
+_ESCALA_CERTEZA = ("solida", "moderada", "preliminar", "insuficiente", "revision_docente")
+_CERTEZA_LABEL = {                       # etiqueta corta (badge para docente/estudiante)
+    "solida": "Respaldado por el material del curso",
+    "moderada": "Bien fundamentado",
+    "preliminar": "Orientación general",
+    "insuficiente": "Información insuficiente",
+    "revision_docente": "Lo confirma tu docente",
+}
+_CERTEZA_RUNI = {                        # cómo lo TRADUCE Runi al estudiante (cálido, honesto)
+    "solida": "Esto sale directo del material de tu curso.",
+    "moderada": "Es una explicación bien fundamentada del ámbito.",
+    "preliminar": "Es una orientación general; contrástala con tu material.",
+    "insuficiente": "Con lo que tengo ahora no me alcanza para asegurarlo.",
+    "revision_docente": "Esto lo decide y confirma tu docente.",
+}
+def _rank_certeza(c: str) -> int:
+    return _ESCALA_CERTEZA.index(c) if c in _ESCALA_CERTEZA else 2   # menor = más fuerte
+
+
+def _nivel_certeza(sugerido, fuente, cita, necesita) -> str:
+    """Pisos de HONESTIDAD (Runi nunca sobre-declara): si se deriva → revision_docente; el material
+    del curso puede ser 'solida'; el conocimiento propio de Runi NUNCA supera 'moderada' (no es
+    evidencia dura); sin respaldo → 'insuficiente'."""
+    if necesita:
+        return "revision_docente"
+    s = (sugerido or "").strip().lower()
+    s = s if s in _ESCALA_CERTEZA else None
+    if fuente == "corpus" and cita:
+        return s if s in ("solida", "moderada") else "moderada"
+    if fuente == "general":
+        base = s or "moderada"
+        return base if _rank_certeza(base) >= _rank_certeza("moderada") else "moderada"  # tope: moderada
+    return s or "insuficiente"
+
+
+def _sep_trunc(s, n: int = 240) -> str:
+    return str(s or "").strip()[:n]
+
+
+def _evidencia(hecho="", inferencia="", recomendacion="", decision="", *,
+               fuente=None, cita=None, necesita=False, certeza_sug=None, motivo=None) -> dict:
+    """Arma la ficha de evidencia separando los cuatro planos y fijando la certeza con los pisos.
+    HECHO solo si lo respalda el material del profesor (jamás se presenta una inferencia como hecho)."""
+    hecho = _sep_trunc(hecho)
+    if not (fuente == "corpus" and cita):
+        hecho = ""                       # sin respaldo textual del curso no hay 'hecho'
+    decision = _sep_trunc(decision)
+    if necesita and not decision:
+        decision = "Tu docente lo revisa y confirma; verás su respuesta por este canal."
+    certeza = _nivel_certeza(certeza_sug, fuente, cita, necesita)
+    ev = {"hecho": hecho, "inferencia": _sep_trunc(inferencia),
+          "recomendacion": _sep_trunc(recomendacion), "decision": decision,
+          "certeza": certeza, "certeza_label": _CERTEZA_LABEL[certeza],
+          "certeza_runi": _CERTEZA_RUNI[certeza]}
+    if motivo:
+        ev["certeza_motivo"] = _sep_trunc(motivo, 160)
+    return ev
+
+
 def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0):
     """Runi, copiloto de APRENDIZAJE. DOS ámbitos: (1) APRENDIZAJE en general → LIBRE, usa el conocimiento
     de la IA como apoyo estratégico para cerrar brechas, anclado al programa y sin contradecir al profesor;
     (2) PARÁMETROS de la asignatura (fechas/ponderaciones/reglas/alcance/ventana) → ESTRICTO: solo el corpus,
     nunca inventar ni contradecir. Clasifica cada consulta (tipo, tema/RA, fuente) para la trazabilidad del
-    profesor. Devuelve (tipo, respuesta, categoria, urgencia, necesita_docente, cita, tema, fuente)."""
+    profesor. Devuelve (tipo, respuesta, categoria, urgencia, necesita_docente, cita, tema, fuente, evidencia)."""
     import os
     curso = a.nombre_curso or "el curso"
     if not os.environ.get("ANTHROPIC_API_KEY"):
         if _es_meta_estudio(pregunta):
-            return ("conceptual", _FALLBACK_ESTUDIO, "contenido", "baja", False, None, "estrategia de estudio", "general")
+            return ("conceptual", _FALLBACK_ESTUDIO, "contenido", "baja", False, None, "estrategia de estudio", "general",
+                    _evidencia(recomendacion="Divide por unidades, prioriza por ponderación y repasa con autoevaluación.",
+                               fuente="general", certeza_sug="preliminar"))
         return ("fuera_corpus", "Tu consulta necesita a tu docente; se la llevé y verás aquí su respuesta.",
-                "otro", "media", True, None, None, "ninguna")
+                "otro", "media", True, None, None, "ninguna", _evidencia(necesita=True, fuente="ninguna"))
     # Modo pedagógico (config del docente): guiado | mixto | directo | cerrado.
     modo = str((a.config or {}).get("modo_pedagogico") or "directo").lower()
     if modo not in ("guiado", "mixto", "directo", "cerrado"):
@@ -508,7 +579,18 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0):
             "sostiene la respuesta; si no, cita=\"\". Nunca inventes fechas ni reglas. Trata al estudiante de TÚ "
             "(tuteo), cálido y cercano. categoria ∈ {fechas, contenido, evaluación, logística, otro}; urgencia ∈ "
             "{baja, media, alta} (alta si hay plazo hoy/mañana).\n"
-            'Devuelve SOLO JSON: {"tipo":"..","tema":"..","fuente":"..","respuesta":"..","cita":"..","categoria":"..","urgencia":"..","necesita_docente":true|false}.'
+            "SEPARACIÓN DE EVIDENCIA (obligatoria — NUNCA mezcles estos cuatro planos como si fueran lo mismo):\n"
+            "  • hecho = SOLO lo que está ESCRITO en el contexto del curso (un parámetro, una definición que cargó el "
+            "profesor). Si no hay respaldo textual del curso, deja hecho=\"\".\n"
+            "  • inferencia = tu explicación/razonamiento con tu conocimiento del ámbito (NO es un hecho del curso).\n"
+            "  • recomendacion = la acción o estrategia de estudio que sugieres (opcional; vacío si no aplica).\n"
+            "  • decision_docente = lo que SOLO decide el profesor (nota, excepción, un parámetro que no está escrito). "
+            "Vacío si no aplica.\n"
+            "  • certeza ∈ {solida, moderada, preliminar, insuficiente} — sé HONESTO: 'solida' solo si lo respalda el "
+            "material del curso; tu conocimiento general del ámbito es 'moderada' o 'preliminar', nunca 'solida'.\n"
+            'Devuelve SOLO JSON: {"tipo":"..","tema":"..","fuente":"..","respuesta":"..","cita":"..","categoria":"..",'
+            '"urgencia":"..","necesita_docente":true|false,"hecho":"..","inferencia":"..","recomendacion":"..",'
+            '"decision_docente":"..","certeza":".."}.'
         )
         ctx = (a.contexto or "")[:20000]
         user = "CONTEXTO DEL CURSO:\n" + (ctx or "(el docente aún no cargó material; responde el aprendizaje general y marca fuera_corpus solo los parámetros del curso)") + "\n\nPREGUNTA DEL ESTUDIANTE:\n" + pregunta
@@ -541,29 +623,47 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0):
         if fuente not in ("corpus", "general", "ninguna"):
             fuente = "corpus" if cita else "general"
         necesita = bool(d.get("necesita_docente", False))
+        # Separación de planos (Evidence Core) tal como la propuso el modelo (el servicio la sanea).
+        hecho = str(d.get("hecho", "")).strip()
+        inferencia = str(d.get("inferencia", "")).strip()
+        recomendacion = str(d.get("recomendacion", "")).strip()
+        decision = str(d.get("decision_docente", "")).strip()
+        certeza_sug = str(d.get("certeza", "")).strip().lower()
 
         # El SERVICIO aplica la política (no confía la decisión final solo al modelo):
         if tipo == "extraccion":
             return ("extraccion", "No puedo darte respuestas de una evaluación en curso. Pero con gusto te ayudo "
-                    "a estudiar el tema si quieres.", "evaluación", "media", False, None, tema, "ninguna")
+                    "a estudiar el tema si quieres.", "evaluación", "media", False, None, tema, "ninguna",
+                    _evidencia(recomendacion="Puedo ayudarte a estudiar el tema para que llegues preparado/a.",
+                               decision="Las respuestas de una evaluación en curso las libera tu docente.",
+                               fuente="ninguna", certeza_sug="revision_docente"))
         if tipo in _TIPOS_DERIVACION:
-            return (tipo, _derivacion_texto(a), "logística", "alta", False, None, tema, "ninguna")
+            return (tipo, _derivacion_texto(a), "logística", "alta", False, None, tema, "ninguna",
+                    _evidencia(decision="Salud, justificaciones y denuncias las atienden Secretaría Académica y Dirección.",
+                               fuente="ninguna", certeza_sug="revision_docente"))
         if tipo in _TIPOS_A_DOCENTE:
             if not resp:
                 resp = ("Esto necesita a tu docente; se lo llevé y verás aquí su respuesta.")
-            return (tipo, resp, cat, urg, True, None, tema, "ninguna")
+            return (tipo, resp, cat, urg, True, None, tema, "ninguna",
+                    _evidencia(inferencia=inferencia, necesita=True, fuente="ninguna"))
         # administrativa / conceptual / otro: Runi responde
+        ev = _evidencia(hecho, inferencia, recomendacion, decision,
+                        fuente=fuente, cita=cita, necesita=necesita, certeza_sug=certeza_sug)
         return (tipo or "conceptual", resp or "Déjame reintentar; reformula tu pregunta con un poco más de detalle.",
-                cat, urg, necesita, cita, tema, fuente)
+                cat, urg, necesita, cita, tema, fuente, ev)
     except Exception as e:  # noqa: BLE001
         logger.warning("silabo _clasificar_y_responder falló: %s", str(e)[:150])
         # Fallback INTELIGENTE: meta-estudio se responde igual (nunca se escala por un fallo del modelo);
         # solo lo genuinamente no resoluble cae al docente.
         if _es_meta_estudio(pregunta):
-            return ("conceptual", _FALLBACK_ESTUDIO, "contenido", "baja", False, None, "estrategia de estudio", "general")
+            return ("conceptual", _FALLBACK_ESTUDIO, "contenido", "baja", False, None, "estrategia de estudio", "general",
+                    _evidencia(recomendacion="Divide por unidades, prioriza por ponderación y repasa con autoevaluación.",
+                               fuente="general", certeza_sug="preliminar"))
         return ("fuera_corpus", "No pude resolver tu duda ahora mismo; reintento y, si sigue, la lleva tu docente. "
                 "Mientras tanto, ¿puedes reformularla o darme un poco más de detalle?",
-                "otro", "media", False, None, None, "ninguna")
+                "otro", "media", False, None, None, "ninguna",
+                _evidencia(decision="Si no logro resolverlo, lo revisa tu docente.", fuente="ninguna",
+                           certeza_sug="insuficiente"))
 
 
 def mis_consultas(db: Session, codigo: str, device_id: str) -> dict:
@@ -583,6 +683,7 @@ def mis_consultas(db: Session, codigo: str, device_id: str) -> dict:
         out.append({"id": str(m.id), "pregunta": m.pregunta, "respuesta_ia": m.respuesta_ia,
                     "respuesta_docente": m.respuesta_docente, "estado": m.estado, "tipo": m.tipo,
                     "cita": getattr(m, "cita", None), "confianza": getattr(m, "confianza", None),
+                    "evidencia": getattr(m, "evidencia", None),
                     "respondido_por": getattr(m, "respondido_por", None),
                     "necesita_docente": m.necesita_docente, "segundos_restantes": restante,
                     "fecha": m.created_at.isoformat() if getattr(m, "created_at", None) else None})
@@ -825,6 +926,7 @@ def _msg_dict(m: MensajeSilabo) -> dict:
     return {"id": str(m.id), "alias": m.alias, "pregunta": m.pregunta,
             "respuesta_ia": m.respuesta_ia, "tipo": getattr(m, "tipo", None),
             "cita": getattr(m, "cita", None), "tema": getattr(m, "tema", None), "fuente": getattr(m, "fuente", None),
+            "evidencia": getattr(m, "evidencia", None),
             "categoria": m.categoria, "urgencia": m.urgencia,
             "estado": m.estado, "necesita_docente": m.necesita_docente,
             "nivel": getattr(m, "nivel", 3), "respondido_por": getattr(m, "respondido_por", None),
