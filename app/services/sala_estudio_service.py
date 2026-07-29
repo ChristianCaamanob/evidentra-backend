@@ -6,6 +6,7 @@ evaluativa/derivación) NO se expone: Runi redirige al espacio personal. Sin cue
 """
 from __future__ import annotations
 
+import re
 import secrets
 import time
 
@@ -27,6 +28,14 @@ _TIPOS_RESERVADOS = ("personal_salud", "denuncia", "justificacion", "evaluativa"
 
 def _ahora() -> int:
     return int(time.time())
+
+
+def _es_expresion(texto: str) -> bool:
+    """True si el mensaje es un STICKER o solo emojis/símbolos (expresión entre compañeros, no una pregunta)."""
+    t = (texto or "").strip()
+    if t.startswith("[sticker:"):
+        return True
+    return not re.search(r"[0-9A-Za-zÁÉÍÓÚÑáéíóúñ]", t)   # sin letras ni dígitos → solo emojis/símbolos
 
 
 def _codigo(db: Session) -> str:
@@ -77,24 +86,25 @@ def postear(db: Session, codigo: str, alias: str | None, device_id: str | None, 
     db.flush()
 
     a = sil_agente(db, s)
-    # Runi responde SOLO lo académico; historial = las últimas vueltas de la sala (memoria conversacional grupal).
-    hist = _historial_sala(db, s)
-    try:
-        tipo, resp, _cat, _urg, necesita, _cita, tema, _fuente, _ev = sil._clasificar_y_responder(
-            a, texto, intentos=0, historial=hist)
-    except Exception:  # noqa: BLE001
-        tipo, resp, necesita, tema = "conceptual", None, False, None
-
-    reservado = (tipo in _TIPOS_RESERVADOS) or necesita
-    if reservado:
-        db.add(SalaMensaje(sala_id=s.id, rol="runi", tema=None,
-                           texto=("Eso mejor lo vemos en tu espacio personal conmigo 🦊 — ahí te ayudo bien y con "
-                                  "reserva. Aquí sigamos con lo que están estudiando en grupo.")))
-    else:
-        db.add(SalaMensaje(sala_id=s.id, rol="runi", tema=(tema or None),
-                           texto=(resp or "Cuéntame un poco más para ayudarte bien.")))
-        _premiar(s, device_id, alias, tema)                 # puntos con significado (aprendizaje real)
-    flag_modified(s, "participantes"); flag_modified(s, "meta")
+    # Runi NO responde a expresiones (emojis, stickers): son entre compañeros, no una pregunta.
+    if not _es_expresion(texto):
+        # Runi responde SOLO lo académico; historial = las últimas vueltas de la sala (memoria grupal).
+        hist = _historial_sala(db, s)
+        try:
+            tipo, resp, _cat, _urg, necesita, _cita, tema, _fuente, _ev = sil._clasificar_y_responder(
+                a, texto, intentos=0, historial=hist)
+        except Exception:  # noqa: BLE001
+            tipo, resp, necesita, tema = "conceptual", None, False, None
+        reservado = (tipo in _TIPOS_RESERVADOS) or necesita
+        if reservado:
+            db.add(SalaMensaje(sala_id=s.id, rol="runi", tema=None,
+                               texto=("Eso mejor lo vemos en tu espacio personal conmigo 🦊 — ahí te ayudo bien y "
+                                      "con reserva. Aquí sigamos con lo que están estudiando en grupo.")))
+        else:
+            db.add(SalaMensaje(sala_id=s.id, rol="runi", tema=(tema or None),
+                               texto=(resp or "Cuéntame un poco más para ayudarte bien.")))
+            _premiar(s, device_id, alias, tema)             # puntos con significado (aprendizaje real)
+        flag_modified(s, "participantes"); flag_modified(s, "meta")
     db.commit(); db.refresh(s)
     return _sala_dict(s, a, incluir_mensajes=True)
 
