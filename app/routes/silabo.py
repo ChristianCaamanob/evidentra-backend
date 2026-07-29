@@ -142,7 +142,7 @@ def preguntar(codigo: str, payload: dict, db: Session = Depends(get_db)):
     payload = payload or {}
     return sil.preguntar(db, codigo, payload.get("pregunta", ""), payload.get("alias"),
                          device_id=payload.get("device_id"), escalar=bool(payload.get("escalar")),
-                         material=payload.get("material"))
+                         material=payload.get("material"), imagenes=payload.get("imagenes"))
 
 
 @router.get("/silabo/{codigo}/mis-consultas")

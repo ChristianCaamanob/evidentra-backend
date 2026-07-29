@@ -360,18 +360,23 @@ def _buscar_cache(db: Session, a: SilaboAgente, pregunta: str):
 
 # ── pregunta del alumno (público) ────────────────────────────────────────────────────
 def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
-              device_id: str | None = None, escalar: bool = False, material: str | None = None) -> dict:
+              device_id: str | None = None, escalar: bool = False, material: str | None = None,
+              imagenes: list | None = None) -> dict:
     a = agente_por_codigo(db, codigo)
     if not a.activo:
         raise conflict("El agente del curso no está activo en este momento.")
     pregunta = (pregunta or "").strip()
-    if len(pregunta) < 3:
+    # Con imágenes adjuntas la pregunta puede ser corta ("¿qué es esto?"); igual exigimos algo escrito.
+    if len(pregunta) < 3 and not imagenes:
         raise conflict("Escriba su pregunta.")
     if len(pregunta) > 1000:
         pregunta = pregunta[:1000]
-    # Carga universal (Fase 1): el estudiante adjunta MATERIAL DE ESTUDIO (texto extraído en su dispositivo,
-    # no se almacena aquí). Runi conversa sobre él como apoyo de aprendizaje, sin tratarlo como parámetro del curso.
+    # Carga universal: MATERIAL DE ESTUDIO del estudiante (Fase 1 texto; Fase 2 imágenes/foto). Se extrae/lee
+    # en su dispositivo, no se almacena aquí. Runi conversa sobre él como aprendizaje, no como parámetro del curso.
     material = (material or "").strip()[:16000] or None
+    imagenes = [im for im in (imagenes or []) if isinstance(im, dict) and (im.get("data"))][:6] or None
+    if imagenes and len(pregunta) < 3:
+        pregunta = "Explícame lo que ves en la(s) imagen(es) que te adjunté."
 
     cache_hit, cita, tema, fuente, evidencia = False, None, None, None, None
     if escalar:
@@ -384,8 +389,8 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
         evidencia = _evidencia(decision="Tu docente responde tu consulta por este canal.",
                                necesita=True, fuente="ninguna")
     else:
-        # Con material adjunto NO se reutiliza caché (la respuesta depende de ESE material del estudiante).
-        cache = None if material else _buscar_cache(db, a, pregunta)
+        # Con material/imágenes adjuntos NO se reutiliza caché (la respuesta depende de ESE material del alumno).
+        cache = None if (material or imagenes) else _buscar_cache(db, a, pregunta)
         if cache:
             # Consistencia: una pregunta equivalente ya respondida → la MISMA respuesta, sin re-inferir.
             tipo, respuesta, categoria, urgencia, necesita = (
@@ -397,7 +402,7 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
         else:
             intentos = _intentos_equivalentes(db, a, pregunta, device_id)
             tipo, respuesta, categoria, urgencia, necesita, cita, tema, fuente, evidencia = \
-                _clasificar_y_responder(a, pregunta, intentos, material=material)
+                _clasificar_y_responder(a, pregunta, intentos, material=material, imagenes=imagenes)
 
     # ── Motor de ética: consecuencia 0–5 + Puerta 3 (verificación de SALIDA sobre la respuesta ya generada).
     from app.services import etica_service as etica
@@ -544,7 +549,8 @@ def _evidencia(hecho="", inferencia="", recomendacion="", decision="", *,
     return ev
 
 
-def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, material: str | None = None):
+def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, material: str | None = None,
+                            imagenes: list | None = None):
     """Runi, copiloto de APRENDIZAJE. DOS ámbitos: (1) APRENDIZAJE en general → LIBRE, usa el conocimiento
     de la IA como apoyo estratégico para cerrar brechas, anclado al programa y sin contradecir al profesor;
     (2) PARÁMETROS de la asignatura (fechas/ponderaciones/reglas/alcance/ventana) → ESTRICTO: solo el corpus,
@@ -615,10 +621,11 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, m
             "Vacío si no aplica.\n"
             "  • certeza ∈ {solida, moderada, preliminar, insuficiente} — sé HONESTO: 'solida' solo si lo respalda el "
             "material del curso; tu conocimiento general del ámbito es 'moderada' o 'preliminar', nunca 'solida'.\n"
-            "MATERIAL DE ESTUDIO DEL ESTUDIANTE: si viene un bloque 'MATERIAL DE ESTUDIO ADJUNTO', úsalo como apoyo "
-            "para EXPLICAR, resumir o responder sobre su contenido (ámbito de aprendizaje); puedes citarlo o apoyarte "
-            "en él. NO lo trates como parámetros del curso (fechas/reglas/ponderaciones siguen SOLO del contexto del "
-            "profesor). Si te apoyas en el material del estudiante, fuente='general' (no es el corpus del profesor).\n"
+            "MATERIAL DE ESTUDIO DEL ESTUDIANTE: si viene un bloque 'MATERIAL DE ESTUDIO ADJUNTO' o IMÁGENES adjuntas "
+            "(fotos de apuntes, láminas, diagramas, pizarra), léelos/míralos como apoyo para EXPLICAR, resumir o "
+            "responder sobre su contenido (ámbito de aprendizaje); puedes citarlos o apoyarte en ellos. NO los trates "
+            "como parámetros del curso (fechas/reglas/ponderaciones siguen SOLO del contexto del profesor). Si te apoyas "
+            "en el material del estudiante, fuente='general' (no es el corpus del profesor).\n"
             'Devuelve SOLO JSON: {"tipo":"..","tema":"..","fuente":"..","respuesta":"..","cita":"..","categoria":"..",'
             '"urgencia":"..","necesita_docente":true|false,"hecho":"..","inferencia":"..","recomendacion":"..",'
             '"decision_docente":"..","certeza":".."}.'
@@ -632,7 +639,11 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, m
         d, _ultimo_err = None, None
         for _i in range(3):                                  # reintentos: no escales por un fallo transitorio del LLM
             try:
-                d = _json_robusto(ce._llamar_anthropic(system, user, max_tokens=1000))
+                if imagenes:
+                    crudo = ce._llamar_anthropic_vision(system, user, imagenes, max_tokens=1200)
+                else:
+                    crudo = ce._llamar_anthropic(system, user, max_tokens=1000)
+                d = _json_robusto(crudo)
                 if d:
                     break
             except Exception as e:  # noqa: BLE001

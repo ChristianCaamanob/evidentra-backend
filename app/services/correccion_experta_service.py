@@ -199,6 +199,28 @@ def _llamar_anthropic(system: str, user: str, modelo: str = MODELO_EXPERTO, max_
     return getattr(msg.content[0], "text", "") if msg.content else ""
 
 
+def _llamar_anthropic_vision(system: str, user: str, imagenes: list, modelo: str = MODELO_EXPERTO,
+                             max_tokens: int = 1800) -> str:
+    """Igual que _llamar_anthropic pero con IMÁGENES (visión). `imagenes` = [{media_type, data(base64)}].
+    Las imágenes van primero y el texto después (recomendación de Anthropic para multi-imagen)."""
+    import anthropic
+    cliente = anthropic.Anthropic()
+    contenido = []
+    for im in (imagenes or [])[:6]:                       # tope duro de 6 imágenes por consulta
+        data = (im or {}).get("data") or ""
+        mt = (im or {}).get("media_type") or "image/jpeg"
+        if data:
+            contenido.append({"type": "image", "source": {"type": "base64", "media_type": mt, "data": data}})
+    contenido.append({"type": "text", "text": user})
+    msg = cliente.messages.create(
+        model=modelo, max_tokens=max_tokens, system=system,
+        messages=[{"role": "user", "content": contenido}])
+    for bloque in msg.content:
+        if getattr(bloque, "type", None) == "text":
+            return bloque.text
+    return getattr(msg.content[0], "text", "") if msg.content else ""
+
+
 def redactar_texto(texto: str, contexto: str = "", llamar=None) -> dict:
     """
     Limpia un texto DICTADO POR EL DOCENTE (enunciado / respuesta óptima): corrige ortografía,
