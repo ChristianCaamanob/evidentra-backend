@@ -358,6 +358,23 @@ def _buscar_cache(db: Session, a: SilaboAgente, pregunta: str):
             "cita": getattr(mejor, "cita", None)}
 
 
+# ── memoria conversacional: las últimas vueltas del MISMO dispositivo, para que Runi entienda las
+# continuaciones breves ("sí", "seguimos", "y eso", "explícalo mejor") en vez de derivarlas por falta de contexto.
+def _historial_reciente(db: Session, agente_id, device_id, n: int = 4) -> str:
+    if not device_id:
+        return ""
+    msgs = (db.query(MensajeSilabo)
+            .filter(MensajeSilabo.agente_id == agente_id, MensajeSilabo.device_id == str(device_id))
+            .order_by(MensajeSilabo.created_at.desc()).limit(n).all())
+    partes = []
+    for m in reversed(msgs):
+        partes.append("Estudiante: " + (m.pregunta or "")[:280])
+        r = (m.respuesta_docente or m.respuesta_ia or "").strip()
+        if r:
+            partes.append("Runi: " + r[:380])
+    return "\n".join(partes)[:2500]
+
+
 # ── pregunta del alumno (público) ────────────────────────────────────────────────────
 def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
               device_id: str | None = None, escalar: bool = False, material: str | None = None,
@@ -401,8 +418,10 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
                                    fuente="corpus", cita=(cita or respuesta), certeza_sug="solida")
         else:
             intentos = _intentos_equivalentes(db, a, pregunta, device_id)
+            historial = _historial_reciente(db, a.id, device_id)
             tipo, respuesta, categoria, urgencia, necesita, cita, tema, fuente, evidencia = \
-                _clasificar_y_responder(a, pregunta, intentos, material=material, imagenes=imagenes)
+                _clasificar_y_responder(a, pregunta, intentos, material=material, imagenes=imagenes,
+                                        historial=historial)
 
     # ── Motor de ética: consecuencia 0–5 + Puerta 3 (verificación de SALIDA sobre la respuesta ya generada).
     from app.services import etica_service as etica
@@ -550,7 +569,7 @@ def _evidencia(hecho="", inferencia="", recomendacion="", decision="", *,
 
 
 def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, material: str | None = None,
-                            imagenes: list | None = None):
+                            imagenes: list | None = None, historial: str | None = None):
     """Runi, copiloto de APRENDIZAJE. DOS ámbitos: (1) APRENDIZAJE en general → LIBRE, usa el conocimiento
     de la IA como apoyo estratégico para cerrar brechas, anclado al programa y sin contradecir al profesor;
     (2) PARÁMETROS de la asignatura (fechas/ponderaciones/reglas/alcance/ventana) → ESTRICTO: solo el corpus,
@@ -621,6 +640,11 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, m
             "Vacío si no aplica.\n"
             "  • certeza ∈ {solida, moderada, preliminar, insuficiente} — sé HONESTO: 'solida' solo si lo respalda el "
             "material del curso; tu conocimiento general del ámbito es 'moderada' o 'preliminar', nunca 'solida'.\n"
+            "CONTINUIDAD DE LA CONVERSACIÓN: si viene un bloque 'CONVERSACIÓN RECIENTE', la consulta puede ser una "
+            "CONTINUACIÓN breve ('sí', 'seguimos', 'dale', 'y eso?', 'explícalo mejor', 'la otra'). Interprétala SIEMPRE "
+            "en el contexto de esa conversación y respóndela como corresponde al hilo; JAMÁS derives al docente ni la "
+            "marques fuera_corpus solo por ser corta o ambigua fuera de contexto. Si de verdad no hay a qué se refiere, "
+            "pide una breve aclaración (no la derives).\n"
             "MATERIAL DE ESTUDIO DEL ESTUDIANTE: si viene un bloque 'MATERIAL DE ESTUDIO ADJUNTO' o IMÁGENES adjuntas "
             "(fotos de apuntes, láminas, diagramas, pizarra), léelos/míralos como apoyo para EXPLICAR, resumir o "
             "responder sobre su contenido (ámbito de aprendizaje); puedes citarlos o apoyarte en ellos. NO los trates "
@@ -632,6 +656,9 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, m
         )
         ctx = (a.contexto or "")[:20000]
         user = "CONTEXTO DEL CURSO:\n" + (ctx or "(el docente aún no cargó material; responde el aprendizaje general y marca fuera_corpus solo los parámetros del curso)")
+        if historial:
+            user += ("\n\nCONVERSACIÓN RECIENTE (para entender continuaciones breves; NO es contexto del curso):\n"
+                     + historial)
         if material:
             user += ("\n\nMATERIAL DE ESTUDIO ADJUNTO POR EL ESTUDIANTE (apoyo para explicar/estudiar; NO son "
                      "parámetros del curso):\n" + material)
@@ -668,6 +695,8 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, m
         fuente = str(d.get("fuente", "")).strip().lower()
         if fuente not in ("corpus", "general", "ninguna"):
             fuente = "corpus" if cita else "general"
+        if fuente == "corpus" and not cita:
+            fuente = "general"      # 'corpus' sin cita válida = no está respaldado por el material → conocimiento general
         necesita = bool(d.get("necesita_docente", False))
         # Separación de planos (Evidence Core) tal como la propuso el modelo (el servicio la sanea).
         hecho = str(d.get("hecho", "")).strip()

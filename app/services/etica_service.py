@@ -117,8 +117,10 @@ def puerta3_verificar(respuesta: str, contexto: str, tipo: str, cita: str | None
     if not pres:
         obs.append("Respuesta vacía para una consulta que Runi debía responder.")
 
-    # Veredicto: se DETIENE si hay fabricación (1 ó 3) — es lo que puede engañar al estudiante.
-    detener = (checks.get("cita_en_contexto") is False) or (checks.get("sin_parametro_fabricado") is False)
+    # Veredicto: se DETIENE SOLO ante fabricación de un PARÁMETRO del curso (fecha/hora/%/sala sin respaldo) —
+    # eso es lo que puede engañar al estudiante. Una cita ausente o una certeza incoherente se OBSERVAN
+    # (no se detiene una respuesta de aprendizaje válida por eso; la fuente ya se degradó a 'general' aguas arriba).
+    detener = (checks.get("sin_parametro_fabricado") is False)
     veredicto = "detenido" if detener else ("observado" if obs else "ok")
     return {"veredicto": veredicto, "observaciones": obs, "checks": checks}
 
