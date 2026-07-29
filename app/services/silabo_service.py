@@ -446,11 +446,12 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
         evidencia["puerta3"] = _p3["veredicto"]
 
     estado = MSG_PENDIENTE if necesita else MSG_RESPONDIDA
-    # Nivel de escalamiento: si hay ayudante activo, lo pendiente pasa PRIMERO por el ayudante (nivel 2, 24 h);
-    # si no, va directo al profesor (nivel 3, 48 h). Lo ya respondido no escala.
+    # BARANDA (decisión CEO jul-28): el PROFESOR recibe TODO primero y siempre. El ayudante NUNCA intercepta la
+    # cola (podría contener algo sensible) — solo ve lo que el profesor le DELEGA explícitamente. Por eso todo lo
+    # pendiente entra directo a NIVEL 3 (profesor); el ayudante recibe por delegación (delegar_al_ayudante).
     if necesita:
-        nivel = 2 if a.ayudante_activo else 3
-        vence = _ahora() + (_PLAZO_AYUDANTE_H if nivel == 2 else _PLAZO_DOCENTE_H) * 3600
+        nivel = 3
+        vence = _ahora() + _PLAZO_DOCENTE_H * 3600
         respondido_por = None
     else:
         nivel = 1
@@ -897,6 +898,27 @@ def responder_docente(db: Session, mensaje_id, respuesta: str, quien: str = "doc
     db.commit(); db.refresh(m)
     d = _msg_dict(m); d["respondidos"] = n
     return d
+
+
+def delegar_al_ayudante(db: Session, mensaje_id) -> dict:
+    """El PROFESOR pasa una duda ACADÉMICA puntual a su ayudante (nivel 3 → 2). El ayudante SOLO ve lo delegado
+    (nunca intercepta la cola). Lo reservado (salud/denuncia/justificación) NO es delegable. Si el ayudante no
+    responde en 24 h, vuelve solo al profesor (_escalar_vencidos)."""
+    m = db.query(MensajeSilabo).filter(MensajeSilabo.id == _uuid(mensaje_id)).first()
+    if not m:
+        raise not_found("Mensaje no encontrado.")
+    a = db.query(SilaboAgente).filter(SilaboAgente.id == m.agente_id).first()
+    if not a or not a.ayudante_activo:
+        raise conflict("Activa primero el ayudante para poder delegar.")
+    if getattr(m, "tipo", None) in _TIPOS_DERIVACION:
+        raise conflict("Esto es reservado (salud/denuncia/justificación) y no se delega; va a Secretaría/Dirección.")
+    if m.estado != MSG_PENDIENTE:
+        raise conflict("Solo se puede delegar una consulta pendiente.")
+    m.nivel = 2
+    m.vence_ts = _ahora() + _PLAZO_AYUDANTE_H * 3600
+    m.motivo_escalamiento = None
+    db.commit(); db.refresh(m)
+    return _msg_dict(m)
 
 
 def subir_al_profesor(db: Session, mensaje_id, motivo: str) -> dict:

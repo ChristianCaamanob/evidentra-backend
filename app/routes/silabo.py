@@ -89,6 +89,11 @@ def responder(mensaje_id: UUID, payload: dict, db: Session = Depends(get_db)):
     return sil.responder_docente(db, mensaje_id, (payload or {}).get("respuesta", ""), quien="docente")
 
 
+@router.post("/silabo/mensaje/{mensaje_id}/delegar", dependencies=[Depends(req_profesor)])
+def delegar(mensaje_id: UUID, db: Session = Depends(get_db)):
+    return sil.delegar_al_ayudante(db, mensaje_id)
+
+
 # ── Nivel 2 · Ayudante (opcional) ─────────────────────────────────────────────────────
 @router.post("/courses/{course_id}/silabo/ayudante", dependencies=[Depends(req_profesor)])
 def config_ayudante(course_id: UUID, request: Request, payload: dict, db: Session = Depends(get_db)):
