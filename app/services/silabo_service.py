@@ -395,6 +395,24 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
     if imagenes and len(pregunta) < 3:
         pregunta = "Explícame lo que ves en la(s) imagen(es) que te adjunté."
 
+    # Emoji/expresión: solo emojis (sin palabras) → Runi REACCIONA cálido, sin buscar en el material ni derivar.
+    if not escalar and not imagenes and _es_expresion(pregunta):
+        reaccion = _reaccion_emoji(pregunta)
+        ev = _evidencia(decision="Reacción de Runi a tu emoji (no busqué en el material).", fuente="ninguna")
+        m = MensajeSilabo(agente_id=a.id, alias=(alias or None), device_id=(device_id or None),
+                          pregunta=pregunta, respuesta_ia=reaccion, tipo="expresion", categoria="otro",
+                          cita=None, tema=None, fuente="ninguna", evidencia=ev, urgencia="baja",
+                          necesita_docente=False, estado=MSG_RESPONDIDA, vence_ts=None, nivel=1,
+                          respondido_por="ia")
+        db.add(m)
+        bitacora_append(db, a.id, device_id, "expresion",
+                        {"tipo": "expresion", "fuente": "ninguna", "decision": "reaccion", "nivel": 1},
+                        contenido=(pregunta + "\n" + reaccion))
+        db.commit(); db.refresh(m)
+        return {"respuesta": reaccion, "necesita_docente": False, "tipo": "expresion", "cache": False,
+                "cita": None, "categoria": "otro", "urgencia": "baja", "mensaje_id": str(m.id),
+                "vence_ts": None, "evidencia": ev}
+
     cache_hit, cita, tema, fuente, evidencia = False, None, None, None, None
     if escalar:
         # Botón "quiero preguntar a una persona": salta la IA y arma para el docente.
@@ -489,6 +507,26 @@ def _intentos_equivalentes(db: Session, a: SilaboAgente, pregunta: str, device_i
             .filter(MensajeSilabo.agente_id == a.id, MensajeSilabo.device_id == str(device_id))
             .order_by(MensajeSilabo.created_at.desc()).limit(40).all())
     return sum(1 for m in prev if _es_equivalente(t, m.pregunta))
+
+
+# Expresión (emoji): el estudiante manda SOLO emojis/stickers, sin palabras → Runi reacciona cálido y NO
+# busca en el material ni deriva al docente (evita un Q&A absurdo sobre un emoji).
+_SHORTCODE_RE = re.compile(r":[a-z0-9-]{2,40}:")
+def _es_expresion(texto: str) -> bool:
+    t = (texto or "").strip()
+    if not t:
+        return False
+    sin = _SHORTCODE_RE.sub(" ", t)                       # quita los :slug: y ve si queda alguna palabra
+    return not re.search(r"[0-9A-Za-zÁÉÍÓÚÑáéíóúñ]", sin)
+_REACCIONES_EMOJI = (
+    "¡Jaja, gracias! :celebremos-runi: Cuando quieras seguimos con la materia.",
+    "Te leo :de-acuerdo-listo: ¿Vemos algún tema del curso?",
+    ":te-apoyo-aprendizaje: Aquí estoy para lo que necesites estudiar.",
+    "¡Me encanta tu energía! :motivacion-aprendizaje: ¿Con qué tema seguimos?",
+    "Anotado :gracias: Cuando quieras te ayudo con la materia.",
+)
+def _reaccion_emoji(texto: str) -> str:
+    return _REACCIONES_EMOJI[len(texto or "") % len(_REACCIONES_EMOJI)]
 
 
 # Meta-estudio: cómo estudiar/prepararse. Runi SIEMPRE puede responderlo (capa C), aunque el LLM falle.
