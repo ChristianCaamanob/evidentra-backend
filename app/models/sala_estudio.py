@@ -41,5 +41,6 @@ class SalaMensaje(UUIDMixin, TimestampMixin, Base):
     rol: Mapped[str] = mapped_column(String(16), default="alumno")               # alumno | runi | sistema
     texto: Mapped[str] = mapped_column(Text)
     tema: Mapped[str | None] = mapped_column(String(120), nullable=True)          # tema/RA que tocó (trazabilidad)
+    char: Mapped[str | None] = mapped_column(String(24), nullable=True)           # personaje de la Pandilla que eligió el alumno
 
     sala = relationship("SalaEstudio", back_populates="mensajes")

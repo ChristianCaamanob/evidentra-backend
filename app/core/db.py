@@ -505,6 +505,9 @@ _COLUMNAS_ADITIVAS = {
     "oral_exam_sesiones": {
         "vivo_token": "VARCHAR(40)",
     },
+    "sala_mensajes": {
+        "char": "VARCHAR(24)",
+    },
     "sesiones_en_vivo": {
         "retro_alumno": "BOOLEAN NOT NULL DEFAULT false",
         "revelar_correccion": "BOOLEAN NOT NULL DEFAULT true",

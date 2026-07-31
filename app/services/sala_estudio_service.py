@@ -30,6 +30,12 @@ def _ahora() -> int:
     return int(time.time())
 
 
+def _char_ok(char) -> str | None:
+    """Sanea el slug del personaje de la Pandilla (el catálogo lo controla el cliente)."""
+    c = re.sub(r"[^a-z0-9-]", "", str(char or "").lower())[:24]
+    return c or None
+
+
 def _es_expresion(texto: str) -> bool:
     """True si el mensaje es un STICKER o solo emojis/símbolos (expresión entre compañeros, no una pregunta)."""
     t = (texto or "").strip()
@@ -46,14 +52,14 @@ def _codigo(db: Session) -> str:
     return "".join(secrets.choice(_ALFA) for _ in range(8))
 
 
-def crear_sala(db: Session, codigo_silabo: str, titulo: str, alias: str | None, device_id: str | None) -> dict:
+def crear_sala(db: Session, codigo_silabo: str, titulo: str, alias: str | None, device_id: str | None, char: str | None = None) -> dict:
     a = sil.agente_por_codigo(db, codigo_silabo)             # el curso al que pertenece la sala
     s = SalaEstudio(agente_id=a.id, codigo=_codigo(db),
                     titulo=(titulo or "Sala de estudio").strip()[:160] or "Sala de estudio",
                     creador_alias=(alias or None), activa=True,
                     participantes={}, meta={"puntos_grupo": 0, "temas": [], "hitos": []})
     db.add(s); db.flush()
-    _tocar(s, device_id, alias)
+    _tocar(s, device_id, alias, char)
     db.add(SalaMensaje(sala_id=s.id, rol="sistema",
                        texto=("¡Sala abierta! 🦊 Invita a tus compañeros con el código. Pregúntenme lo que "
                               "estén estudiando: yo los guío y les voy dando puntos a medida que avanzan.")))
@@ -61,19 +67,19 @@ def crear_sala(db: Session, codigo_silabo: str, titulo: str, alias: str | None, 
     return _sala_dict(s, a)
 
 
-def unirse(db: Session, codigo: str, alias: str | None, device_id: str | None) -> dict:
+def unirse(db: Session, codigo: str, alias: str | None, device_id: str | None, char: str | None = None) -> dict:
     s = _por_codigo(db, codigo)
     if not s.activa:
         raise conflict("Esta sala de estudio ya se cerró.")
     nuevo = not (s.participantes or {}).get(str(device_id or ""))
-    _tocar(s, device_id, alias)
+    _tocar(s, device_id, alias, char)
     if nuevo and device_id:
         db.add(SalaMensaje(sala_id=s.id, rol="sistema", texto=((alias or "Alguien") + " se unió a la sala. 👋")))
     db.commit(); db.refresh(s)
     return _sala_dict(s, sil_agente(db, s), incluir_mensajes=True)
 
 
-def postear(db: Session, codigo: str, alias: str | None, device_id: str | None, texto: str) -> dict:
+def postear(db: Session, codigo: str, alias: str | None, device_id: str | None, texto: str, char: str | None = None) -> dict:
     s = _por_codigo(db, codigo)
     if not s.activa:
         raise conflict("Esta sala de estudio ya se cerró.")
@@ -81,8 +87,8 @@ def postear(db: Session, codigo: str, alias: str | None, device_id: str | None, 
     if len(texto) < 1:
         raise conflict("Escribe algo para tus compañeros.")
     texto = texto[:1000]
-    _tocar(s, device_id, alias)
-    db.add(SalaMensaje(sala_id=s.id, rol="alumno", alias=(alias or None), device_id=(device_id or None), texto=texto))
+    _tocar(s, device_id, alias, char)
+    db.add(SalaMensaje(sala_id=s.id, rol="alumno", alias=(alias or None), device_id=(device_id or None), texto=texto, char=_char_ok(char)))
     db.flush()
 
     a = sil_agente(db, s)
@@ -142,14 +148,17 @@ def _course_id(db, s):
     return getattr(a, "course_id", None)
 
 
-def _tocar(s: SalaEstudio, device_id, alias) -> None:
-    """Registra presencia + alias del participante (sin PII); crea su registro si es nuevo."""
+def _tocar(s: SalaEstudio, device_id, alias, char=None) -> None:
+    """Registra presencia + alias + personaje del participante (sin PII); crea su registro si es nuevo."""
     if not device_id:
         return
     p = s.participantes or {}
     d = p.get(str(device_id)) or {"alias": (alias or "Anónimo"), "puntos": 0, "aportes": 0}
     if alias:
         d["alias"] = alias[:80]
+    ch = _char_ok(char)
+    if ch:
+        d["char"] = ch
     d["ultimo_ts"] = _ahora()
     p[str(device_id)] = d
     s.participantes = p
@@ -194,7 +203,7 @@ def _sala_dict(s: SalaEstudio, a=None, incluir_mensajes: bool = False) -> dict:
     parts = s.participantes or {}
     lista = sorted(
         [{"alias": v.get("alias", "Anónimo"), "puntos": int(v.get("puntos", 0)), "aportes": int(v.get("aportes", 0)),
-          "en_linea": (ahora - int(v.get("ultimo_ts", 0))) <= _PRESENCIA_SEG} for v in parts.values()],
+          "char": v.get("char"), "en_linea": (ahora - int(v.get("ultimo_ts", 0))) <= _PRESENCIA_SEG} for v in parts.values()],
         key=lambda x: x["puntos"], reverse=True)
     meta = s.meta or {}
     out = {"codigo": s.codigo, "titulo": s.titulo, "activa": s.activa,
@@ -206,7 +215,7 @@ def _sala_dict(s: SalaEstudio, a=None, incluir_mensajes: bool = False) -> dict:
     if incluir_mensajes:
         msgs = sorted(s.mensajes, key=lambda m: (m.created_at.isoformat() if getattr(m, "created_at", None) else ""))
         out["mensajes"] = [{"id": str(m.id), "rol": m.rol, "alias": m.alias, "texto": m.texto,
-                            "tema": m.tema, "device_id": m.device_id,
+                            "tema": m.tema, "device_id": m.device_id, "char": getattr(m, "char", None),
                             "fecha": m.created_at.isoformat() if getattr(m, "created_at", None) else None}
                            for m in msgs][-120:]
     return out

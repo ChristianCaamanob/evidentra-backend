@@ -19,19 +19,19 @@ router = APIRouter(prefix="/salas", tags=["salas"])
 def crear(payload: dict, db: Session = Depends(get_db)):
     payload = payload or {}
     return salas.crear_sala(db, payload.get("silabo", ""), payload.get("titulo", ""),
-                            payload.get("alias"), payload.get("device_id"))
+                            payload.get("alias"), payload.get("device_id"), payload.get("char"))
 
 
 @router.post("/{codigo}/unirse")
 def unirse(codigo: str, payload: dict, db: Session = Depends(get_db)):
     payload = payload or {}
-    return salas.unirse(db, codigo, payload.get("alias"), payload.get("device_id"))
+    return salas.unirse(db, codigo, payload.get("alias"), payload.get("device_id"), payload.get("char"))
 
 
 @router.post("/{codigo}/postear")
 def postear(codigo: str, payload: dict, db: Session = Depends(get_db)):
     payload = payload or {}
-    return salas.postear(db, codigo, payload.get("alias"), payload.get("device_id"), payload.get("texto", ""))
+    return salas.postear(db, codigo, payload.get("alias"), payload.get("device_id"), payload.get("texto", ""), payload.get("char"))
 
 
 @router.get("/{codigo}")
