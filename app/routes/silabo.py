@@ -180,6 +180,30 @@ def pandilla_passkey_verificar(codigo: str, request: Request, payload: dict, db:
                                     request.headers.get("origin"))
 
 
+@router.post("/silabo/{codigo}/pandilla/ubicacion")
+@limit("40/minute")
+def pandilla_ubicacion_compartir(codigo: str, request: Request, payload: dict, db: Session = Depends(get_db)):
+    # Comparte/actualiza la ubicación (requiere el token de passkey). Voluntaria, temporal, sin historial.
+    from app.services import pandilla_service as pand
+    p = payload or {}
+    return pand.compartir_ubicacion(db, codigo, p.get("ubicacion_token"), p.get("lat"), p.get("lng"),
+                                    accuracy=p.get("accuracy"), precision=p.get("precision", "aprox"),
+                                    char=p.get("char"), estado=p.get("estado"),
+                                    duracion_min=p.get("duracion_min", 30))
+
+
+@router.get("/silabo/{codigo}/pandilla/ubicaciones")
+def pandilla_ubicaciones(codigo: str, ubicacion_token: str = "", db: Session = Depends(get_db)):
+    from app.services import pandilla_service as pand
+    return pand.ubicaciones_grupo(db, codigo, ubicacion_token)
+
+
+@router.delete("/silabo/{codigo}/pandilla/ubicacion")
+def pandilla_ubicacion_dejar(codigo: str, ubicacion_token: str = "", db: Session = Depends(get_db)):
+    from app.services import pandilla_service as pand
+    return pand.dejar_ubicacion(db, codigo, ubicacion_token)
+
+
 @router.get("/silabo/{codigo}/mis-consultas")
 def mis_consultas(codigo: str, device_id: str = "", db: Session = Depends(get_db)):
     return sil.mis_consultas(db, codigo, device_id)

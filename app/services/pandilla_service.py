@@ -22,10 +22,14 @@ from app.services import asistencia_webauthn as awa
 from app.services import auth_service
 from app.services import silabo_service as sil
 
-_TTL_RETO = 180     # s para completar la ceremonia (get)
-_TTL_UBIC = 600     # s de validez del token de ubicación tras probar la passkey
+_TTL_RETO = 180      # s para completar la ceremonia (get)
+_TTL_UBIC = 7200     # s de validez del token de ubicación (cubre una sesión de compartir de hasta 2 h)
 _P_RETO = "pandilla_ubi_reto"
 _P_OK = "pandilla_ubi_ok"
+_MAX_MIN = 120       # duración máxima de compartir (min)
+_APROX_RADIO_M = 160.0   # radio de privacidad del modo "zona aproximada" (m)
+_APROX_DEC = 3           # redondeo de coords en modo aproximado (~110 m)
+_PRESENCIA_S = 300       # una ubicación de más de 5 min sin renovar se considera vieja
 
 
 def _curso_id(a):
@@ -112,5 +116,105 @@ def verificar_ubicacion(db: Session, codigo: str, credential, reto_token: str, o
 
     ubic = auth_service.create_token({"p": _P_OK, "mat": payload.get("mat"), "cid": payload.get("cid"),
                                       "exp": int(time.time()) + _TTL_UBIC})
-    # La ubicación real permanece BLOQUEADA por flag institucional + DPIA: aquí solo se PRUEBA la identidad.
-    return {"ok": True, "ubicacion_token": ubic, "expira_en": _TTL_UBIC, "ubicacion_habilitada": False}
+    return {"ok": True, "ubicacion_token": ubic, "expira_en": _TTL_UBIC, "ubicacion_habilitada": True}
+
+
+# ── Compartir / ver / revocar ubicación real (Fase 2 · adultos, voluntario, temporal, sin historial) ──
+def _tok_ok(token):
+    """Valida el token de ubicación (emitido tras la passkey) y devuelve (matricula_id, course_id)."""
+    p = auth_service.decode_token(token or "")
+    if not p or p.get("p") != _P_OK or not p.get("mat") or not p.get("cid"):
+        raise conflict("Tu verificación de ubicación venció; vuelve a probar tu passkey.")
+    return str(p["mat"]), str(p["cid"])
+
+
+def _nombre_matricula(db, mat_id):
+    m = db.query(AsistenciaMatricula).filter(AsistenciaMatricula.id == _uuid.UUID(str(mat_id))).first()
+    return (sil._nombre_amable(m.nombre) if m and m.nombre else None), (m if m else None)
+
+
+def compartir_ubicacion(db: Session, codigo: str, token: str, lat, lng, accuracy=None,
+                        precision="aprox", char=None, estado=None, duracion_min=30, origin_header=None) -> dict:
+    """Guarda/actualiza la ÚNICA ubicación activa del alumno (upsert → sin historial). En modo 'aprox'
+    reduce la precisión (redondeo + radio de privacidad). Caduca por TTL según la duración elegida."""
+    from app.models.pandilla import PandillaUbicacion
+    mat_id, cid = _tok_ok(token)
+    a = sil.agente_por_codigo(db, codigo)
+    if str(_curso_id(a)) != cid:
+        raise conflict("La verificación no corresponde a este curso.")
+    try:
+        lat = float(lat); lng = float(lng)
+    except Exception:  # noqa: BLE001
+        raise unprocessable("Coordenadas inválidas.")
+    if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lng <= 180.0):
+        raise unprocessable("Coordenadas fuera de rango.")
+    preciso = (str(precision) == "preciso")
+    if not preciso:
+        lat = round(lat, _APROX_DEC); lng = round(lng, _APROX_DEC)
+        acc = _APROX_RADIO_M
+    else:
+        try:
+            acc = float(accuracy) if accuracy is not None else 10.0
+        except Exception:  # noqa: BLE001
+            acc = 10.0
+        acc = max(3.0, min(acc, 80.0))
+    try:
+        dur = int(duracion_min)
+    except Exception:  # noqa: BLE001
+        dur = 30
+    dur = max(5, min(dur, _MAX_MIN))
+    ahora = int(time.time())
+    nombre, _m = _nombre_matricula(db, mat_id)
+    cid_u, mat_u = _uuid.UUID(cid), _uuid.UUID(mat_id)
+    row = db.query(PandillaUbicacion).filter(
+        PandillaUbicacion.course_id == cid_u, PandillaUbicacion.matricula_id == mat_u).first()
+    if not row:
+        row = PandillaUbicacion(course_id=cid_u, matricula_id=mat_u)
+        db.add(row)
+    row.lat = lat; row.lng = lng; row.accuracy_m = acc
+    row.precision = "preciso" if preciso else "aprox"
+    row.char = (str(char)[:24] if char else row.char)
+    row.alias = nombre or row.alias
+    row.estado = (str(estado)[:20] if estado else None)
+    row.capturado_ts = ahora
+    row.expires_ts = ahora + dur * 60
+    db.commit()
+    return {"ok": True, "expira_ts": row.expires_ts, "precision": row.precision}
+
+
+def ubicaciones_grupo(db: Session, codigo: str, token: str) -> dict:
+    """Ubicaciones ACTIVAS (no caducadas) del MISMO curso de quien está verificado. Purga las vencidas."""
+    from app.models.pandilla import PandillaUbicacion
+    mat_id, cid = _tok_ok(token)
+    a = sil.agente_por_codigo(db, codigo)
+    if str(_curso_id(a)) != cid:
+        raise conflict("La verificación no corresponde a este curso.")
+    ahora = int(time.time())
+    cid_u = _uuid.UUID(cid)
+    # purga oportunista de las caducadas (sin historial)
+    db.query(PandillaUbicacion).filter(
+        PandillaUbicacion.course_id == cid_u, PandillaUbicacion.expires_ts < ahora).delete()
+    db.commit()
+    filas = db.query(PandillaUbicacion).filter(
+        PandillaUbicacion.course_id == cid_u, PandillaUbicacion.expires_ts >= ahora).all()
+    out = []
+    for r in filas:
+        out.append({
+            "yo": str(r.matricula_id) == mat_id,
+            "char": r.char, "alias": r.alias, "estado": r.estado,
+            "lat": r.lat, "lng": r.lng, "accuracy_m": r.accuracy_m, "precision": r.precision,
+            "edad_seg": max(0, ahora - int(r.capturado_ts or ahora)),
+            "vieja": (ahora - int(r.capturado_ts or ahora)) > _PRESENCIA_S,
+        })
+    return {"ok": True, "ubicaciones": out, "servidor_ts": ahora}
+
+
+def dejar_ubicacion(db: Session, codigo: str, token: str) -> dict:
+    """Revocación inmediata: elimina la ubicación activa del alumno."""
+    from app.models.pandilla import PandillaUbicacion
+    mat_id, cid = _tok_ok(token)
+    db.query(PandillaUbicacion).filter(
+        PandillaUbicacion.course_id == _uuid.UUID(cid),
+        PandillaUbicacion.matricula_id == _uuid.UUID(mat_id)).delete()
+    db.commit()
+    return {"ok": True}
