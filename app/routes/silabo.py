@@ -137,6 +137,12 @@ def al_contexto(mensaje_id: UUID, db: Session = Depends(get_db)):
 
 
 # ── público (alumno, sin login) ──────────────────────────────────────────────────────
+@router.get("/silabo/por-curso/{course_code}")
+def silabo_por_curso(course_code: str, db: Session = Depends(get_db)):
+    # Resuelve el código ACADÉMICO del ramo → agente Runi (para que el alumno entre con el código que conoce).
+    return sil.info_por_curso(db, course_code)
+
+
 @router.get("/silabo/{codigo}")
 def info_publica(codigo: str, db: Session = Depends(get_db)):
     a = sil.agente_por_codigo(db, codigo)

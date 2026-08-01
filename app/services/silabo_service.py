@@ -189,6 +189,23 @@ def agente_de_curso(db: Session, course_id) -> SilaboAgente | None:
     return db.query(SilaboAgente).filter(SilaboAgente.course_id == str(course_id)).first()
 
 
+def info_por_curso(db: Session, course_code: str) -> dict:
+    """Resuelve el CÓDIGO ACADÉMICO del ramo (p.ej. OBMA1008) → agente Runi, para que el alumno
+    pueda entrar con el código que sí conoce. Devuelve el código del agente si está publicado."""
+    from sqlalchemy import func
+    from app.models.course import Course
+    cc = str(course_code or "").strip()
+    if not cc:
+        return {"ok": False, "motivo": "vacio"}
+    c = db.query(Course).filter(func.lower(Course.code) == cc.lower()).first()
+    if not c:
+        return {"ok": False, "motivo": "curso_no_existe"}
+    a = agente_de_curso(db, c.id)
+    if not a:
+        return {"ok": False, "motivo": "sin_agente", "nombre_curso": c.name}
+    return {"ok": True, "codigo": a.codigo, "activo": bool(a.activo), "nombre_curso": c.name}
+
+
 def agente_por_codigo(db: Session, codigo: str) -> SilaboAgente:
     a = db.query(SilaboAgente).filter(SilaboAgente.codigo == str(codigo).upper()).first()
     if not a:
