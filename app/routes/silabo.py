@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, req_profesor
 from app.core.config import settings
+from app.core.ratelimit import limit
 from app.models.course import Course
 from app.services import silabo_service as sil
 
@@ -148,6 +149,15 @@ def preguntar(codigo: str, payload: dict, db: Session = Depends(get_db)):
     return sil.preguntar(db, codigo, payload.get("pregunta", ""), payload.get("alias"),
                          device_id=payload.get("device_id"), escalar=bool(payload.get("escalar")),
                          material=payload.get("material"), imagenes=payload.get("imagenes"))
+
+
+@router.post("/silabo/{codigo}/identificar")
+@limit("10/minute")
+def identificar(codigo: str, request: Request, payload: dict, db: Session = Depends(get_db)):
+    # El alumno se identifica con su RUT contra la NÓMINA del curso → devuelve su nombre real.
+    # Rate-limit por IP (anti enumeración de RUTs). No revela nombres fuera de la nómina.
+    payload = payload or {}
+    return sil.identificar_por_rut(db, codigo, payload.get("rut", ""))
 
 
 @router.get("/silabo/{codigo}/mis-consultas")

@@ -496,6 +496,32 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
             "evidencia": evidencia}
 
 
+def _norm_rut(r) -> str:
+    """Normaliza un RUT para comparar: quita puntos/guion/espacios, K en minúscula. '12.345.678-K' → '12345678k'."""
+    return re.sub(r"[^0-9kK]", "", str(r or "")).lower()
+
+
+def identificar_por_rut(db: Session, codigo: str, rut: str) -> dict:
+    """El alumno se identifica con su RUT contra la NÓMINA (Student) del curso del sílabo.
+    Devuelve su nombre real si está en la nómina; si no, {ok: False} (no revela nada fuera de ella).
+    NO es autenticación fuerte (el RUT no es secreto) — para VER UBICACIÓN se exige además passkey (Fase 2)."""
+    import uuid as _uuid
+    from app.models.student import Student
+    a = agente_por_codigo(db, codigo)
+    nr = _norm_rut(rut)
+    if len(nr) < 7:
+        raise conflict("Escribe tu RUT completo (con dígito verificador).")
+    try:
+        cid = _uuid.UUID(str(a.course_id))
+    except Exception:  # noqa: BLE001
+        return {"ok": False}
+    for st in db.query(Student).filter(Student.course_id == cid).all():
+        if _norm_rut(st.rut) == nr:
+            nombre = " ".join(x for x in [(st.nombres or "").strip(), (st.apellido_paterno or "").strip()] if x).strip()
+            return {"ok": True, "nombre": nombre or "Estudiante", "rut": nr}
+    return {"ok": False}
+
+
 def _intentos_equivalentes(db: Session, a: SilaboAgente, pregunta: str, device_id: str | None) -> int:
     """Cuántas veces ESTE dispositivo ya preguntó algo equivalente (regla de rendición)."""
     if not device_id:
