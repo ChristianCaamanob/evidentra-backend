@@ -512,6 +512,9 @@ _COLUMNAS_ADITIVAS = {
     "students": {
         "matricula": "VARCHAR(80)",
     },
+    "pandilla_ubicaciones": {
+        "owner_key": "VARCHAR(80)",
+    },
     "sesiones_en_vivo": {
         "retro_alumno": "BOOLEAN NOT NULL DEFAULT false",
         "revelar_correccion": "BOOLEAN NOT NULL DEFAULT true",
@@ -635,6 +638,23 @@ def _init_schema() -> None:
             log.warning("Alembic upgrade falló, se usa create_all: %s", e)
     Base.metadata.create_all(bind=engine)
     _ensure_columns(log)
+    _migraciones_especiales(log)
+
+
+def _migraciones_especiales(log) -> None:
+    """ALTERs idempotentes que el mecanismo aditivo (solo ADD COLUMN) no cubre. Postgres; en SQLite fallan y se ignoran."""
+    from sqlalchemy import text
+    stmts = [
+        # La ubicación de la Pandilla puede pertenecer a un RUT (identidad) o a una matrícula (passkey):
+        # matricula_id pasa a ser OPCIONAL (el dueño real vive en owner_key).
+        "ALTER TABLE pandilla_ubicaciones ALTER COLUMN matricula_id DROP NOT NULL",
+    ]
+    for s in stmts:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(s))
+        except Exception as e:  # noqa: BLE001
+            log.info("migración especial omitida: %s", str(e)[:90])
 
 
 def _promote_owners() -> None:

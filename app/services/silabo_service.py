@@ -536,17 +536,23 @@ def identificar_por_rut(db: Session, codigo: str, valor: str) -> dict:
     def _match_id(campo):
         return len(nid) >= 4 and bool(campo) and _norm_id(campo) == nid
 
+    def _resp(nombre, rut_n, matricula):
+        # La identidad por RUT/matrícula YA autoriza compartir/ver ubicación (owner_key = 'rut:<rut o id>').
+        from app.services import pandilla_service as pand
+        clave = "rut:" + (rut_n or _norm_id(matricula) or nid or nr)
+        tok = pand.token_ubicacion(clave, cid, nombre)
+        return {"ok": True, "nombre": nombre or "Estudiante", "rut": rut_n, "matricula": matricula,
+                "ubicacion_token": tok}
+
     # 1) Nómina académica (Student): por RUT o por matrícula.
     for st in db.query(Student).filter(Student.course_id == cid).all():
         if _match_rut(st.rut) or _match_id(getattr(st, "matricula", None)):
-            nombre = _nombre_amable(st.nombres, st.apellido_paterno)
-            return {"ok": True, "nombre": nombre or "Estudiante", "rut": _norm_rut(st.rut) or None,
-                    "matricula": getattr(st, "matricula", None)}
+            return _resp(_nombre_amable(st.nombres, st.apellido_paterno), _norm_rut(st.rut) or None,
+                         getattr(st, "matricula", None))
     # 2) Nómina de asistencia (AsistenciaMatricula): por RUT o por identificador académico (matrícula).
     for m in db.query(AsistenciaMatricula).filter(AsistenciaMatricula.course_id == cid).all():
         if _match_rut(m.rut) or _match_id(m.identificador):
-            return {"ok": True, "nombre": _nombre_amable(m.nombre) or "Estudiante",
-                    "rut": _norm_rut(m.rut) or None, "matricula": m.identificador}
+            return _resp(_nombre_amable(m.nombre), _norm_rut(m.rut) or None, m.identificador)
     return {"ok": False}
 
 

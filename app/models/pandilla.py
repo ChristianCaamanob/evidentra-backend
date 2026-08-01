@@ -17,11 +17,11 @@ from app.models.base import Base, UUIDMixin, TimestampMixin
 class PandillaUbicacion(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "pandilla_ubicaciones"
     # Una ubicación ACTIVA por alumno y curso → el upsert sobrescribe (sin historial).
-    __table_args__ = (UniqueConstraint("course_id", "matricula_id", name="uq_pandilla_ubic_curso_mat"),)
-
     course_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
-    matricula_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("asistencia_matriculas.id"), index=True)
+    # Dueño: 'rut:<rut>' (identidad por nómina) o 'mat:<matricula_id>' (passkey). Una fila por (curso, owner).
+    owner_key: Mapped[str | None] = mapped_column(String(80), index=True, nullable=True)
+    matricula_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("asistencia_matriculas.id"), index=True, nullable=True)
     lat: Mapped[float] = mapped_column(Float)
     lng: Mapped[float] = mapped_column(Float)
     accuracy_m: Mapped[float] = mapped_column(Float, default=0.0)        # radio de precisión (m)

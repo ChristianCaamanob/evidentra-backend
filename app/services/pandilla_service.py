@@ -114,31 +114,34 @@ def verificar_ubicacion(db: Session, codigo: str, credential, reto_token: str, o
     disp.sign_count = max(nuevo, disp.sign_count or 0)
     db.commit()
 
-    ubic = auth_service.create_token({"p": _P_OK, "mat": payload.get("mat"), "cid": payload.get("cid"),
-                                      "exp": int(time.time()) + _TTL_UBIC})
+    m = disp.matricula
+    nombre = sil._nombre_amable(m.nombre) if m and m.nombre else None
+    ubic = token_ubicacion("mat:" + str(payload.get("mat")), payload.get("cid"), nombre)
     return {"ok": True, "ubicacion_token": ubic, "expira_en": _TTL_UBIC, "ubicacion_habilitada": True}
 
 
 # ── Compartir / ver / revocar ubicación real (Fase 2 · adultos, voluntario, temporal, sin historial) ──
 def _tok_ok(token):
-    """Valida el token de ubicación (emitido tras la passkey) y devuelve (matricula_id, course_id)."""
+    """Valida el token de ubicación (emitido tras identificarse por RUT o probar passkey).
+    Devuelve (owner_key, course_id, nombre)."""
     p = auth_service.decode_token(token or "")
-    if not p or p.get("p") != _P_OK or not p.get("mat") or not p.get("cid"):
-        raise conflict("Tu verificación de ubicación venció; vuelve a probar tu passkey.")
-    return str(p["mat"]), str(p["cid"])
+    if not p or p.get("p") != _P_OK or not p.get("ow") or not p.get("cid"):
+        raise conflict("Tu verificación de ubicación venció; vuelve a identificarte.")
+    return str(p["ow"]), str(p["cid"]), (p.get("nom") or None)
 
 
-def _nombre_matricula(db, mat_id):
-    m = db.query(AsistenciaMatricula).filter(AsistenciaMatricula.id == _uuid.UUID(str(mat_id))).first()
-    return (sil._nombre_amable(m.nombre) if m and m.nombre else None), (m if m else None)
+def token_ubicacion(owner_key: str, cid, nombre: str) -> str:
+    """Emite el token corto que autoriza compartir/ver ubicación (lo usan la identidad por RUT y la passkey)."""
+    return auth_service.create_token({"p": _P_OK, "ow": owner_key, "cid": str(cid),
+                                      "nom": nombre or "", "exp": int(time.time()) + _TTL_UBIC})
 
 
 def compartir_ubicacion(db: Session, codigo: str, token: str, lat, lng, accuracy=None,
                         precision="aprox", char=None, estado=None, duracion_min=30, origin_header=None) -> dict:
-    """Guarda/actualiza la ÚNICA ubicación activa del alumno (upsert → sin historial). En modo 'aprox'
-    reduce la precisión (redondeo + radio de privacidad). Caduca por TTL según la duración elegida."""
+    """Guarda/actualiza la ÚNICA ubicación activa del alumno (upsert por owner_key → sin historial). En modo
+    'aprox' reduce la precisión (redondeo + radio de privacidad). Caduca por TTL según la duración elegida."""
     from app.models.pandilla import PandillaUbicacion
-    mat_id, cid = _tok_ok(token)
+    ow, cid, nombre = _tok_ok(token)
     a = sil.agente_por_codigo(db, codigo)
     if str(_curso_id(a)) != cid:
         raise conflict("La verificación no corresponde a este curso.")
@@ -164,12 +167,17 @@ def compartir_ubicacion(db: Session, codigo: str, token: str, lat, lng, accuracy
         dur = 30
     dur = max(5, min(dur, _MAX_MIN))
     ahora = int(time.time())
-    nombre, _m = _nombre_matricula(db, mat_id)
-    cid_u, mat_u = _uuid.UUID(cid), _uuid.UUID(mat_id)
+    cid_u = _uuid.UUID(cid)
+    mat_u = None
+    if ow.startswith("mat:"):
+        try:
+            mat_u = _uuid.UUID(ow[4:])
+        except Exception:  # noqa: BLE001
+            mat_u = None
     row = db.query(PandillaUbicacion).filter(
-        PandillaUbicacion.course_id == cid_u, PandillaUbicacion.matricula_id == mat_u).first()
+        PandillaUbicacion.course_id == cid_u, PandillaUbicacion.owner_key == ow).first()
     if not row:
-        row = PandillaUbicacion(course_id=cid_u, matricula_id=mat_u)
+        row = PandillaUbicacion(course_id=cid_u, owner_key=ow, matricula_id=mat_u)
         db.add(row)
     row.lat = lat; row.lng = lng; row.accuracy_m = acc
     row.precision = "preciso" if preciso else "aprox"
@@ -185,13 +193,12 @@ def compartir_ubicacion(db: Session, codigo: str, token: str, lat, lng, accuracy
 def ubicaciones_grupo(db: Session, codigo: str, token: str) -> dict:
     """Ubicaciones ACTIVAS (no caducadas) del MISMO curso de quien está verificado. Purga las vencidas."""
     from app.models.pandilla import PandillaUbicacion
-    mat_id, cid = _tok_ok(token)
+    ow, cid, _nom = _tok_ok(token)
     a = sil.agente_por_codigo(db, codigo)
     if str(_curso_id(a)) != cid:
         raise conflict("La verificación no corresponde a este curso.")
     ahora = int(time.time())
     cid_u = _uuid.UUID(cid)
-    # purga oportunista de las caducadas (sin historial)
     db.query(PandillaUbicacion).filter(
         PandillaUbicacion.course_id == cid_u, PandillaUbicacion.expires_ts < ahora).delete()
     db.commit()
@@ -200,7 +207,7 @@ def ubicaciones_grupo(db: Session, codigo: str, token: str) -> dict:
     out = []
     for r in filas:
         out.append({
-            "yo": str(r.matricula_id) == mat_id,
+            "yo": (r.owner_key == ow),
             "char": r.char, "alias": r.alias, "estado": r.estado,
             "lat": r.lat, "lng": r.lng, "accuracy_m": r.accuracy_m, "precision": r.precision,
             "edad_seg": max(0, ahora - int(r.capturado_ts or ahora)),
@@ -212,9 +219,9 @@ def ubicaciones_grupo(db: Session, codigo: str, token: str) -> dict:
 def dejar_ubicacion(db: Session, codigo: str, token: str) -> dict:
     """Revocación inmediata: elimina la ubicación activa del alumno."""
     from app.models.pandilla import PandillaUbicacion
-    mat_id, cid = _tok_ok(token)
+    ow, cid, _nom = _tok_ok(token)
     db.query(PandillaUbicacion).filter(
         PandillaUbicacion.course_id == _uuid.UUID(cid),
-        PandillaUbicacion.matricula_id == _uuid.UUID(mat_id)).delete()
+        PandillaUbicacion.owner_key == ow).delete()
     db.commit()
     return {"ok": True}
