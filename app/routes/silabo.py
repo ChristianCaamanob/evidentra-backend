@@ -223,3 +223,44 @@ def confianza(codigo: str, payload: dict, db: Session = Depends(get_db)):
 @router.post("/silabo/{codigo}/borrar-memoria")
 def borrar_memoria(codigo: str, payload: dict, db: Session = Depends(get_db)):
     return sil.borrar_memoria(db, codigo, (payload or {}).get("device_id", ""))
+
+
+# ── Cuenta global del alumno (app Runi): registro + login con passkey ──────────
+@router.post("/alumno/registrar/opciones")
+@limit("8/minute")
+def alumno_reg_opciones(request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import alumno_auth as aa
+    p = payload or {}
+    return aa.registrar_opciones(db, p.get("rut", ""), p.get("nombres") or p.get("nombre", ""),
+                                 p.get("apellido_paterno") or p.get("apellido", ""),
+                                 p.get("apellido_materno", ""), request.headers.get("origin"))
+
+
+@router.post("/alumno/registrar/verificar")
+@limit("8/minute")
+def alumno_reg_verificar(request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import alumno_auth as aa
+    p = payload or {}
+    return aa.registrar_verificar(db, p.get("reg_token"), p.get("credential"), request.headers.get("origin"))
+
+
+@router.post("/alumno/login/opciones")
+@limit("15/minute")
+def alumno_login_opciones(request: Request, payload: dict = None, db: Session = Depends(get_db)):
+    from app.services import alumno_auth as aa
+    return aa.login_opciones(db, request.headers.get("origin"))
+
+
+@router.post("/alumno/login/verificar")
+@limit("15/minute")
+def alumno_login_verificar(request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import alumno_auth as aa
+    p = payload or {}
+    return aa.login_verificar(db, p.get("login_token"), p.get("credential"), request.headers.get("origin"))
+
+
+@router.get("/alumno/sesion")
+def alumno_sesion(token: str = "", db: Session = Depends(get_db)):
+    from app.services import alumno_auth as aa
+    info = aa.sesion_desde_token(db, token)
+    return {"ok": bool(info), "alumno": info}
