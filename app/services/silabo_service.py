@@ -506,6 +506,12 @@ def _norm_id(v) -> str:
     return re.sub(r"[^0-9a-zA-Z]", "", str(v or "")).lower()
 
 
+def _nombre_amable(*partes) -> str:
+    """Nombre legible para mostrar: junta partes, quita la barra de 'APELLIDOS/NOMBRES' y colapsa espacios."""
+    s = " ".join(p for p in partes if p).strip().replace("/", " ")
+    return re.sub(r"\s+", " ", s).strip()
+
+
 def identificar_por_rut(db: Session, codigo: str, valor: str) -> dict:
     """El alumno se identifica con su RUT **o** su número de matrícula contra la NÓMINA del curso del sílabo.
     (Las universidades entregan nóminas a veces por RUT y a veces por matrícula.) Busca en la nómina académica
@@ -533,13 +539,13 @@ def identificar_por_rut(db: Session, codigo: str, valor: str) -> dict:
     # 1) Nómina académica (Student): por RUT o por matrícula.
     for st in db.query(Student).filter(Student.course_id == cid).all():
         if _match_rut(st.rut) or _match_id(getattr(st, "matricula", None)):
-            nombre = " ".join(x for x in [(st.nombres or "").strip(), (st.apellido_paterno or "").strip()] if x).strip()
+            nombre = _nombre_amable(st.nombres, st.apellido_paterno)
             return {"ok": True, "nombre": nombre or "Estudiante", "rut": _norm_rut(st.rut) or None,
                     "matricula": getattr(st, "matricula", None)}
     # 2) Nómina de asistencia (AsistenciaMatricula): por RUT o por identificador académico (matrícula).
     for m in db.query(AsistenciaMatricula).filter(AsistenciaMatricula.course_id == cid).all():
         if _match_rut(m.rut) or _match_id(m.identificador):
-            return {"ok": True, "nombre": (m.nombre or "Estudiante").strip(),
+            return {"ok": True, "nombre": _nombre_amable(m.nombre) or "Estudiante",
                     "rut": _norm_rut(m.rut) or None, "matricula": m.identificador}
     return {"ok": False}
 
