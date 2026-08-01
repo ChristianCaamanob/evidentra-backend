@@ -161,6 +161,25 @@ def identificar(codigo: str, request: Request, payload: dict, db: Session = Depe
     return sil.identificar_por_rut(db, codigo, valor)
 
 
+@router.post("/silabo/{codigo}/pandilla/passkey/reto")
+@limit("12/minute")
+def pandilla_passkey_reto(codigo: str, request: Request, payload: dict, db: Session = Depends(get_db)):
+    # Compuerta passkey → ubicación (Fase 2): opciones de aserción para probar la passkey del alumno.
+    from app.services import pandilla_service as pand
+    payload = payload or {}
+    valor = payload.get("valor") or payload.get("rut") or payload.get("matricula") or ""
+    return pand.reto_ubicacion(db, codigo, valor, request.headers.get("origin"))
+
+
+@router.post("/silabo/{codigo}/pandilla/passkey/verificar")
+@limit("12/minute")
+def pandilla_passkey_verificar(codigo: str, request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import pandilla_service as pand
+    payload = payload or {}
+    return pand.verificar_ubicacion(db, codigo, payload.get("credential"), payload.get("reto_token"),
+                                    request.headers.get("origin"))
+
+
 @router.get("/silabo/{codigo}/mis-consultas")
 def mis_consultas(codigo: str, device_id: str = "", db: Session = Depends(get_db)):
     return sil.mis_consultas(db, codigo, device_id)
