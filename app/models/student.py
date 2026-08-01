@@ -10,6 +10,7 @@ class Student(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "students"
     course_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("courses.id"), nullable=False)
     rut: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    matricula: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)  # nº de matrícula/ID académico (nóminas que no usan RUT)
     apellido_paterno: Mapped[str] = mapped_column(String(100), default="")
     apellido_materno: Mapped[str] = mapped_column(String(100), default="")
     nombres: Mapped[str] = mapped_column(String(100), default="")

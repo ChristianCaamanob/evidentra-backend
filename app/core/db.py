@@ -508,6 +508,9 @@ _COLUMNAS_ADITIVAS = {
     "sala_mensajes": {
         "char": "VARCHAR(24)",
     },
+    "students": {
+        "matricula": "VARCHAR(80)",
+    },
     "sesiones_en_vivo": {
         "retro_alumno": "BOOLEAN NOT NULL DEFAULT false",
         "revelar_correccion": "BOOLEAN NOT NULL DEFAULT true",

@@ -154,10 +154,11 @@ def preguntar(codigo: str, payload: dict, db: Session = Depends(get_db)):
 @router.post("/silabo/{codigo}/identificar")
 @limit("10/minute")
 def identificar(codigo: str, request: Request, payload: dict, db: Session = Depends(get_db)):
-    # El alumno se identifica con su RUT contra la NÓMINA del curso → devuelve su nombre real.
-    # Rate-limit por IP (anti enumeración de RUTs). No revela nombres fuera de la nómina.
+    # El alumno se identifica con su RUT O su matrícula contra la NÓMINA del curso → devuelve su nombre real.
+    # Rate-limit por IP (anti enumeración). No revela nombres fuera de la nómina.
     payload = payload or {}
-    return sil.identificar_por_rut(db, codigo, payload.get("rut", ""))
+    valor = payload.get("valor") or payload.get("rut") or payload.get("matricula") or ""
+    return sil.identificar_por_rut(db, codigo, valor)
 
 
 @router.get("/silabo/{codigo}/mis-consultas")

@@ -501,24 +501,46 @@ def _norm_rut(r) -> str:
     return re.sub(r"[^0-9kK]", "", str(r or "")).lower()
 
 
-def identificar_por_rut(db: Session, codigo: str, rut: str) -> dict:
-    """El alumno se identifica con su RUT contra la NÓMINA (Student) del curso del sílabo.
-    Devuelve su nombre real si está en la nómina; si no, {ok: False} (no revela nada fuera de ella).
-    NO es autenticación fuerte (el RUT no es secreto) — para VER UBICACIÓN se exige además passkey (Fase 2)."""
+def _norm_id(v) -> str:
+    """Normaliza una matrícula/ID académico para comparar: solo alfanumérico, minúscula. 'A-2021.123' → 'a2021123'."""
+    return re.sub(r"[^0-9a-zA-Z]", "", str(v or "")).lower()
+
+
+def identificar_por_rut(db: Session, codigo: str, valor: str) -> dict:
+    """El alumno se identifica con su RUT **o** su número de matrícula contra la NÓMINA del curso del sílabo.
+    (Las universidades entregan nóminas a veces por RUT y a veces por matrícula.) Busca en la nómina académica
+    (Student: rut o matricula) y en la de asistencia (AsistenciaMatricula: rut o identificador). Devuelve el
+    nombre real si aparece; si no, {ok: False} (no revela nada fuera de la nómina). NO es autenticación fuerte
+    (ni el RUT ni la matrícula son secretos) — para VER UBICACIÓN se exige además passkey (Fase 2)."""
     import uuid as _uuid
     from app.models.student import Student
+    from app.models.asistencia import AsistenciaMatricula
     a = agente_por_codigo(db, codigo)
-    nr = _norm_rut(rut)
-    if len(nr) < 7:
-        raise conflict("Escribe tu RUT completo (con dígito verificador).")
+    nr, nid = _norm_rut(valor), _norm_id(valor)
+    if len(nr) < 7 and len(nid) < 4:
+        raise conflict("Escribe tu RUT completo o tu número de matrícula.")
     try:
         cid = _uuid.UUID(str(a.course_id))
     except Exception:  # noqa: BLE001
         return {"ok": False}
+
+    def _match_rut(campo):
+        return len(nr) >= 7 and _norm_rut(campo) == nr
+
+    def _match_id(campo):
+        return len(nid) >= 4 and bool(campo) and _norm_id(campo) == nid
+
+    # 1) Nómina académica (Student): por RUT o por matrícula.
     for st in db.query(Student).filter(Student.course_id == cid).all():
-        if _norm_rut(st.rut) == nr:
+        if _match_rut(st.rut) or _match_id(getattr(st, "matricula", None)):
             nombre = " ".join(x for x in [(st.nombres or "").strip(), (st.apellido_paterno or "").strip()] if x).strip()
-            return {"ok": True, "nombre": nombre or "Estudiante", "rut": nr}
+            return {"ok": True, "nombre": nombre or "Estudiante", "rut": _norm_rut(st.rut) or None,
+                    "matricula": getattr(st, "matricula", None)}
+    # 2) Nómina de asistencia (AsistenciaMatricula): por RUT o por identificador académico (matrícula).
+    for m in db.query(AsistenciaMatricula).filter(AsistenciaMatricula.course_id == cid).all():
+        if _match_rut(m.rut) or _match_id(m.identificador):
+            return {"ok": True, "nombre": (m.nombre or "Estudiante").strip(),
+                    "rut": _norm_rut(m.rut) or None, "matricula": m.identificador}
     return {"ok": False}
 
 
