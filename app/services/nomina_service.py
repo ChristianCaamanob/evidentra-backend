@@ -96,6 +96,11 @@ def parse_nomina_excel(file_bytes):
         raw = sheet.cell(ri, rcol).value
         if raw is None or str(raw).strip() == "":
             continue
+        # Filas-resumen al pie de las planillas de notas (no son alumnos): se ignoran en silencio.
+        _low = re.sub(r"[^a-z]", "", str(raw).strip().lower())
+        if _low in ("promedio", "promedios", "media", "desviacion", "desviacionestandar", "desv",
+                    "total", "totales", "maximo", "minimo", "mediana", "moda", "aprobados", "reprobados"):
+            continue
         norm, dvok = clean_rut(raw)
         ap = str(sheet.cell(ri, apcol).value or "").strip() if apcol else ""
         am = str(sheet.cell(ri, amcol).value or "").strip() if amcol else ""
