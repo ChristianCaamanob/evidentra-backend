@@ -416,13 +416,13 @@ def reunion_reservar(request: Request, code: str, payload: dict, db: Session = D
     return rs.reservar(db, code, p)
 
 
-@router.get("/reunion/video-config")
+@router.get("/reuniones/video-config")
 def reunion_video_config(db: Session = Depends(get_db)):
     from app.services import reunion_service as rs
     return rs.video_config()
 
 
-@router.post("/reunion/video-jwt")
+@router.post("/reuniones/video-jwt")
 @limit("30/minute")
 def reunion_video_jwt(request: Request, payload: dict, db: Session = Depends(get_db)):
     from app.services import reunion_service as rs
