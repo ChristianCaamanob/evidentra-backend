@@ -137,6 +137,76 @@ def perfil_estudiante(db: Session, codigo: str, device_id: str) -> dict:
             "resumen": _resumen_pedagogico(lista, total, vacios_temas, baja_conf),
             "temas": lista[:12], "por_semana": por_semana,
             "ultima": (acad[-1].created_at.isoformat() if acad else None)}
+def monitoreo_curso(db: Session, course_id) -> dict:
+    """Monitoreo docente (read-only): actividad de cada estudiante con el copiloto Runi + señales de
+    los otros módulos (agenda, avisos, reuniones) a nivel de curso. Identidad por device_id/alias."""
+    a = agente_de_curso(db, course_id)
+    if not a:
+        return {"ok": True, "estudiantes": [], "resumen": {}, "sin_agente": True}
+    msgs = (db.query(MensajeSilabo)
+            .filter(MensajeSilabo.agente_id == a.id)
+            .order_by(MensajeSilabo.created_at.asc()).all())
+    est = {}
+    for m in msgs:
+        dev = (m.device_id or "—")
+        e = est.get(dev)
+        if not e:
+            e = est[dev] = {"device": dev, "alias": None, "consultas": 0, "academicas": 0,
+                            "temas": {}, "vacios": 0, "escaladas": 0,
+                            "conf": {"baja": 0, "media": 0, "alta": 0}, "ultima": None, "recientes": []}
+        if m.alias:
+            e["alias"] = m.alias
+        e["consultas"] += 1
+        es_acad = (getattr(m, "tipo", None) or "") not in _TIPOS_NO_ACADEMICO
+        if es_acad:
+            e["academicas"] += 1
+            key = (getattr(m, "tema", None) or "").strip() or "Sin clasificar"
+            e["temas"][key] = e["temas"].get(key, 0) + 1
+        if m.necesita_docente:
+            e["vacios"] += 1
+        if getattr(m, "estado", None) in ("pendiente", "escalada") or (m.nivel and m.nivel >= 3 and m.necesita_docente):
+            e["escaladas"] += 1
+        if getattr(m, "confianza", None) in e["conf"]:
+            e["conf"][m.confianza] += 1
+        e["ultima"] = m.created_at.isoformat() if m.created_at else e["ultima"]
+        e["recientes"].append({"pregunta": (m.pregunta or "")[:160], "tema": getattr(m, "tema", None),
+                               "confianza": getattr(m, "confianza", None),
+                               "ts": m.created_at.isoformat() if m.created_at else None})
+    salida = []
+    for e in est.values():
+        temas_top = sorted(e["temas"].items(), key=lambda x: x[1], reverse=True)
+        salida.append({
+            "device": e["device"], "alias": e["alias"] or "Estudiante s/ nombre",
+            "consultas": e["consultas"], "academicas": e["academicas"],
+            "temas_n": len(e["temas"]), "temas_top": [{"tema": t, "n": n} for t, n in temas_top[:5]],
+            "vacios": e["vacios"], "escaladas": e["escaladas"], "conf": e["conf"],
+            "ultima": e["ultima"], "recientes": list(reversed(e["recientes"]))[:6]})
+    salida.sort(key=lambda x: (x["ultima"] or ""), reverse=True)
+    # Señales de otros módulos a nivel de curso (identidad cruzada aún no unificada → totales del curso).
+    resumen = {"estudiantes_activos": len(salida), "consultas_totales": len(msgs)}
+    try:
+        from app.models.push import StudentCourseFollow, PushSubscription
+        cid = str(a.course_id)
+        follows = db.query(StudentCourseFollow).filter(StudentCourseFollow.course_id == cid).all()
+        owners = {f.owner_key for f in follows}
+        resumen["siguiendo_curso"] = len(owners)
+        con_avisos = 0
+        for ow in owners:
+            if db.query(PushSubscription).filter(PushSubscription.owner_key == ow).first():
+                con_avisos += 1
+        resumen["con_avisos"] = con_avisos
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from app.models.evaluacion_agenda import EvaluacionAgenda
+        resumen["evaluaciones_cargadas"] = db.query(EvaluacionAgenda).filter(
+            EvaluacionAgenda.course_id == str(a.course_id)).count()
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "estudiantes": salida, "resumen": resumen,
+            "nombre_curso": a.nombre_curso, "codigo": a.codigo}
+
+
 def set_confianza(db: Session, mensaje_id, device_id, confianza) -> dict:
     confianza = (confianza or "").strip().lower()
     if confianza not in ("baja", "media", "alta"):

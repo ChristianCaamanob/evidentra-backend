@@ -180,4 +180,11 @@ def tick(db: Session) -> dict:
             db.add(PushSent(eval_id=str(e.id), owner_key=f.owner_key, hito=str(dias)))
             db.commit()
             enviados += n
-    return {"ok": True, "enviados": enviados}
+    # Alarmas de recordatorios personales del alumno (fecha/hora que él mismo puso).
+    personales = 0
+    try:
+        from app.services import recordatorio_service as rs
+        personales = rs.tick(db)
+    except Exception:  # noqa: BLE001
+        _log.exception("tick recordatorios personales")
+    return {"ok": True, "enviados": enviados, "personales": personales}

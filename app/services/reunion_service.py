@@ -185,6 +185,16 @@ def reservar(db: Session, code: str, payload: dict) -> dict:
                 invitado_owner_key=(str(p.get("owner_key") or "").strip()[:80] or None),
                 nota=(str(p.get("nota") or "").strip()[:300] or None), video_url=video)
     db.add(r); db.commit()
+    # Avisar al anfitrión (push) que le reservaron un horario.
+    try:
+        from app.services import push_service as ps
+        ps.enviar_a_owner(db, d.owner_key, {
+            "title": "Nueva reserva 🦊",
+            "body": f"{invitado} reservó «{d.titulo}»: {fecha} a las {inicio}.",
+            "tag": f"reserva-{r.id}", "url": "/?agenda=1",
+            "icon": "/runi/icons/icon-192.png", "badge": "/runi/icons/icon-192.png"})
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True, "reserva": _reserva_dict(r, d), "ics": _ics(r, d)}
 
 

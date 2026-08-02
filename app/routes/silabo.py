@@ -424,3 +424,37 @@ def reunion_cancelar(request: Request, reserva_id: str, payload: dict = None, db
     p = payload or {}
     ow = hs.owner_key(db, p.get("device_id", ""), p.get("sesion", ""))
     return rs.cancelar(db, ow, reserva_id)
+
+
+# ── Recordatorios personales del alumno (v2.0 · con alarma push) ───────────────
+@router.post("/alumno/recordatorios")
+@limit("30/minute")
+def recordatorio_crear(request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import recordatorio_service as rs
+    from app.services import horario_service as hs
+    p = payload or {}
+    ow = hs.owner_key(db, p.get("device_id", ""), p.get("sesion", ""))
+    return rs.crear(db, ow, p)
+
+
+@router.get("/alumno/recordatorios")
+def recordatorio_listar(device_id: str = "", sesion: str = "", db: Session = Depends(get_db)):
+    from app.services import recordatorio_service as rs
+    from app.services import horario_service as hs
+    return rs.listar(db, hs.owner_key(db, device_id, sesion))
+
+
+@router.delete("/alumno/recordatorios/{rid}")
+@limit("30/minute")
+def recordatorio_eliminar(request: Request, rid: str, payload: dict = None, db: Session = Depends(get_db)):
+    from app.services import recordatorio_service as rs
+    from app.services import horario_service as hs
+    p = payload or {}
+    ow = hs.owner_key(db, p.get("device_id", ""), p.get("sesion", ""))
+    return rs.eliminar(db, ow, rid)
+
+
+# ── Monitoreo docente por estudiante (v2.0, read-only) ─────────────────────────
+@router.get("/courses/{course_id}/monitoreo", dependencies=[Depends(req_profesor)])
+def curso_monitoreo(course_id: UUID, db: Session = Depends(get_db)):
+    return sil.monitoreo_curso(db, course_id)
