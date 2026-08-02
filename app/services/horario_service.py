@@ -57,7 +57,13 @@ def _json(txt: str):
 
 
 def _norm_dia(v) -> int | None:
-    s = str(v or "").strip().lower()
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, int):
+        return v if 0 <= v <= 6 else None
+    s = str(v).strip().lower()
     if s.isdigit():
         n = int(s)
         return n if 0 <= n <= 6 else None
