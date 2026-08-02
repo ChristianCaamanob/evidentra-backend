@@ -101,7 +101,13 @@ _USER = (
     '{"bloques":[{"asignatura":"","dia":"Lun|Mar|Mie|Jue|Vie|Sab|Dom","inicio":"HH:MM",'
     '"fin":"HH:MM","sala":"","docente":"","tipo":"clase|lab|ayudantia|otro"}],"avisos":["texto corto"]}\n'
     "Reglas: un bloque por franja y día (si una clase se repite en varios días, crea un bloque por día). "
-    "Usa 24h (ej 14:30). En 'avisos' incluye choques de horario detectados o campos dudosos. "
+    "Usa 24h (ej 14:30). Extrae TODAS las celdas con contenido (clases, laboratorios, coordinaciones, "
+    "reuniones, talleres): cada celda no vacía bajo un día es un bloque. "
+    "Si el horario es una GRILLA con columna de HORA que muestra dos horas por fila (inicio y fin del "
+    "módulo), usa la primera como 'inicio' y la segunda como 'fin'. Combina celdas verticalmente unidas "
+    "en un solo bloque con el rango completo. El nombre de la asignatura/actividad va en 'asignatura' y "
+    "cualquier código de sala/aula (ej. MORA110, A-201) en 'sala'. "
+    "En 'avisos' incluye choques de horario detectados o campos dudosos. "
     "Si el texto/imagen no parece un horario, devuelve bloques:[] y un aviso explicándolo."
 )
 
@@ -113,9 +119,9 @@ def extraer(imagenes: list | None, texto: str = "") -> dict:
     try:
         from app.services import correccion_experta_service as ce
         if imagenes:
-            crudo = ce._llamar_anthropic_vision(_SYSTEM, _USER, imagenes, max_tokens=2200)
+            crudo = ce._llamar_anthropic_vision(_SYSTEM, _USER, imagenes, max_tokens=8000)
         else:
-            crudo = ce._llamar_anthropic(_SYSTEM, _USER + "\n\nHORARIO (texto):\n" + texto[:8000], max_tokens=2200)
+            crudo = ce._llamar_anthropic(_SYSTEM, _USER + "\n\nHORARIO (texto):\n" + texto[:8000], max_tokens=8000)
     except Exception as e:  # noqa: BLE001
         raise unprocessable(f"No pude leer el horario ahora: {e}")
 
