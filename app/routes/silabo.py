@@ -319,3 +319,45 @@ def evals_eliminar(eval_id: UUID, db: Session = Depends(get_db)):
 def evals_publicas(codigo: str, db: Session = Depends(get_db)):
     from app.services import evaluaciones_agenda_service as ev
     return ev.listar_por_silabo(db, codigo)
+
+
+# ── Web Push (v2.0 · notificaciones a pantalla bloqueada) ──────────────────────
+@router.get("/push/vapid")
+def push_vapid(db: Session = Depends(get_db)):
+    from app.services import push_service as ps
+    return ps.vapid_public(db)
+
+
+@router.post("/push/subscribe")
+@limit("20/minute")
+def push_subscribe(request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import push_service as ps
+    from app.services import horario_service as hs
+    p = payload or {}
+    ow = hs.owner_key(db, p.get("device_id", ""), p.get("sesion", ""))
+    return ps.guardar_sub(db, ow, p.get("subscription") or {})
+
+
+@router.post("/push/follow")
+@limit("30/minute")
+def push_follow(request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import push_service as ps
+    from app.services import horario_service as hs
+    from app.services import silabo_service as sil
+    p = payload or {}
+    ow = hs.owner_key(db, p.get("device_id", ""), p.get("sesion", ""))
+    codigo = str(p.get("codigo") or "").strip()
+    if not codigo:
+        return {"ok": False}
+    a = sil.agente_por_codigo(db, codigo)
+    if not a or not getattr(a, "course_id", None):
+        return {"ok": False}
+    return ps.seguir_curso(db, ow, a.course_id, codigo)
+
+
+@router.post("/push/tick")
+@limit("6/minute")
+def push_tick(request: Request, db: Session = Depends(get_db)):
+    """Barrido idempotente de recordatorios. Seguro de llamar repetidamente (dedupe interno)."""
+    from app.services import push_service as ps
+    return ps.tick(db)

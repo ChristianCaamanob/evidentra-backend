@@ -29,3 +29,6 @@ python-pptx>=0.6.21,<1.1
 
 # Passkeys (asistencia AS2/AS3) — cripto WebAuthn auditada de Duo
 webauthn>=2.0,<3
+
+# Web Push (v2.0 · notificaciones a pantalla bloqueada de la PWA) — VAPID + envío
+pywebpush>=2.0,<3
