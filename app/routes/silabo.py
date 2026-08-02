@@ -361,3 +361,66 @@ def push_tick(request: Request, db: Session = Depends(get_db)):
     """Barrido idempotente de recordatorios. Seguro de llamar repetidamente (dedupe interno)."""
     from app.services import push_service as ps
     return ps.tick(db)
+
+
+# ── Reuniones / reservas nativas (v2.0 · Bookings keyless) ─────────────────────
+@router.post("/reuniones")
+@limit("15/minute")
+def reunion_crear(request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import reunion_service as rs
+    from app.services import horario_service as hs
+    p = payload or {}
+    ow = hs.owner_key(db, p.get("device_id", ""), p.get("sesion", ""))
+    return rs.crear(db, ow, p.get("anfitrion", ""), p)
+
+
+@router.get("/reuniones/mias")
+def reunion_mias(device_id: str = "", sesion: str = "", db: Session = Depends(get_db)):
+    from app.services import reunion_service as rs
+    from app.services import horario_service as hs
+    return rs.mias(db, hs.owner_key(db, device_id, sesion))
+
+
+@router.get("/reuniones/agenda")
+def reunion_agenda(device_id: str = "", sesion: str = "", db: Session = Depends(get_db)):
+    """Reuniones del alumno (como anfitrión y como invitado) para fusionar en su agenda."""
+    from app.services import reunion_service as rs
+    from app.services import horario_service as hs
+    return rs.de_alumno(db, hs.owner_key(db, device_id, sesion))
+
+
+@router.delete("/reuniones/{code}")
+@limit("15/minute")
+def reunion_eliminar(request: Request, code: str, payload: dict = None, db: Session = Depends(get_db)):
+    from app.services import reunion_service as rs
+    from app.services import horario_service as hs
+    p = payload or {}
+    ow = hs.owner_key(db, p.get("device_id", ""), p.get("sesion", ""))
+    return rs.eliminar(db, ow, code)
+
+
+@router.get("/reunion/{code}")
+def reunion_publica(code: str, db: Session = Depends(get_db)):
+    from app.services import reunion_service as rs
+    return rs.publica(db, code)
+
+
+@router.post("/reunion/{code}/reservar")
+@limit("20/minute")
+def reunion_reservar(request: Request, code: str, payload: dict, db: Session = Depends(get_db)):
+    from app.services import reunion_service as rs
+    from app.services import horario_service as hs
+    p = payload or {}
+    if p.get("sesion") or p.get("device_id"):
+        p = dict(p, owner_key=hs.owner_key(db, p.get("device_id", ""), p.get("sesion", "")))
+    return rs.reservar(db, code, p)
+
+
+@router.post("/reunion/reserva/{reserva_id}/cancelar")
+@limit("20/minute")
+def reunion_cancelar(request: Request, reserva_id: str, payload: dict = None, db: Session = Depends(get_db)):
+    from app.services import reunion_service as rs
+    from app.services import horario_service as hs
+    p = payload or {}
+    ow = hs.owner_key(db, p.get("device_id", ""), p.get("sesion", ""))
+    return rs.cancelar(db, ow, reserva_id)
