@@ -8,6 +8,7 @@ ve los huecos LIBRES de los próximos N días y reserva uno → cita con sala de
 from __future__ import annotations
 
 import datetime as _dt
+import os
 import re
 import secrets
 import uuid as _uuid
@@ -51,9 +52,15 @@ def _gen_code(db: Session) -> str:
     return "".join(secrets.choice(_ALFABETO) for _ in range(9))
 
 
+# Instancia Jitsi SIN login (meet.jit.si exige que el moderador inicie sesión con Google). El frontend
+# reconstruye el dominio desde _JITSI_DOMAIN, así que aquí basta con dejar un dominio keyless coherente
+# para el .ics y el enlace externo de respaldo. Configurable por env JITSI_DOMAIN.
+_JITSI_DOMAIN = os.getenv("JITSI_DOMAIN", "meet.ffmuc.net")
+
+
 def _video_url(code: str, fecha: str, inicio: str) -> str:
     room = f"EvalysRuni-{code}-{fecha.replace('-', '')}{inicio.replace(':', '')}"
-    return f"https://meet.jit.si/{room}"
+    return f"https://{_JITSI_DOMAIN}/{room}"
 
 
 def _disp_dict(d: Disponibilidad) -> dict:
