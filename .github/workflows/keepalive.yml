@@ -14,8 +14,13 @@ jobs:
           for i in 1 2 3; do
             code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 70 https://evidentra-backend.onrender.com/api/v1/health || echo 000)
             echo "intento $i -> HTTP $code"
-            [ "$code" = "200" ] && exit 0
+            [ "$code" = "200" ] && break
             sleep 25
           done
-          echo "Backend no respondió 200 (puede estar despertando). Best-effort."
+      - name: Tick de recordatorios push
+        # Dispara los recordatorios amables de evaluaciones (12 sem/1 sem/3 días) y las alarmas de
+        # los recordatorios personales del alumno cuando llega su hora. Es idempotente (dedupe en la BD).
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 70 -X POST https://evidentra-backend.onrender.com/api/v1/push/tick || echo 000)
+          echo "push/tick -> HTTP $code"
           exit 0
