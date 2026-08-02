@@ -138,27 +138,56 @@ def perfil_estudiante(db: Session, codigo: str, device_id: str) -> dict:
             "temas": lista[:12], "por_semana": por_semana,
             "ultima": (acad[-1].created_at.isoformat() if acad else None)}
 def monitoreo_curso(db: Session, course_id) -> dict:
-    """Monitoreo docente (read-only): actividad de cada estudiante con el copiloto Runi + señales de
-    los otros módulos (agenda, avisos, reuniones) a nivel de curso. Identidad por device_id/alias."""
+    """Monitoreo docente (read-only) UNIFICADO por estudiante: cruza TODOS los módulos (Runi, agenda,
+    avisos, recordatorios, reuniones) resolviendo la identidad device_id → owner_key → cuenta."""
     a = agente_de_curso(db, course_id)
     if not a:
         return {"ok": True, "estudiantes": [], "resumen": {}, "sin_agente": True}
-    msgs = (db.query(MensajeSilabo)
-            .filter(MensajeSilabo.agente_id == a.id)
+    from app.models.device_identity import DeviceIdentity
+    from app.models.push import StudentCourseFollow, PushSubscription
+    from app.models.agenda import AgendaBloque
+    from app.models.recordatorio import RecordatorioPersonal
+    from app.models.reunion import Disponibilidad, Reserva
+    from app.models.student_account import StudentAccount
+    cid = str(a.course_id)
+
+    # Mapa de identidad: device_id → owner_key (+ nombre de cuenta).
+    idmap = {d.device_id: d for d in db.query(DeviceIdentity).all()}
+
+    def _resolver(device_id):
+        d = idmap.get(device_id)
+        if d:
+            return d.owner_key, d.nombre
+        dev = re.sub(r"[^0-9a-zA-Z_-]", "", str(device_id or "anon"))[:64] or "anon"
+        return "dev:" + dev, None
+
+    def _nombre_de_owner(ow):
+        if ow.startswith("sid:"):
+            try:
+                c = db.query(StudentAccount).filter(StudentAccount.id == _uuid(ow[4:])).first()
+                if c:
+                    return (_nombre_amable(c.nombres, c.apellido_paterno) or c.nombres or "Estudiante")
+            except Exception:  # noqa: BLE001
+                pass
+        return None
+
+    # 1) Actividad con Runi, agrupada por owner_key resuelto (unifica varios dispositivos de un mismo alumno).
+    msgs = (db.query(MensajeSilabo).filter(MensajeSilabo.agente_id == a.id)
             .order_by(MensajeSilabo.created_at.asc()).all())
     est = {}
     for m in msgs:
-        dev = (m.device_id or "—")
-        e = est.get(dev)
+        ow, nom = _resolver(m.device_id or "")
+        e = est.get(ow)
         if not e:
-            e = est[dev] = {"device": dev, "alias": None, "consultas": 0, "academicas": 0,
-                            "temas": {}, "vacios": 0, "escaladas": 0,
-                            "conf": {"baja": 0, "media": 0, "alta": 0}, "ultima": None, "recientes": []}
+            e = est[ow] = {"owner": ow, "nombre": nom, "alias": None, "consultas": 0, "academicas": 0,
+                           "temas": {}, "vacios": 0, "escaladas": 0,
+                           "conf": {"baja": 0, "media": 0, "alta": 0}, "ultima": None, "recientes": []}
+        if nom and not e["nombre"]:
+            e["nombre"] = nom
         if m.alias:
             e["alias"] = m.alias
         e["consultas"] += 1
-        es_acad = (getattr(m, "tipo", None) or "") not in _TIPOS_NO_ACADEMICO
-        if es_acad:
+        if (getattr(m, "tipo", None) or "") not in _TIPOS_NO_ACADEMICO:
             e["academicas"] += 1
             key = (getattr(m, "tema", None) or "").strip() or "Sin clasificar"
             e["temas"][key] = e["temas"].get(key, 0) + 1
@@ -172,35 +201,44 @@ def monitoreo_curso(db: Session, course_id) -> dict:
         e["recientes"].append({"pregunta": (m.pregunta or "")[:160], "tema": getattr(m, "tema", None),
                                "confianza": getattr(m, "confianza", None),
                                "ts": m.created_at.isoformat() if m.created_at else None})
+
+    # 2) Incluir también a quien sigue el curso aunque no haya consultado a Runi.
+    for f in db.query(StudentCourseFollow).filter(StudentCourseFollow.course_id == cid).all():
+        if f.owner_key not in est:
+            est[f.owner_key] = {"owner": f.owner_key, "nombre": None, "alias": None, "consultas": 0,
+                                "academicas": 0, "temas": {}, "vacios": 0, "escaladas": 0,
+                                "conf": {"baja": 0, "media": 0, "alta": 0}, "ultima": None, "recientes": []}
+
+    # 3) Señales por-estudiante de los OTROS módulos (todo por owner_key).
     salida = []
-    for e in est.values():
+    con_avisos = 0
+    for ow, e in est.items():
+        agenda_n = db.query(AgendaBloque).filter(AgendaBloque.owner_key == ow).count()
+        avisos = db.query(PushSubscription).filter(PushSubscription.owner_key == ow).first() is not None
+        if avisos:
+            con_avisos += 1
+        recs = db.query(RecordatorioPersonal).filter(RecordatorioPersonal.owner_key == ow).count()
+        reun = (db.query(Disponibilidad).filter(Disponibilidad.owner_key == ow).count()
+                + db.query(Reserva).filter(Reserva.invitado_owner_key == ow).count())
         temas_top = sorted(e["temas"].items(), key=lambda x: x[1], reverse=True)
+        nombre = e["nombre"] or _nombre_de_owner(ow) or e["alias"] or "Estudiante s/ nombre"
         salida.append({
-            "device": e["device"], "alias": e["alias"] or "Estudiante s/ nombre",
+            "owner": ow, "nombre": nombre, "identificado": ow.startswith("sid:"),
             "consultas": e["consultas"], "academicas": e["academicas"],
             "temas_n": len(e["temas"]), "temas_top": [{"tema": t, "n": n} for t, n in temas_top[:5]],
             "vacios": e["vacios"], "escaladas": e["escaladas"], "conf": e["conf"],
-            "ultima": e["ultima"], "recientes": list(reversed(e["recientes"]))[:6]})
-    salida.sort(key=lambda x: (x["ultima"] or ""), reverse=True)
-    # Señales de otros módulos a nivel de curso (identidad cruzada aún no unificada → totales del curso).
-    resumen = {"estudiantes_activos": len(salida), "consultas_totales": len(msgs)}
-    try:
-        from app.models.push import StudentCourseFollow, PushSubscription
-        cid = str(a.course_id)
-        follows = db.query(StudentCourseFollow).filter(StudentCourseFollow.course_id == cid).all()
-        owners = {f.owner_key for f in follows}
-        resumen["siguiendo_curso"] = len(owners)
-        con_avisos = 0
-        for ow in owners:
-            if db.query(PushSubscription).filter(PushSubscription.owner_key == ow).first():
-                con_avisos += 1
-        resumen["con_avisos"] = con_avisos
-    except Exception:  # noqa: BLE001
-        pass
+            "ultima": e["ultima"], "recientes": list(reversed(e["recientes"]))[:6],
+            "modulos": {"agenda": agenda_n, "avisos": avisos, "recordatorios": recs, "reuniones": reun}})
+    salida.sort(key=lambda x: (x["ultima"] or "", x["consultas"]), reverse=True)
+
+    resumen = {"estudiantes": len(salida), "consultas_totales": len(msgs),
+               "con_avisos": con_avisos,
+               "con_agenda": sum(1 for s in salida if s["modulos"]["agenda"] > 0),
+               "identificados": sum(1 for s in salida if s["identificado"])}
     try:
         from app.models.evaluacion_agenda import EvaluacionAgenda
         resumen["evaluaciones_cargadas"] = db.query(EvaluacionAgenda).filter(
-            EvaluacionAgenda.course_id == str(a.course_id)).count()
+            EvaluacionAgenda.course_id == cid).count()
     except Exception:  # noqa: BLE001
         pass
     return {"ok": True, "estudiantes": salida, "resumen": resumen,

@@ -29,16 +29,41 @@ _COLORES = ["#34e5a8", "#f0954a", "#9d7cff", "#4da5ff", "#ff6b9d", "#f6bd60", "#
 
 
 def owner_key(db: Session, device_id: str, sesion: str = "") -> str:
+    info = None
+    dev = re.sub(r"[^0-9a-zA-Z_-]", "", str(device_id or "anon"))[:64] or "anon"
+    ok = "dev:" + dev
     if sesion:
         try:
             from app.services import alumno_auth as aa
             info = aa.sesion_desde_token(db, sesion)
             if info and info.get("sid"):
-                return "sid:" + str(info["sid"])
+                ok = "sid:" + str(info["sid"])
+        except Exception:  # noqa: BLE001
+            info = None
+    # Puente de identidad para el monitoreo docente: recuerda device_id → owner_key (+ nombre).
+    if device_id:
+        try:
+            _registrar_identidad(db, dev, ok, info)
         except Exception:  # noqa: BLE001
             pass
-    dev = re.sub(r"[^0-9a-zA-Z_-]", "", str(device_id or "anon"))[:64] or "anon"
-    return "dev:" + dev
+    return ok
+
+
+def _registrar_identidad(db: Session, device_id: str, owner: str, info) -> None:
+    from app.models.device_identity import DeviceIdentity
+    nombre = (info or {}).get("nombre") if info else None
+    aid = (info or {}).get("sid") if info else None
+    row = db.query(DeviceIdentity).filter(DeviceIdentity.device_id == device_id).first()
+    if not row:
+        db.add(DeviceIdentity(device_id=device_id, owner_key=owner, account_id=aid, nombre=nombre))
+        db.commit()
+    elif row.owner_key != owner or (nombre and row.nombre != nombre) or (aid and row.account_id != aid):
+        row.owner_key = owner
+        if aid:
+            row.account_id = aid
+        if nombre:
+            row.nombre = nombre
+        db.commit()
 
 
 def _json(txt: str):
