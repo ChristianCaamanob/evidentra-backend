@@ -416,6 +416,30 @@ def reunion_reservar(request: Request, code: str, payload: dict, db: Session = D
     return rs.reservar(db, code, p)
 
 
+@router.get("/reunion/video-config")
+def reunion_video_config(db: Session = Depends(get_db)):
+    from app.services import reunion_service as rs
+    return rs.video_config()
+
+
+@router.post("/reunion/video-jwt")
+@limit("30/minute")
+def reunion_video_jwt(request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import reunion_service as rs
+    from app.services import horario_service as hs
+    p = payload or {}
+    ow = hs.owner_key(db, p.get("device_id", ""), p.get("sesion", ""))
+    nombre = str(p.get("nombre") or "").strip()
+    if not nombre and p.get("sesion"):
+        try:
+            from app.services import alumno_auth as aa
+            info = aa.sesion_desde_token(db, p.get("sesion"))
+            nombre = (info or {}).get("nombre") or ""
+        except Exception:  # noqa: BLE001
+            pass
+    return rs.video_jwt(str(p.get("room") or "").strip(), nombre, ow, moderador=True)
+
+
 @router.post("/reunion/reserva/{reserva_id}/cancelar")
 @limit("20/minute")
 def reunion_cancelar(request: Request, reserva_id: str, payload: dict = None, db: Session = Depends(get_db)):

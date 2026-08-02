@@ -57,6 +57,48 @@ def _gen_code(db: Session) -> str:
 # para el .ics y el enlace externo de respaldo. Configurable por env JITSI_DOMAIN.
 _JITSI_DOMAIN = os.getenv("JITSI_DOMAIN", "meet.ffmuc.net")
 
+# JaaS de 8x8 (video embebido + marca Evalys, sin login para el usuario). La llave privada vive SOLO
+# aquí (env de Render); el JWT se firma en el servidor. Si no están las 3 variables → modo keyless.
+_JAAS_APP_ID = os.getenv("JAAS_APP_ID", "").strip()
+_JAAS_KID = os.getenv("JAAS_KID", "").strip()
+_JAAS_PRIVATE_KEY = os.getenv("JAAS_PRIVATE_KEY", "").strip()
+
+
+def _jaas_activo() -> bool:
+    return bool(_JAAS_APP_ID and _JAAS_KID and _JAAS_PRIVATE_KEY)
+
+
+def video_config() -> dict:
+    """El frontend consulta esto para saber si embeber (JaaS) o abrir keyless."""
+    if _jaas_activo():
+        return {"ok": True, "provider": "jaas", "domain": "8x8.vc", "appId": _JAAS_APP_ID}
+    return {"ok": True, "provider": "keyless", "domain": _JITSI_DOMAIN}
+
+
+def video_jwt(room: str, nombre: str, owner_key: str, moderador: bool = True) -> dict:
+    """Firma un JWT de JaaS (RS256) para entrar embebido sin que el usuario inicie sesión."""
+    if not _jaas_activo():
+        return {"ok": False, "provider": "keyless", "domain": _JITSI_DOMAIN}
+    try:
+        from jose import jwt as _jwt
+        now = int(_dt.datetime.utcnow().timestamp())
+        key = _JAAS_PRIVATE_KEY.replace("\\n", "\n")   # por si viene con saltos escapados en el env
+        claims = {
+            "aud": "jitsi", "iss": "chat", "sub": _JAAS_APP_ID,
+            "room": room or "*", "iat": now, "nbf": now - 10, "exp": now + 3 * 3600,
+            "context": {
+                "user": {"name": (nombre or "Invitado")[:80], "id": (owner_key or "anon")[:80],
+                         "moderator": bool(moderador)},
+                "features": {"livestreaming": False, "recording": False,
+                             "transcription": False, "outbound-call": False},
+            },
+        }
+        token = _jwt.encode(claims, key, algorithm="RS256", headers={"kid": _JAAS_KID})
+        return {"ok": True, "provider": "jaas", "domain": "8x8.vc", "appId": _JAAS_APP_ID,
+                "room": room, "jwt": token}
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "provider": "keyless", "domain": _JITSI_DOMAIN}
+
 
 def _video_url(code: str, fecha: str, inicio: str) -> str:
     room = f"EvalysRuni-{code}-{fecha.replace('-', '')}{inicio.replace(':', '')}"
