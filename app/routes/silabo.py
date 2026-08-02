@@ -270,3 +270,27 @@ def alumno_sesion(token: str = "", db: Session = Depends(get_db)):
     from app.services import alumno_auth as aa
     info = aa.sesion_desde_token(db, token)
     return {"ok": bool(info), "alumno": info}
+
+
+# ── Horario mágico + Agenda (v2.0) ────────────────────────────────────────────
+@router.post("/alumno/horario/extraer")
+@limit("6/minute")
+def alumno_horario_extraer(request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import horario_service as hs
+    p = payload or {}
+    return hs.extraer(p.get("imagenes"), p.get("texto", ""))
+
+
+@router.post("/alumno/agenda")
+@limit("20/minute")
+def alumno_agenda_guardar(request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import horario_service as hs
+    p = payload or {}
+    ow = hs.owner_key(db, p.get("device_id", ""), p.get("sesion", ""))
+    return hs.guardar(db, ow, p.get("bloques") or [])
+
+
+@router.get("/alumno/agenda")
+def alumno_agenda_obtener(device_id: str = "", sesion: str = "", db: Session = Depends(get_db)):
+    from app.services import horario_service as hs
+    return hs.obtener(db, hs.owner_key(db, device_id, sesion))
