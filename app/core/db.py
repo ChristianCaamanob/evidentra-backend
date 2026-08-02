@@ -25,6 +25,7 @@ from app.models.sala_estudio import SalaEstudio, SalaMensaje  # noqa: F401
 from app.models.pandilla import PandillaUbicacion  # noqa: F401
 from app.models.student_account import StudentAccount, StudentPasskey  # noqa: F401
 from app.models.agenda import AgendaBloque  # noqa: F401
+from app.models.evaluacion_agenda import EvaluacionAgenda  # noqa: F401
 
 # Normaliza el esquema de Render/Heroku: SQLAlchemy 2.0 exige 'postgresql://'.
 _db_url = settings.database_url

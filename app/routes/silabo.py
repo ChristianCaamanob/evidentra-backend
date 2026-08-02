@@ -294,3 +294,28 @@ def alumno_agenda_guardar(request: Request, payload: dict, db: Session = Depends
 def alumno_agenda_obtener(device_id: str = "", sesion: str = "", db: Session = Depends(get_db)):
     from app.services import horario_service as hs
     return hs.obtener(db, hs.owner_key(db, device_id, sesion))
+
+
+# ── Evaluaciones del curso (docente carga fecha → agenda del alumno + recordatorios) ──
+@router.post("/courses/{course_id}/evaluaciones", dependencies=[Depends(req_profesor)])
+def evals_crear(course_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    from app.services import evaluaciones_agenda_service as ev
+    return ev.crear(db, course_id, payload)
+
+
+@router.get("/courses/{course_id}/evaluaciones", dependencies=[Depends(req_profesor)])
+def evals_listar(course_id: UUID, db: Session = Depends(get_db)):
+    from app.services import evaluaciones_agenda_service as ev
+    return ev.listar(db, course_id)
+
+
+@router.delete("/evaluaciones/{eval_id}", dependencies=[Depends(req_profesor)])
+def evals_eliminar(eval_id: UUID, db: Session = Depends(get_db)):
+    from app.services import evaluaciones_agenda_service as ev
+    return ev.eliminar(db, eval_id)
+
+
+@router.get("/silabo/{codigo}/evaluaciones")
+def evals_publicas(codigo: str, db: Session = Depends(get_db)):
+    from app.services import evaluaciones_agenda_service as ev
+    return ev.listar_por_silabo(db, codigo)
