@@ -138,9 +138,27 @@ _USER = (
     "SALA/AULA: es un código alfanumérico corto (ej. MORA110, MORA210, B102, F407, F105, A-201) o con "
     "prefijo (Sala X, Lab. X, Aud. B, Pab. C-12). ES UN ERROR MUY COMÚN OMITIRLA: revisa la última línea "
     "de CADA celda; si hay recinto, ponlo en 'sala'. Solo deja 'sala' vacío si la celda de verdad no lo tiene. "
+    "OJO: 'UDD', 'USS', 'UdeC', 'UNAB', 'UCSC', 'UDLA' son UNIVERSIDADES/campus y son parte del NOMBRE del "
+    "ramo (van en 'asignatura'), NUNCA son la sala. Las secciones (T01, T03, T50) tampoco son sala. "
     "En 'avisos' incluye choques de horario detectados o campos dudosos. "
     "Si el texto/imagen no parece un horario, devuelve bloques:[] y un aviso explicándolo."
 )
+
+# Siglas de universidad/campus/carrera que el modelo confunde con sala (NO son recintos).
+_NO_SALA = {"UDD", "USS", "UDEC", "UNAB", "UCSC", "UDLA", "PUC", "PUCV", "USACH", "UV", "UBB", "UCN",
+            "UACH", "UTAL", "UFRO", "UMAG", "UDA", "UTA", "UST", "UAI", "UANDES", "UCM", "UOH", "UASS",
+            "IP", "CFT", "UDP", "UAH", "UCEN", "UMCE", "USM", "UTFSM", "DCM", "UDDUSS"}
+
+
+def _limpia_sala(s):
+    """Descarta como 'sala' las siglas de universidad/campus (UDD, USS, UdeC…) y basura sin dígitos."""
+    if not s:
+        return None
+    norm = re.sub(r"[^A-Za-z0-9]", "", str(s)).upper()
+    if not norm or norm in _NO_SALA:
+        return None
+    return str(s).strip()[:80]
+
 
 # Recupera la sala desde el texto literal de la celda cuando el modelo la omitió en 'sala'.
 _SALA_PREFIJO = re.compile(r"\b(?:sala|lab\.?|aud\.?|auditorio|pab\.?|pabell[oó]n|edif\.?|edificio)\s*[:.]?\s*([A-Za-z]?\.?\s?-?\s?\d[\w.\- ]{0,10})", re.I)
@@ -196,9 +214,13 @@ def extraer(imagenes: list | None, texto: str = "") -> dict:
         if dia is None or not ini or not asig:
             continue
         key = (dia, ini, asig.lower())
-        sala = str(b.get("sala") or "").strip()[:80] or None
+        sala_raw = str(b.get("sala") or "").strip()[:80] or None
+        sala = _limpia_sala(sala_raw)
+        if sala_raw and not sala and sala_raw not in asig:   # era sigla de U (UDD/USS…) mal puesta como sala → devolver al nombre
+            asig = (asig + " " + sala_raw).strip()[:160]
+            key = (dia, ini, asig.lower())
         if not sala:   # el modelo suele omitir la sala aunque esté en la celda → recupérala del texto literal
-            sala = _sala_desde_celda(b.get("celda"), asig) or None
+            sala = _limpia_sala(_sala_desde_celda(b.get("celda"), asig))
         fin = _norm_hora(b.get("fin"))
         doc = str(b.get("docente") or "").strip()[:120] or None
         tipo = (str(b.get("tipo") or "clase").strip().lower()[:30]) or "clase"
