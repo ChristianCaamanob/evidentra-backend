@@ -123,23 +123,47 @@ _SYSTEM = (
 )
 _USER = (
     "Extrae TODOS los bloques de clase/actividad del horario. Devuelve este JSON exacto:\n"
-    '{"bloques":[{"asignatura":"","dia":"Lun|Mar|Mie|Jue|Vie|Sab|Dom","inicio":"HH:MM",'
+    '{"bloques":[{"asignatura":"","celda":"","dia":"Lun|Mar|Mie|Jue|Vie|Sab|Dom","inicio":"HH:MM",'
     '"fin":"HH:MM","sala":"","docente":"","tipo":"clase|lab|ayudantia|otro"}],"avisos":["texto corto"]}\n'
     "Reglas: un bloque por franja y día (si una clase se repite en varios días, crea un bloque por día). "
     "Usa 24h (ej 14:30). Extrae TODAS las celdas con contenido (clases, laboratorios, coordinaciones, "
     "reuniones, talleres): cada celda no vacía bajo un día es un bloque. "
     "Si el horario es una GRILLA con columna de HORA que muestra dos horas por fila (inicio y fin del "
     "módulo), usa la primera como 'inicio' y la segunda como 'fin'. Combina celdas verticalmente unidas "
-    "en un solo bloque con el rango completo. El nombre de la asignatura/actividad va en 'asignatura'. "
-    "SALA/AULA — MUY IMPORTANTE: dentro de CADA celda suele venir, además del nombre, un código de sala "
-    "en línea aparte o al final (suele ser alfanumérico corto: letras+números, con o sin guion/punto, "
-    "ej. MORA110, A-201, LAB 3, Sala 204, Aud. B, Pab. C-12, Edif. 3 / 210). SIEMPRE que exista ese código "
-    "u nombre de recinto en la celda, sepáralo del nombre de la asignatura y ponlo en 'sala' (no lo dejes "
-    "pegado a 'asignatura' ni lo omitas). Revisa cada celda por separado: unas traen sala y otras no. "
-    "Solo deja 'sala' vacío si esa celda realmente no muestra ningún recinto. "
+    "en un solo bloque con el rango completo. "
+    "CAMPO 'celda' — OBLIGATORIO: copia LITERALMENTE TODO el texto que aparece dentro de esa celda, línea "
+    "por línea, SIN OMITIR NADA (nombre del ramo, código, sección, y MUY IMPORTANTE la SALA/AULA que casi "
+    "siempre va en una segunda línea o al final). No resumas: transcribe todo lo que ves en la celda. "
+    "Luego, a partir de 'celda': pon el nombre en 'asignatura' y el recinto en 'sala'. "
+    "SALA/AULA: es un código alfanumérico corto (ej. MORA110, MORA210, B102, F407, F105, A-201) o con "
+    "prefijo (Sala X, Lab. X, Aud. B, Pab. C-12). ES UN ERROR MUY COMÚN OMITIRLA: revisa la última línea "
+    "de CADA celda; si hay recinto, ponlo en 'sala'. Solo deja 'sala' vacío si la celda de verdad no lo tiene. "
     "En 'avisos' incluye choques de horario detectados o campos dudosos. "
     "Si el texto/imagen no parece un horario, devuelve bloques:[] y un aviso explicándolo."
 )
+
+# Recupera la sala desde el texto literal de la celda cuando el modelo la omitió en 'sala'.
+_SALA_PREFIJO = re.compile(r"\b(?:sala|lab\.?|aud\.?|auditorio|pab\.?|pabell[oó]n|edif\.?|edificio)\s*[:.]?\s*([A-Za-z]?\.?\s?-?\s?\d[\w.\- ]{0,10})", re.I)
+_SALA_CODIGO = re.compile(r"\b([A-Z]{2,5}\d{2,4}[A-Z]?|[A-Z]-?\d{2,4}|\d{3,4})\b")
+
+
+def _sala_desde_celda(celda: str, asignatura: str) -> str:
+    t = str(celda or "").replace("\r", "\n").strip()
+    if not t:
+        return ""
+    m = _SALA_PREFIJO.search(t)
+    if m:
+        return ("Sala " + m.group(1).strip()) if not re.match(r"(?i)^(sala|lab|aud|pab|edif)", m.group(0)) else m.group(0).strip()
+    # Sin prefijo: busca un código de recinto que NO sea parte del nombre/sección (T01, T50 son secciones, no salas).
+    asig = str(asignatura or "")
+    for cod in _SALA_CODIGO.findall(t):
+        if re.match(r"^T\d{1,2}$", cod, re.I):        # sección (T01, T03, T50) → no es sala
+            continue
+        if cod in asig:                               # ya está en el nombre → no es la sala
+            continue
+        if len(cod) >= 3:                             # MORA110, B102, F407, 210…
+            return cod
+    return ""
 
 
 def extraer(imagenes: list | None, texto: str = "") -> dict:
@@ -173,6 +197,8 @@ def extraer(imagenes: list | None, texto: str = "") -> dict:
             continue
         key = (dia, ini, asig.lower())
         sala = str(b.get("sala") or "").strip()[:80] or None
+        if not sala:   # el modelo suele omitir la sala aunque esté en la celda → recupérala del texto literal
+            sala = _sala_desde_celda(b.get("celda"), asig) or None
         fin = _norm_hora(b.get("fin"))
         doc = str(b.get("docente") or "").strip()[:120] or None
         tipo = (str(b.get("tipo") or "clase").strip().lower()[:30]) or "clase"
