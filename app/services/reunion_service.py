@@ -100,9 +100,9 @@ def video_jwt(room: str, nombre: str, owner_key: str, moderador: bool = True) ->
         return {"ok": False, "provider": "keyless", "domain": _JITSI_DOMAIN}
 
 
-def _video_url(code: str, fecha: str, inicio: str) -> str:
-    room = f"EvalysRuni-{code}-{fecha.replace('-', '')}{inicio.replace(':', '')}"
-    return f"https://{_JITSI_DOMAIN}/{room}"
+def _video_url(code: str, fecha: str = "", inicio: str = "") -> str:
+    # UNA sala por disponibilidad → el anfitrión y todos sus invitados se encuentran en la misma sala.
+    return f"https://{_JITSI_DOMAIN}/EvalysRuni-{code}"
 
 
 def _disp_dict(d: Disponibilidad) -> dict:
