@@ -321,6 +321,45 @@ def evals_publicas(codigo: str, db: Session = Depends(get_db)):
     return ev.listar_por_silabo(db, codigo)
 
 
+# ── Material del curso (el docente comparte programa/apuntes/libros/artículos con el alumno) ──
+@router.post("/courses/{course_id}/materiales", dependencies=[Depends(req_profesor)])
+@limit("30/minute")
+def materiales_crear(course_id: UUID, request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import material_curso_service as mc
+    return mc.crear(db, course_id, payload)
+
+
+@router.get("/courses/{course_id}/materiales", dependencies=[Depends(req_profesor)])
+def materiales_listar(course_id: UUID, db: Session = Depends(get_db)):
+    from app.services import material_curso_service as mc
+    return mc.listar(db, course_id)
+
+
+@router.delete("/materiales/{material_id}", dependencies=[Depends(req_profesor)])
+def materiales_eliminar(material_id: UUID, db: Session = Depends(get_db)):
+    from app.services import material_curso_service as mc
+    return mc.eliminar(db, material_id)
+
+
+@router.get("/silabo/{codigo}/materiales")
+def materiales_publicos(codigo: str, db: Session = Depends(get_db)):
+    from app.services import material_curso_service as mc
+    return mc.listar_por_silabo(db, codigo)
+
+
+@router.get("/materiales/{material_id}/archivo")
+def materiales_archivo(material_id: str, db: Session = Depends(get_db)):
+    from fastapi import Response
+    from app.services import material_curso_service as mc
+    r = mc.archivo(db, material_id)
+    if not r:
+        from app.core.errors import not_found
+        raise not_found("Archivo no encontrado.")
+    data, mime, nombre = r
+    return Response(content=data, media_type=mime,
+                    headers={"Content-Disposition": f'inline; filename="{nombre}"'})
+
+
 # ── Web Push (v2.0 · notificaciones a pantalla bloqueada) ──────────────────────
 @router.get("/push/vapid")
 def push_vapid(db: Session = Depends(get_db)):
