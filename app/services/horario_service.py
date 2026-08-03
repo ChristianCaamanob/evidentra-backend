@@ -184,7 +184,7 @@ def _sala_desde_celda(celda: str, asignatura: str) -> str:
     return ""
 
 
-def extraer(imagenes: list | None, texto: str = "") -> dict:
+def extraer(imagenes: list | None, texto: str = "", debug: bool = False) -> dict:
     imagenes = [im for im in (imagenes or []) if isinstance(im, dict) and im.get("data")][:6] or None
     if not imagenes and not (texto or "").strip():
         raise unprocessable("Envía una foto de tu horario o pégalo como texto.")
@@ -253,7 +253,11 @@ def extraer(imagenes: list | None, texto: str = "") -> dict:
                 aviso = f"Posible choque: {out[i]['asignatura']} y {out[j]['asignatura']} el {_DIAS[out[i]['dia']]}."
                 if aviso not in avisos:
                     avisos.append(aviso)
-    return {"ok": True, "bloques": out, "avisos": avisos, "total": len(out)}
+    res = {"ok": True, "bloques": out, "avisos": avisos, "total": len(out)}
+    if debug:
+        res["crudo"] = str(crudo)[:6000]        # texto literal que devolvió el modelo (diagnóstico)
+        res["n_imagenes"] = len(imagenes or [])
+    return res
 
 
 def guardar(db: Session, owner: str, bloques: list) -> dict:

@@ -278,7 +278,7 @@ def alumno_sesion(token: str = "", db: Session = Depends(get_db)):
 def alumno_horario_extraer(request: Request, payload: dict, db: Session = Depends(get_db)):
     from app.services import horario_service as hs
     p = payload or {}
-    return hs.extraer(p.get("imagenes"), p.get("texto", ""))
+    return hs.extraer(p.get("imagenes"), p.get("texto", ""), debug=bool(p.get("debug")))
 
 
 @router.post("/alumno/agenda")
