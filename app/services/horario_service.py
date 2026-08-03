@@ -158,27 +158,45 @@ def extraer(imagenes: list | None, texto: str = "") -> dict:
     data = _json(crudo)
     brutos = data.get("bloques") if isinstance(data, dict) else None
     avisos = [str(a)[:160] for a in (data.get("avisos") or [])][:8] if isinstance(data, dict) else []
-    out = []
-    ci = 0
-    asig_color = {}
+    # Se envían varias imágenes (foto completa + mitades para leer la sala): el mismo bloque puede venir
+    # repetido. Deduplicamos por (día, inicio, asignatura) y FUSIONAMOS campos: si una copia trae sala/fin
+    # y otra no, nos quedamos con la que sí (así la sala legible en la mitad “gana”).
+    dedup = {}
+    orden = []
     for b in (brutos or []):
         if not isinstance(b, dict):
             continue
         dia = _norm_dia(b.get("dia"))
         ini = _norm_hora(b.get("inicio"))
-        fin = _norm_hora(b.get("fin"))
         asig = str(b.get("asignatura") or "").strip()[:160]
         if dia is None or not ini or not asig:
             continue
-        if asig not in asig_color:
-            asig_color[asig] = _COLORES[ci % len(_COLORES)]; ci += 1
-        out.append({
-            "asignatura": asig, "dia": dia, "inicio": ini, "fin": fin or ini,
-            "sala": str(b.get("sala") or "").strip()[:80] or None,
-            "docente": str(b.get("docente") or "").strip()[:120] or None,
-            "tipo": (str(b.get("tipo") or "clase").strip().lower()[:30]) or "clase",
-            "color": asig_color[asig],
-        })
+        key = (dia, ini, asig.lower())
+        sala = str(b.get("sala") or "").strip()[:80] or None
+        fin = _norm_hora(b.get("fin"))
+        doc = str(b.get("docente") or "").strip()[:120] or None
+        tipo = (str(b.get("tipo") or "clase").strip().lower()[:30]) or "clase"
+        if key in dedup:
+            e = dedup[key]
+            if not e["sala"] and sala:
+                e["sala"] = sala
+            if (not e["fin"] or e["fin"] == e["inicio"]) and fin and fin != ini:
+                e["fin"] = fin
+            if not e["docente"] and doc:
+                e["docente"] = doc
+        else:
+            dedup[key] = {"asignatura": asig, "dia": dia, "inicio": ini, "fin": fin or ini,
+                          "sala": sala, "docente": doc, "tipo": tipo}
+            orden.append(key)
+    ci = 0
+    asig_color = {}
+    out = []
+    for key in orden:
+        e = dedup[key]
+        if e["asignatura"] not in asig_color:
+            asig_color[e["asignatura"]] = _COLORES[ci % len(_COLORES)]; ci += 1
+        e["color"] = asig_color[e["asignatura"]]
+        out.append(e)
     out.sort(key=lambda x: (x["dia"], x["inicio"]))
     # Choques (mismo día con solape) → aviso adicional si el modelo no lo detectó.
     for i in range(len(out)):
