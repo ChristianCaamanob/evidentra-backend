@@ -136,6 +136,26 @@ def enviar_a_owner(db: Session, owner_key: str, payload: dict) -> int:
     return enviados
 
 
+def enviar_a_curso(db: Session, course_id, payload: dict) -> int:
+    """Envía la notificación a TODOS los estudiantes suscritos que siguen el curso (tiempo real)."""
+    cfg = _ensure_config(db)
+    if not cfg:
+        return 0
+    seguidores = db.query(StudentCourseFollow).filter(
+        StudentCourseFollow.course_id == str(course_id)).all()
+    enviados = 0
+    for f in seguidores:
+        subs = db.query(PushSubscription).filter(PushSubscription.owner_key == f.owner_key).all()
+        for row in subs:
+            r = _enviar_a_sub(cfg, row, payload)
+            if r == "ok":
+                enviados += 1
+            elif r == "gone":
+                db.delete(row)
+    db.commit()
+    return enviados
+
+
 def _payload_eval(e: EvaluacionAgenda, dias: int) -> dict:
     tipo = _TIPO_LABEL.get((e.tipo or "").lower(), (e.tipo or "Evaluación").capitalize())
     cuando = _HITOS.get(dias, f"en {dias} días")

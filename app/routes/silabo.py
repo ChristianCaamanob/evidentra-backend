@@ -15,7 +15,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, req_profesor
+from app.api.deps import get_db, req_profesor, usuario_actual
 from app.core.config import settings
 from app.core.ratelimit import limit
 from app.models.course import Course
@@ -515,6 +515,27 @@ def recordatorio_eliminar(request: Request, rid: str, payload: dict = None, db: 
     p = payload or {}
     ow = hs.owner_key(db, p.get("device_id", ""), p.get("sesion", ""))
     return rs.eliminar(db, ow, rid)
+
+
+# ── Anuncios del docente (v2.0) → push en tiempo real + bandeja del alumno ─────
+@router.post("/courses/{course_id}/anuncios", dependencies=[Depends(req_profesor)])
+@limit("20/minute")
+def anuncio_crear(request: Request, course_id: UUID, payload: dict,
+                  usuario=Depends(usuario_actual), db: Session = Depends(get_db)):
+    from app.services import anuncio_service as ans
+    return ans.crear(db, course_id, payload or {}, autor=getattr(usuario, "name", "") or "Tu profesor")
+
+
+@router.get("/courses/{course_id}/anuncios", dependencies=[Depends(req_profesor)])
+def anuncio_listar_docente(course_id: UUID, db: Session = Depends(get_db)):
+    from app.services import anuncio_service as ans
+    return ans.listar_por_course(db, course_id)
+
+
+@router.get("/silabo/{codigo}/anuncios")
+def anuncio_listar_alumno(codigo: str, db: Session = Depends(get_db)):
+    from app.services import anuncio_service as ans
+    return ans.listar_por_codigo(db, codigo)
 
 
 # ── Notas de la Pandilla (v2.0 social, efímeras 24 h) ──────────────────────────
