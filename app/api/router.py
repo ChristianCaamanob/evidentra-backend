@@ -89,3 +89,5 @@ from app.routes.auth import router as auth_router
 api_router.include_router(auth_router)
 from app.routes.export import router as export_router
 api_router.include_router(export_router)
+from app.routes.admin_consola import router as admin_consola_router
+api_router.include_router(admin_consola_router)
