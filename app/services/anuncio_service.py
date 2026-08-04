@@ -28,8 +28,9 @@ def crear(db: Session, course_id, payload: dict, autor: str = "") -> dict:
     enviados = 0
     try:
         payload_push = {"title": "📣 " + (a.titulo or "Anuncio del curso"),
-                        "body": (a.cuerpo or "")[:180] or a.titulo,
+                        "body": (a.cuerpo or "")[:400] or a.titulo,
                         "tag": f"anuncio-{a.id}", "url": "/?avisos=1",
+                        "requireInteraction": True, "vibrate": [120, 60, 120, 60, 200],
                         "icon": "/runi/icons/icon-192.png", "badge": "/runi/icons/icon-192.png"}
         enviados = push_service.enviar_a_curso(db, course_id, payload_push)
     except Exception:
