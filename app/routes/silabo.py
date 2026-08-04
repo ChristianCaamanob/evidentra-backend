@@ -517,6 +517,34 @@ def recordatorio_eliminar(request: Request, rid: str, payload: dict = None, db: 
     return rs.eliminar(db, ow, rid)
 
 
+# ── Notas de la Pandilla (v2.0 social, efímeras 24 h) ──────────────────────────
+@router.post("/alumno/pandilla/nota")
+@limit("30/minute")
+def pand_nota_set(request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import pand_nota_service as ns
+    from app.services import horario_service as hs
+    p = payload or {}
+    ow = hs.owner_key(db, p.get("device_id", ""), p.get("sesion", ""))
+    return ns.set_nota(db, ow, p)
+
+
+@router.get("/alumno/pandilla/nota")
+def pand_nota_mia(device_id: str = "", sesion: str = "", db: Session = Depends(get_db)):
+    from app.services import pand_nota_service as ns
+    from app.services import horario_service as hs
+    return ns.mi_nota(db, hs.owner_key(db, device_id, sesion))
+
+
+@router.delete("/alumno/pandilla/nota")
+@limit("30/minute")
+def pand_nota_del(request: Request, payload: dict = None, db: Session = Depends(get_db)):
+    from app.services import pand_nota_service as ns
+    from app.services import horario_service as hs
+    p = payload or {}
+    ow = hs.owner_key(db, p.get("device_id", ""), p.get("sesion", ""))
+    return ns.eliminar(db, ow)
+
+
 # ── Monitoreo docente por estudiante (v2.0, read-only) ─────────────────────────
 @router.get("/courses/{course_id}/monitoreo", dependencies=[Depends(req_profesor)])
 def curso_monitoreo(course_id: UUID, db: Session = Depends(get_db)):
