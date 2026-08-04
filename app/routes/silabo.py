@@ -529,10 +529,10 @@ def pand_nota_set(request: Request, payload: dict, db: Session = Depends(get_db)
 
 
 @router.get("/alumno/pandilla/nota")
-def pand_nota_mia(device_id: str = "", sesion: str = "", db: Session = Depends(get_db)):
+def pand_nota_mia(device_id: str = "", sesion: str = "", curso: str = "", db: Session = Depends(get_db)):
     from app.services import pand_nota_service as ns
     from app.services import horario_service as hs
-    return ns.mi_nota(db, hs.owner_key(db, device_id, sesion))
+    return ns.mi_nota(db, hs.owner_key(db, device_id, sesion), curso)
 
 
 @router.delete("/alumno/pandilla/nota")
@@ -557,10 +557,10 @@ def pand_momento_publicar(request: Request, payload: dict, db: Session = Depends
 
 
 @router.get("/alumno/pandilla/momento")
-def pand_momento_feed(device_id: str = "", sesion: str = "", db: Session = Depends(get_db)):
+def pand_momento_feed(device_id: str = "", sesion: str = "", curso: str = "", db: Session = Depends(get_db)):
     from app.services import pand_momento_service as ms
     from app.services import horario_service as hs
-    return ms.feed(db, hs.owner_key(db, device_id, sesion))
+    return ms.feed(db, hs.owner_key(db, device_id, sesion), curso)
 
 
 @router.delete("/alumno/pandilla/momento")

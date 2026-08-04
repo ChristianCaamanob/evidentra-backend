@@ -525,6 +525,12 @@ _COLUMNAS_ADITIVAS = {
     "pandilla_ubicaciones": {
         "owner_key": "VARCHAR(80)",
     },
+    "pand_notas": {
+        "curso": "VARCHAR(40)",
+    },
+    "pand_momentos": {
+        "curso": "VARCHAR(40)",
+    },
     "sesiones_en_vivo": {
         "retro_alumno": "BOOLEAN NOT NULL DEFAULT false",
         "revelar_correccion": "BOOLEAN NOT NULL DEFAULT true",

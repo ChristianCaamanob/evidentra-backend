@@ -55,6 +55,7 @@ def publicar(db: Session, owner_key: str, payload: dict) -> dict:
     r.caption = (str(p.get("caption") or "").strip()[:140] or None)
     r.char = (str(p.get("char") or "").strip()[:40] or None)
     r.nombre = (str(p.get("nombre") or "").strip()[:80] or None)
+    r.curso = (str(p.get("curso") or "").strip()[:40] or None)
     r.reportes = 0
     r.oculto = False
     r.created_at = _dt.datetime.utcnow()   # renueva la ventana de 24 h
@@ -62,11 +63,19 @@ def publicar(db: Session, owner_key: str, payload: dict) -> dict:
     return {"ok": True, "momento": _dict(r, con_imagen=False)}
 
 
-def feed(db: Session, owner_key: str) -> dict:
+def feed(db: Session, owner_key: str, curso: str = "") -> dict:
+    """Devuelve tu momento + los momentos vigentes de tus compañeros del MISMO curso (grupo real)."""
     r = db.query(PandMomento).filter(PandMomento.owner_key == owner_key).first()
-    if r is None or r.oculto or not _vigente(r):
-        return {"ok": True, "mio": None}
-    return {"ok": True, "mio": _dict(r, con_imagen=True)}
+    mio = _dict(r, con_imagen=True) if (r is not None and not r.oculto and _vigente(r)) else None
+    companeros = []
+    cur = str(curso or "").strip()[:40]
+    if cur:
+        filas = db.query(PandMomento).filter(PandMomento.curso == cur,
+                                             PandMomento.owner_key != owner_key).all()
+        vis = [x for x in filas if (not x.oculto) and _vigente(x) and (x.imagen or "").startswith("data:image/")]
+        vis.sort(key=lambda x: x.created_at or _dt.datetime.min, reverse=True)
+        companeros = [_dict(x, con_imagen=True) for x in vis]
+    return {"ok": True, "mio": mio, "companeros": companeros}
 
 
 def eliminar(db: Session, owner_key: str) -> dict:

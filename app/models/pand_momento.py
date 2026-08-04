@@ -18,6 +18,7 @@ class PandMomento(UUIDMixin, Base):
     owner_key: Mapped[str] = mapped_column(String(80), index=True, unique=True)
     char: Mapped[str | None] = mapped_column(String(40), nullable=True)
     nombre: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    curso: Mapped[str | None] = mapped_column(String(40), index=True, nullable=True)  # código de curso (grupo real)
     imagen: Mapped[str] = mapped_column(Text, default="")          # data-URL base64 (reescalada en cliente)
     caption: Mapped[str | None] = mapped_column(String(140), nullable=True)
     reportes: Mapped[int] = mapped_column(Integer, default=0)

@@ -19,4 +19,5 @@ class PandNota(UUIDMixin, Base):
     texto: Mapped[str] = mapped_column(String(90), default="")
     char: Mapped[str | None] = mapped_column(String(40), nullable=True)     # personaje/avatar
     nombre: Mapped[str | None] = mapped_column(String(80), nullable=True)   # nombre visible
+    curso: Mapped[str | None] = mapped_column(String(40), index=True, nullable=True)  # código de curso (grupo real)
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())

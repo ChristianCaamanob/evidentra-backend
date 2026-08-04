@@ -44,16 +44,24 @@ def set_nota(db: Session, owner_key: str, payload: dict) -> dict:
     r.texto = texto
     r.char = (str(p.get("char") or "").strip()[:40] or None)
     r.nombre = (str(p.get("nombre") or "").strip()[:80] or None)
+    r.curso = (str(p.get("curso") or "").strip()[:40] or None)
     r.created_at = _dt.datetime.utcnow()   # renueva la ventana de 24 h
     db.commit()
     return {"ok": True, "nota": _dict(r)}
 
 
-def mi_nota(db: Session, owner_key: str) -> dict:
+def mi_nota(db: Session, owner_key: str, curso: str = "") -> dict:
+    """Devuelve tu nota + las notas vigentes de tus compañeros del MISMO curso (grupo real)."""
     r = db.query(PandNota).filter(PandNota.owner_key == owner_key).first()
-    if r is None or not _vigente(r):
-        return {"ok": True, "nota": None}
-    return {"ok": True, "nota": _dict(r)}
+    mio = _dict(r) if (r is not None and _vigente(r)) else None
+    companeros = []
+    cur = str(curso or "").strip()[:40]
+    if cur:
+        filas = db.query(PandNota).filter(PandNota.curso == cur,
+                                          PandNota.owner_key != owner_key).all()
+        companeros = [_dict(x) for x in filas if _vigente(x) and (x.texto or "").strip()]
+        companeros.sort(key=lambda d: d.get("created_at") or "", reverse=True)
+    return {"ok": True, "nota": mio, "companeros": companeros}
 
 
 def eliminar(db: Session, owner_key: str) -> dict:
