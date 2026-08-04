@@ -40,6 +40,31 @@ def decode_token(token: str):
     except JWTError:
         return None
 
+_OWNER_EMAILS_CACHE = None
+
+
+def _owner_emails():
+    global _OWNER_EMAILS_CACHE
+    if _OWNER_EMAILS_CACHE is None:
+        import os as _os
+        _OWNER_EMAILS_CACHE = set(e.strip().lower() for e in
+                                  _os.getenv("EVALYS_OWNER_EMAILS", "mispelis2020@gmail.com").split(",") if e.strip())
+    return _OWNER_EMAILS_CACHE
+
+
+def _ensure_owner_rol(db, teacher):
+    """El dueño (correo en EVALYS_OWNER_EMAILS) siempre queda con rol 'creador', sin depender
+    de un reinicio del servidor. Promoción idempotente (solo escribe si hace falta)."""
+    try:
+        if teacher and (teacher.email or "").lower() in _owner_emails() and teacher.rol != "creador":
+            teacher.rol = "creador"
+            teacher.email_verificado = True
+            db.commit()
+    except Exception:
+        db.rollback()
+    return teacher
+
+
 def usuario_desde_token(db, token: str):
     """Devuelve el Teacher del JWT (o None). El rol se relee de la BD, no del token,
     para que un cambio de rol tenga efecto inmediato."""
@@ -51,7 +76,8 @@ def usuario_desde_token(db, token: str):
         uid = _uuid.UUID(str(payload["sub"]))
     except (ValueError, TypeError):
         return None
-    return db.query(Teacher).filter(Teacher.id == uid).first()
+    t = db.query(Teacher).filter(Teacher.id == uid).first()
+    return _ensure_owner_rol(db, t)
 
 def _token_payload(teacher):
     return {"sub": str(teacher.id), "email": teacher.email, "rol": teacher.rol}
@@ -118,6 +144,7 @@ def login_teacher(db, email, password):
     teacher = get_teacher_by_email(db, email)
     if not teacher: return {"error": "Correo no registrado"}
     if not verify_password(password, teacher.hashed_password): return {"error": "Contraseña incorrecta"}
+    teacher = _ensure_owner_rol(db, teacher)   # el dueño → creador + correo verificado, sin depender de reinicio
     if not getattr(teacher, "email_verificado", True):
         return {"error": "Verifica tu correo antes de ingresar. Te enviamos un enlace.",
                 "email_no_verificado": True, "email": teacher.email}
