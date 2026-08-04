@@ -545,6 +545,41 @@ def pand_nota_del(request: Request, payload: dict = None, db: Session = Depends(
     return ns.eliminar(db, ow)
 
 
+# ── Momentos de la Pandilla (v2.0 social · fotos efímeras 24 h + moderación) ───
+@router.post("/alumno/pandilla/momento")
+@limit("15/minute")
+def pand_momento_publicar(request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import pand_momento_service as ms
+    from app.services import horario_service as hs
+    p = payload or {}
+    ow = hs.owner_key(db, p.get("device_id", ""), p.get("sesion", ""))
+    return ms.publicar(db, ow, p)
+
+
+@router.get("/alumno/pandilla/momento")
+def pand_momento_feed(device_id: str = "", sesion: str = "", db: Session = Depends(get_db)):
+    from app.services import pand_momento_service as ms
+    from app.services import horario_service as hs
+    return ms.feed(db, hs.owner_key(db, device_id, sesion))
+
+
+@router.delete("/alumno/pandilla/momento")
+@limit("30/minute")
+def pand_momento_del(request: Request, payload: dict = None, db: Session = Depends(get_db)):
+    from app.services import pand_momento_service as ms
+    from app.services import horario_service as hs
+    p = payload or {}
+    ow = hs.owner_key(db, p.get("device_id", ""), p.get("sesion", ""))
+    return ms.eliminar(db, ow)
+
+
+@router.post("/alumno/pandilla/momento/{mid}/reportar")
+@limit("30/minute")
+def pand_momento_reportar(request: Request, mid: str, payload: dict = None, db: Session = Depends(get_db)):
+    from app.services import pand_momento_service as ms
+    return ms.reportar(db, mid)
+
+
 # ── Monitoreo docente por estudiante (v2.0, read-only) ─────────────────────────
 @router.get("/courses/{course_id}/monitoreo", dependencies=[Depends(req_profesor)])
 def curso_monitoreo(course_id: UUID, db: Session = Depends(get_db)):

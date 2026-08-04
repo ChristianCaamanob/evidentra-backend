@@ -32,6 +32,7 @@ from app.models.recordatorio import RecordatorioPersonal  # noqa: F401
 from app.models.device_identity import DeviceIdentity  # noqa: F401
 from app.models.material_curso import MaterialCurso  # noqa: F401
 from app.models.pand_nota import PandNota  # noqa: F401
+from app.models.pand_momento import PandMomento  # noqa: F401
 
 # Normaliza el esquema de Render/Heroku: SQLAlchemy 2.0 exige 'postgresql://'.
 _db_url = settings.database_url
