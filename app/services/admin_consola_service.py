@@ -9,11 +9,15 @@ o retener diálogos indefinidamente es un módulo aparte (captura de datos nuevo
 """
 from __future__ import annotations
 
+import datetime as _dt
+
 from sqlalchemy.orm import Session
 
 from app.models.admin_log import AccesoAdminLog
 from app.models.pand_nota import PandNota
 from app.models.pand_momento import PandMomento
+from app.models.reunion import Disponibilidad, Reserva
+from app.models.silabo import MensajeSilabo, SilaboAgente
 
 
 def _log(db: Session, admin_email: str, recurso: str, detalle: str = "") -> None:
@@ -49,6 +53,42 @@ def social(db: Session, admin_email: str, con_imagen: bool = False) -> dict:
         momentos.append(d)
     _log(db, admin_email, "social", f"notas={len(notas)} momentos={len(momentos)} imagen={int(con_imagen)}")
     return {"ok": True, "notas": notas, "momentos": momentos}
+
+
+def reuniones(db: Session, admin_email: str) -> dict:
+    """Reuniones/reservas EN VIVO: disponibilidades activas + próximas citas confirmadas."""
+    disp_activas = db.query(Disponibilidad).filter(Disponibilidad.activo == True).count()  # noqa: E712
+    hoy = _dt.date.today().isoformat()
+    filas = (db.query(Reserva).filter(Reserva.estado == "confirmada", Reserva.fecha >= hoy)
+             .order_by(Reserva.fecha.asc(), Reserva.inicio.asc()).limit(80).all())
+    disp_ids = {r.disponibilidad_id for r in filas}
+    disp = {d.id: d for d in db.query(Disponibilidad).filter(Disponibilidad.id.in_(disp_ids)).all()} if disp_ids else {}
+    reservas = []
+    for r in filas:
+        d = disp.get(r.disponibilidad_id)
+        reservas.append({"id": str(r.id), "fecha": r.fecha, "inicio": r.inicio, "fin": r.fin,
+                         "invitado": r.invitado, "anfitrion": (d.anfitrion if d else ""),
+                         "titulo": (d.titulo if d else "Reunión"), "video": bool(r.video_url),
+                         "nota": r.nota})
+    _log(db, admin_email, "reuniones", f"activas={disp_activas} reservas={len(reservas)}")
+    return {"ok": True, "disponibilidades_activas": disp_activas, "reservas": reservas}
+
+
+def dialogos(db: Session, admin_email: str, limite: int = 60) -> dict:
+    """Diálogos con Runi EN VIVO: las consultas más recientes de los estudiantes (pulso, no archivo)."""
+    filas = db.query(MensajeSilabo).order_by(MensajeSilabo.created_at.desc()).limit(min(int(limite or 60), 200)).all()
+    ag_ids = {f.agente_id for f in filas}
+    agentes = {a.id: a for a in db.query(SilaboAgente).filter(SilaboAgente.id.in_(ag_ids)).all()} if ag_ids else {}
+    out = []
+    for f in filas:
+        a = agentes.get(f.agente_id)
+        curso = (a.nombre_curso if a and a.nombre_curso else (a.codigo if a else None)) or "—"
+        out.append({"id": str(f.id), "curso": curso, "alias": f.alias, "pregunta": f.pregunta,
+                    "respuesta": (f.respuesta_ia or "")[:400], "tema": f.tema, "categoria": f.categoria,
+                    "confianza": f.confianza, "estado": f.estado,
+                    "created_at": f.created_at.isoformat() if f.created_at else None})
+    _log(db, admin_email, "dialogos", f"n={len(out)}")
+    return {"ok": True, "dialogos": out}
 
 
 def accesos(db: Session, admin_email: str, limite: int = 200) -> dict:

@@ -22,6 +22,16 @@ def admin_social(con_imagen: bool = False, db: Session = Depends(get_db), admin:
     return acs.social(db, getattr(admin, "email", "") or "", con_imagen=con_imagen)
 
 
+@router.get("/reuniones")
+def admin_reuniones(db: Session = Depends(get_db), admin: Teacher = Depends(req_creador)):
+    return acs.reuniones(db, getattr(admin, "email", "") or "")
+
+
+@router.get("/dialogos")
+def admin_dialogos(limite: int = 60, db: Session = Depends(get_db), admin: Teacher = Depends(req_creador)):
+    return acs.dialogos(db, getattr(admin, "email", "") or "", limite=limite)
+
+
 @router.get("/accesos")
 def admin_accesos(limite: int = 200, db: Session = Depends(get_db), admin: Teacher = Depends(req_creador)):
     return acs.accesos(db, getattr(admin, "email", "") or "", limite=limite)
