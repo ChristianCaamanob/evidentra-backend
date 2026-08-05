@@ -264,7 +264,8 @@ def set_confianza(db: Session, mensaje_id, device_id, confianza) -> dict:
         a = db.query(SilaboAgente).filter(SilaboAgente.id == m.agente_id).first()
         # pseudo_id consistente con el frontend ('stu:'+device) para que el alumno vea su propio progreso.
         pid = "stu:" + str(device_id or m.device_id or "anon")
-        _eps.registrar_silabo(db, pid, (a.course_id if a else None), (m.tema or "consulta"),
+        # course_id del episodio = CÓDIGO del sílabo (consistente con el repaso del frontend y el dashboard docente).
+        _eps.registrar_silabo(db, pid, (a.codigo if a else None), (m.tema or "consulta"),
                               confianza, (m.respuesta_ia or "")[:500])
     except Exception:
         try:

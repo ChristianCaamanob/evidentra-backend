@@ -155,6 +155,38 @@ def mi_progreso(db: Session, pseudo_id: str) -> dict:
             "repasos_hoy": repasos}
 
 
+def resumen_docente(db: Session, course: str, dias: int = 14) -> dict:
+    """B8 · Dashboard docente de DECISIONES (no gráficos): pulso del curso + RA con mayor dificultad
+    (dominio + errores de alta confianza) + alertas pedagógicas accionables."""
+    m = metricas(db, course or None, dias)
+    desde = _dt.datetime.utcnow() - _dt.timedelta(days=max(1, int(dias or 14)))
+    q = db.query(ConfidenceObs).filter(ConfidenceObs.created_at >= desde)
+    if course:
+        q = q.filter(ConfidenceObs.course_id == course)
+    obs = q.all()
+    ras: dict[str, dict] = {}
+    for o in obs:
+        r = o.ra or "General"
+        d = ras.setdefault(r, {"ok": 0, "ng": 0, "conf": 0, "n": 0, "alta_mal": 0})
+        d["n"] += 1; d["conf"] += (o.confidence or 0)
+        if o.correct is not None:
+            d["ng"] += 1; d["ok"] += (1 if o.correct else 0)
+            if o.correct is False and (o.confidence or 0) >= 80:
+                d["alta_mal"] += 1
+    por_ra = [{"ra": r, "dominio": (round(d["ok"] / d["ng"] * 100) if d["ng"] else round(d["conf"] / max(1, d["n"]))),
+               "n": d["n"], "graduado": d["ng"] > 0, "errores_alta_confianza": d["alta_mal"]} for r, d in ras.items()]
+    por_ra.sort(key=lambda x: (x["dominio"], -x["errores_alta_confianza"]))   # más difícil primero
+    alertas = []
+    for r in por_ra:
+        if r["errores_alta_confianza"] >= 2:
+            alertas.append({"tipo": "alta_confianza", "ra": r["ra"],
+                            "texto": r["ra"] + ": varios errores con ALTA confianza → conviene una aclaración colectiva."})
+        elif r["graduado"] and r["dominio"] < 45:
+            alertas.append({"tipo": "dominio_bajo", "ra": r["ra"],
+                            "texto": r["ra"] + ": dominio bajo (" + str(r["dominio"]) + "%) → reforzar en clase."})
+    return {"ok": True, "pulso": m, "por_ra": por_ra[:8], "alertas": alertas[:6]}
+
+
 def metricas(db: Session, course_id: str | None = None, dias: int = 7) -> dict:
     """North Star + calibración en ventana de `dias`. Para dashboards (no califica estudiantes)."""
     desde = _dt.datetime.utcnow() - _dt.timedelta(days=max(1, int(dias or 7)))

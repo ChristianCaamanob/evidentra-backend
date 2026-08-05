@@ -99,3 +99,8 @@ def consent_revocar(request: Request, payload: dict, db: Session = Depends(get_d
 @router.get("/episodes/metricas", dependencies=[Depends(req_profesor)])
 def episode_metricas(course_id: str = "", dias: int = 7, db: Session = Depends(get_db)):
     return eps.metricas(db, course_id or None, dias)
+
+
+@router.get("/episodes/resumen-docente", dependencies=[Depends(req_profesor)])
+def episode_resumen_docente(course: str = "", dias: int = 14, db: Session = Depends(get_db)):
+    return eps.resumen_docente(db, course, dias)
