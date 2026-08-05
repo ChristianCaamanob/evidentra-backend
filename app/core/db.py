@@ -37,6 +37,7 @@ from app.models.admin_log import AccesoAdminLog  # noqa: F401
 from app.models.anuncio import Anuncio  # noqa: F401
 from app.models.episode import Episode, ConfidenceObs, RetentionCheck  # noqa: F401
 from app.models.analytics import AnalyticsEvent  # noqa: F401
+from app.models.consent import Consent  # noqa: F401
 
 # Normaliza el esquema de Render/Heroku: SQLAlchemy 2.0 exige 'postgresql://'.
 _db_url = settings.database_url

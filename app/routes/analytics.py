@@ -74,6 +74,28 @@ def episode_mi_progreso(pseudo_id: str = "", db: Session = Depends(get_db)):
     return eps.mi_progreso(db, pseudo_id)
 
 
+# ── B12 · Consentimiento + privacidad (versionado, revocable) ────────────────────
+@router.get("/alumno/consent")
+def consent_estado(pseudo_id: str = "", db: Session = Depends(get_db)):
+    from app.services import consent_service as cs
+    return cs.estado(db, pseudo_id)
+
+
+@router.post("/alumno/consent")
+@limit("30/minute")
+def consent_aceptar(request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import consent_service as cs
+    p = payload or {}
+    return cs.aceptar(db, p.get("pseudo_id", ""), p.get("scope", "social,analitica"), p.get("quiz_score"))
+
+
+@router.post("/alumno/consent/revocar")
+@limit("30/minute")
+def consent_revocar(request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import consent_service as cs
+    return cs.revocar(db, (payload or {}).get("pseudo_id", ""))
+
+
 @router.get("/episodes/metricas", dependencies=[Depends(req_profesor)])
 def episode_metricas(course_id: str = "", dias: int = 7, db: Session = Depends(get_db)):
     return eps.metricas(db, course_id or None, dias)
