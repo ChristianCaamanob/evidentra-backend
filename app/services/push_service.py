@@ -207,4 +207,11 @@ def tick(db: Session) -> dict:
         personales = rs.tick(db)
     except Exception:  # noqa: BLE001
         _log.exception("tick recordatorios personales")
-    return {"ok": True, "enviados": enviados, "personales": personales}
+    # B4 · repasos diferidos vencidos (comprobación espaciada del Episodio de Aprendizaje).
+    repasos = 0
+    try:
+        from app.services import episode_service as eps
+        repasos = eps.tick_repasos(db)
+    except Exception:  # noqa: BLE001
+        _log.exception("tick repasos diferidos")
+    return {"ok": True, "enviados": enviados, "personales": personales, "repasos": repasos}

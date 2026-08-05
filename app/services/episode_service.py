@@ -268,3 +268,54 @@ def metricas(db: Session, course_id: str | None = None, dias: int = 7) -> dict:
             "errores_alta_confianza": err_alta_conf, "retencion_diferida": ret_dif,
             "observaciones": len(obs), "observaciones_graduadas": ng,
             "confianza_autoreporte": conf_autoreporte}
+
+
+def _payload_repaso(c: RetentionCheck) -> dict:
+    ra = (c.ra or "lo que estudiaste").strip()
+    return {"title": "Runi · tu repaso está listo 🦊",
+            "body": "Pasaron unos días: fija «" + ra + "» con un repaso corto (2 min). Así construyes memoria real.",
+            "tag": "repaso-" + str(c.id), "url": "/?repaso=1",
+            "icon": "/runi/icons/icon-192.png", "badge": "/runi/icons/icon-192.png"}
+
+
+def tick_repasos(db: Session) -> int:
+    """B4 — empuja los repasos diferidos VENCIDOS (RetentionCheck con scheduled_for<=ahora, sin responder,
+    sin notificar aún). Idempotente vía PushSent(eval_id='ret:<id>', hito='0'). Mapea pseudo_id 'stu:<device>'
+    → owner_key real usando el puente de identidad (o 'dev:<device>' de respaldo). Piso de 3 días para no
+    inundar con checks muy viejos al primer barrido. Seguro de llamar en cada tick del cron."""
+    from app.models.device_identity import DeviceIdentity
+    from app.models.push import PushSent
+    from app.services import push_service as ps
+    ahora = _dt.datetime.now(_dt.timezone.utc)
+    piso = ahora - _dt.timedelta(days=3)
+    pend = (db.query(RetentionCheck)
+            .filter(RetentionCheck.done_at.is_(None),
+                    RetentionCheck.scheduled_for <= ahora,
+                    RetentionCheck.scheduled_for >= piso)
+            .order_by(RetentionCheck.scheduled_for.asc())
+            .limit(200).all())
+    enviados = 0
+    for c in pend:
+        pid = c.pseudo_id or ""
+        if pid.startswith("stu:"):
+            device = pid[4:]
+        elif pid.startswith("silabo:"):
+            device = pid[7:]
+        else:
+            device = pid
+        row = db.query(DeviceIdentity).filter(DeviceIdentity.device_id == device).first()
+        owner_key = row.owner_key if (row and row.owner_key) else ("dev:" + device)
+        eid = "ret:" + str(c.id)
+        ya = (db.query(PushSent)
+              .filter(PushSent.eval_id == eid, PushSent.owner_key == owner_key, PushSent.hito == "0")
+              .first())
+        if ya:
+            continue
+        try:
+            n = ps.enviar_a_owner(db, owner_key, _payload_repaso(c))
+        except Exception:  # noqa: BLE001
+            n = 0
+        db.add(PushSent(eval_id=eid, owner_key=owner_key, hito="0"))
+        db.commit()
+        enviados += n
+    return enviados
