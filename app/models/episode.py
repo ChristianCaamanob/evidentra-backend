@@ -41,7 +41,7 @@ class ConfidenceObs(UUIDMixin, Base):
     course_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     ra: Mapped[str | None] = mapped_column(String(120), nullable=True)
     item_id: Mapped[str] = mapped_column(String(80))
-    correct: Mapped[bool] = mapped_column(Boolean, default=False)
+    correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # nulo = auto-reporte sin corrección (sílabo)
     confidence: Mapped[int] = mapped_column(Integer, default=0)         # 0–100, ANTES del feedback
     response_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     help_used: Mapped[bool] = mapped_column(Boolean, default=False)

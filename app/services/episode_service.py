@@ -16,6 +16,7 @@ from app.core.errors import not_found, unprocessable
 from app.models.episode import Episode, ConfidenceObs, RetentionCheck
 
 _VENTANAS = {"24-48h": _dt.timedelta(hours=36), "7d": _dt.timedelta(days=7), "21-30d": _dt.timedelta(days=25)}
+_CONF_MAP = {"baja": 30, "media": 60, "alta": 90}   # etiqueta metacognitiva → confianza 0–100
 
 
 def _ep(db, eid) -> Episode:
@@ -42,15 +43,37 @@ def start(db: Session, pseudo_id: str, course_id: str, ra: str, objetivo: str = 
 def observe(db: Session, episode_id, obs: dict) -> dict:
     e = _ep(db, episode_id)
     o = obs or {}
-    if o.get("item_id") is None or o.get("correct") is None or o.get("confidence") is None:
-        raise unprocessable("La observación necesita item_id, correct y confidence.")
+    if o.get("item_id") is None or o.get("confidence") is None:
+        raise unprocessable("La observación necesita item_id y confidence.")
     conf = max(0, min(100, int(o.get("confidence") or 0)))
+    corr = o.get("correct")
+    corr = (bool(corr) if corr is not None else None)   # None = auto-reporte sin corrección
     db.add(ConfidenceObs(episode_id=e.id, pseudo_id=e.pseudo_id, course_id=e.course_id, ra=(o.get("ra") or e.ra),
-                         item_id=str(o.get("item_id"))[:80], correct=bool(o.get("correct")), confidence=conf,
+                         item_id=str(o.get("item_id"))[:80], correct=corr, confidence=conf,
                          response_time_ms=o.get("response_time_ms"), help_used=bool(o.get("help_used")),
                          attempt=int(o.get("attempt") or 1)))
     db.commit()
     return {"ok": True}
+
+
+def registrar_silabo(db: Session, pseudo_id: str, course_id, tema: str, confianza_label: str,
+                     sintesis: str = "") -> dict:
+    """Cable sílabo→Episodio: una consulta con confianza auto-reportada = Episodio COMPLETO
+    (objetivo=tema, feedback dado por Runi, cierre=síntesis) + comprobación diferida 7d programada.
+    Se vuelve VERIFICADO cuando el estudiante responde esa comprobación."""
+    ra = (str(tema or "consulta"))[:120]
+    e = Episode(pseudo_id=str(pseudo_id)[:80], course_id=(str(course_id)[:64] if course_id else None),
+                ra=ra, objetivo=("Comprender: " + ra)[:255], origen="silabo", feedback_given=True,
+                sintesis=((str(sintesis)[:2000]) or "Consulta resuelta con Runi."),
+                closed_at=_dt.datetime.utcnow(), completo=True, verificado=False)
+    db.add(e); db.flush()
+    conf = _CONF_MAP.get((confianza_label or "").lower(), 60)
+    db.add(ConfidenceObs(episode_id=e.id, pseudo_id=e.pseudo_id, course_id=e.course_id, ra=ra,
+                         item_id="silabo", correct=None, confidence=conf, attempt=1))
+    db.add(RetentionCheck(episode_id=e.id, pseudo_id=e.pseudo_id, course_id=e.course_id, ra=ra,
+                          ventana="7d", scheduled_for=_dt.datetime.utcnow() + _VENTANAS["7d"]))
+    db.commit()
+    return {"ok": True, "episode_id": str(e.id), "completo": True}
 
 
 def feedback(db: Session, episode_id) -> dict:
@@ -124,14 +147,17 @@ def metricas(db: Session, course_id: str | None = None, dias: int = 7) -> dict:
     for e in eav:
         por_est[e.pseudo_id] = por_est.get(e.pseudo_id, 0) + 1
     con_3 = sum(1 for v in por_est.values() if v >= 3)
-    # calibración
-    n = len(obs)
-    brier = round(sum(((o.confidence / 100.0) - (1 if o.correct else 0)) ** 2 for o in obs) / n, 4) if n else None
-    cal_err = round(sum(abs((o.confidence / 100.0) - (1 if o.correct else 0)) for o in obs) / n, 4) if n else None
-    conf_media = (sum(o.confidence for o in obs) / n / 100.0) if n else None
-    exac_media = (sum(1 for o in obs if o.correct) / n) if n else None
-    sobreconf = round(conf_media - exac_media, 4) if n else None
-    err_alta_conf = sum(1 for o in obs if o.confidence >= 80 and not o.correct)
+    # calibración — SOLO sobre observaciones graduadas (correct != None). El auto-reporte del
+    # sílabo (correct=None) alimenta la distribución de confianza, no el Brier.
+    grad = [o for o in obs if o.correct is not None]
+    ng = len(grad)
+    brier = round(sum(((o.confidence / 100.0) - (1 if o.correct else 0)) ** 2 for o in grad) / ng, 4) if ng else None
+    cal_err = round(sum(abs((o.confidence / 100.0) - (1 if o.correct else 0)) for o in grad) / ng, 4) if ng else None
+    conf_media_g = (sum(o.confidence for o in grad) / ng / 100.0) if ng else None
+    exac_media = (sum(1 for o in grad if o.correct) / ng) if ng else None
+    sobreconf = round(conf_media_g - exac_media, 4) if ng else None
+    err_alta_conf = sum(1 for o in grad if o.confidence >= 80 and not o.correct)
+    conf_autoreporte = round(sum(o.confidence for o in obs if o.correct is None) / max(1, sum(1 for o in obs if o.correct is None)), 1) if any(o.correct is None for o in obs) else None
     # retención diferida (checks respondidos en ventana)
     rq = db.query(RetentionCheck).filter(RetentionCheck.done_at.isnot(None), RetentionCheck.done_at >= desde)
     if course_id:
@@ -143,4 +169,5 @@ def metricas(db: Session, course_id: str | None = None, dias: int = 7) -> dict:
             "pct_3eav": round(con_3 / wau, 3) if wau else 0,
             "brier": brier, "error_calibracion": cal_err, "sobreconfianza": sobreconf,
             "errores_alta_confianza": err_alta_conf, "retencion_diferida": ret_dif,
-            "observaciones": n}
+            "observaciones": len(obs), "observaciones_graduadas": ng,
+            "confianza_autoreporte": conf_autoreporte}

@@ -256,6 +256,21 @@ def set_confianza(db: Session, mensaje_id, device_id, confianza) -> dict:
         raise conflict("Solo puedes marcar tu propia consulta.")
     m.confianza = confianza
     db.commit()
+    # CABLE North Star: al registrar su confianza, la consulta se vuelve un Episodio de Aprendizaje
+    # (objetivo=tema, feedback dado, cierre=respuesta) + comprobación diferida 7d. Aditivo: si falla,
+    # nunca rompe la acción del alumno.
+    try:
+        import hashlib
+        from app.services import episode_service as _eps
+        a = db.query(SilaboAgente).filter(SilaboAgente.id == m.agente_id).first()
+        pid = "silabo:" + hashlib.sha256(str(device_id or m.device_id or "anon").encode()).hexdigest()[:16]
+        _eps.registrar_silabo(db, pid, (a.course_id if a else None), (m.tema or "consulta"),
+                              confianza, (m.respuesta_ia or "")[:500])
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
     return {"ok": True, "confianza": confianza}
 def borrar_memoria(db: Session, codigo: str, device_id: str) -> dict:
     """Derecho a borrar: elimina las consultas de ESE estudiante (su memoria). La BITÁCORA (auditoría,

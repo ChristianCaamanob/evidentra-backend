@@ -668,6 +668,8 @@ def _migraciones_especiales(log) -> None:
         # La ubicación de la Pandilla puede pertenecer a un RUT (identidad) o a una matrícula (passkey):
         # matricula_id pasa a ser OPCIONAL (el dueño real vive en owner_key).
         "ALTER TABLE pandilla_ubicaciones ALTER COLUMN matricula_id DROP NOT NULL",
+        # Confianza auto-reportada (sílabo) puede no tener corrección (correct nulo) hasta la comprobación diferida.
+        "ALTER TABLE learning_confidence_obs ALTER COLUMN correct DROP NOT NULL",
     ]
     for s in stmts:
         try:
