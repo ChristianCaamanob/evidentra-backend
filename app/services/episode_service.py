@@ -1,0 +1,146 @@
+"""
+Motor del Episodio de Aprendizaje Verificado (North Star).
+
+Ciclo: start → observe(confianza) → feedback → close(+comprobación inmediata) → [comprobación diferida].
+`completo` = objetivo + respuesta + feedback + cierre.  `verificado` = completo + comprobación.
+Métricas: EAV/WAU, %≥3 EAV, Brier, calibración, sobreconfianza, errores de alta confianza, retención diferida.
+"""
+from __future__ import annotations
+
+import datetime as _dt
+import uuid as _uuid
+
+from sqlalchemy.orm import Session
+
+from app.core.errors import not_found, unprocessable
+from app.models.episode import Episode, ConfidenceObs, RetentionCheck
+
+_VENTANAS = {"24-48h": _dt.timedelta(hours=36), "7d": _dt.timedelta(days=7), "21-30d": _dt.timedelta(days=25)}
+
+
+def _ep(db, eid) -> Episode:
+    try:
+        u = _uuid.UUID(str(eid))
+    except (ValueError, TypeError):
+        raise not_found("Episodio no válido.")
+    e = db.query(Episode).filter(Episode.id == u).first()
+    if not e:
+        raise not_found("Episodio no encontrado.")
+    return e
+
+
+def start(db: Session, pseudo_id: str, course_id: str, ra: str, objetivo: str = "", origen: str = "") -> dict:
+    if not (pseudo_id or "").strip():
+        raise unprocessable("Falta pseudo_id.")
+    e = Episode(pseudo_id=str(pseudo_id)[:80], course_id=(str(course_id)[:64] if course_id else None),
+                ra=(str(ra)[:120] if ra else None), objetivo=(str(objetivo)[:255] or None),
+                origen=(str(origen)[:40] or None))
+    db.add(e); db.commit()
+    return {"ok": True, "episode_id": str(e.id)}
+
+
+def observe(db: Session, episode_id, obs: dict) -> dict:
+    e = _ep(db, episode_id)
+    o = obs or {}
+    if o.get("item_id") is None or o.get("correct") is None or o.get("confidence") is None:
+        raise unprocessable("La observación necesita item_id, correct y confidence.")
+    conf = max(0, min(100, int(o.get("confidence") or 0)))
+    db.add(ConfidenceObs(episode_id=e.id, pseudo_id=e.pseudo_id, course_id=e.course_id, ra=(o.get("ra") or e.ra),
+                         item_id=str(o.get("item_id"))[:80], correct=bool(o.get("correct")), confidence=conf,
+                         response_time_ms=o.get("response_time_ms"), help_used=bool(o.get("help_used")),
+                         attempt=int(o.get("attempt") or 1)))
+    db.commit()
+    return {"ok": True}
+
+
+def feedback(db: Session, episode_id) -> dict:
+    e = _ep(db, episode_id); e.feedback_given = True; db.commit()
+    return {"ok": True}
+
+
+def close(db: Session, episode_id, sintesis: str = "", check_immediate=None, programar_diferida: str = "7d") -> dict:
+    e = _ep(db, episode_id)
+    e.sintesis = (str(sintesis)[:2000] or None)
+    e.closed_at = _dt.datetime.utcnow()
+    if check_immediate is not None:
+        e.check_immediate = bool(check_immediate)
+    n_obs = db.query(ConfidenceObs).filter(ConfidenceObs.episode_id == e.id).count()
+    e.completo = bool(e.ra and n_obs > 0 and e.feedback_given and e.sintesis)
+    e.verificado = bool(e.completo and (e.check_immediate is not None))
+    # Programar comprobación diferida (spaced retrieval) — se responde luego y puede verificar el episodio.
+    dif = None
+    if e.completo and programar_diferida in _VENTANAS:
+        dif = RetentionCheck(episode_id=e.id, pseudo_id=e.pseudo_id, course_id=e.course_id, ra=e.ra,
+                             ventana=programar_diferida, scheduled_for=_dt.datetime.utcnow() + _VENTANAS[programar_diferida])
+        db.add(dif)
+    db.commit()
+    return {"ok": True, "completo": e.completo, "verificado": e.verificado,
+            "diferida_programada": (dif is not None), "ventana": (programar_diferida if dif else None)}
+
+
+def responder_diferida(db: Session, check_id, correct: bool) -> dict:
+    try:
+        u = _uuid.UUID(str(check_id))
+    except (ValueError, TypeError):
+        raise not_found("Comprobación no válida.")
+    c = db.query(RetentionCheck).filter(RetentionCheck.id == u).first()
+    if not c:
+        raise not_found("Comprobación no encontrada.")
+    c.correct = bool(correct); c.done_at = _dt.datetime.utcnow(); db.commit()
+    e = db.query(Episode).filter(Episode.id == c.episode_id).first()
+    if e and e.completo and not e.verificado:
+        e.verificado = True; db.commit()   # una comprobación diferida respondida verifica el episodio
+    return {"ok": True, "verificado": bool(e and e.verificado)}
+
+
+def pendientes_diferidas(db: Session, pseudo_id: str) -> dict:
+    ahora = _dt.datetime.utcnow()
+    filas = (db.query(RetentionCheck)
+             .filter(RetentionCheck.pseudo_id == str(pseudo_id), RetentionCheck.done_at.is_(None),
+                     RetentionCheck.scheduled_for <= ahora).all())
+    return {"ok": True, "pendientes": [{"id": str(c.id), "ra": c.ra, "ventana": c.ventana,
+                                        "course_id": c.course_id} for c in filas]}
+
+
+def metricas(db: Session, course_id: str | None = None, dias: int = 7) -> dict:
+    """North Star + calibración en ventana de `dias`. Para dashboards (no califica estudiantes)."""
+    desde = _dt.datetime.utcnow() - _dt.timedelta(days=max(1, int(dias or 7)))
+
+    def _ep_q():
+        q = db.query(Episode).filter(Episode.started_at >= desde)
+        return q.filter(Episode.course_id == course_id) if course_id else q
+
+    def _obs_q():
+        q = db.query(ConfidenceObs).filter(ConfidenceObs.created_at >= desde)
+        return q.filter(ConfidenceObs.course_id == course_id) if course_id else q
+
+    eps = _ep_q().all()
+    obs = _obs_q().all()
+    wau = len(set([e.pseudo_id for e in eps] + [o.pseudo_id for o in obs]))
+    eav = [e for e in eps if e.verificado]
+    n_eav = len(eav)
+    # %≥3 EAV por estudiante activo
+    por_est = {}
+    for e in eav:
+        por_est[e.pseudo_id] = por_est.get(e.pseudo_id, 0) + 1
+    con_3 = sum(1 for v in por_est.values() if v >= 3)
+    # calibración
+    n = len(obs)
+    brier = round(sum(((o.confidence / 100.0) - (1 if o.correct else 0)) ** 2 for o in obs) / n, 4) if n else None
+    cal_err = round(sum(abs((o.confidence / 100.0) - (1 if o.correct else 0)) for o in obs) / n, 4) if n else None
+    conf_media = (sum(o.confidence for o in obs) / n / 100.0) if n else None
+    exac_media = (sum(1 for o in obs if o.correct) / n) if n else None
+    sobreconf = round(conf_media - exac_media, 4) if n else None
+    err_alta_conf = sum(1 for o in obs if o.confidence >= 80 and not o.correct)
+    # retención diferida (checks respondidos en ventana)
+    rq = db.query(RetentionCheck).filter(RetentionCheck.done_at.isnot(None), RetentionCheck.done_at >= desde)
+    if course_id:
+        rq = rq.filter(RetentionCheck.course_id == course_id)
+    rchecks = rq.all()
+    ret_dif = round(sum(1 for c in rchecks if c.correct) / len(rchecks), 4) if rchecks else None
+    return {"ok": True, "ventana_dias": dias, "wau": wau, "eav": n_eav,
+            "eav_por_wau": round(n_eav / wau, 3) if wau else 0,
+            "pct_3eav": round(con_3 / wau, 3) if wau else 0,
+            "brier": brier, "error_calibracion": cal_err, "sobreconfianza": sobreconf,
+            "errores_alta_confianza": err_alta_conf, "retencion_diferida": ret_dif,
+            "observaciones": n}

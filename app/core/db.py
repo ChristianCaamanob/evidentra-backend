@@ -35,6 +35,8 @@ from app.models.pand_nota import PandNota  # noqa: F401
 from app.models.pand_momento import PandMomento  # noqa: F401
 from app.models.admin_log import AccesoAdminLog  # noqa: F401
 from app.models.anuncio import Anuncio  # noqa: F401
+from app.models.episode import Episode, ConfidenceObs, RetentionCheck  # noqa: F401
+from app.models.analytics import AnalyticsEvent  # noqa: F401
 
 # Normaliza el esquema de Render/Heroku: SQLAlchemy 2.0 exige 'postgresql://'.
 _db_url = settings.database_url
