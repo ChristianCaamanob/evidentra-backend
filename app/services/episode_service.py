@@ -155,6 +155,41 @@ def mi_progreso(db: Session, pseudo_id: str) -> dict:
             "repasos_hoy": repasos}
 
 
+def mi_plan(db: Session, pseudo_id: str) -> dict:
+    """B7 · Segmentación server-side + recomendación real de Runi, desde señales reales del estudiante
+    (episodios, RA más débil, errores de alta confianza, repasos pendientes). El horario lo enriquece
+    el frontend (próxima clase). Segmentos social/privado quedan como override manual del alumno."""
+    p = mi_progreso(db, pseudo_id)
+    n = p["episodios"]; por_ra = p["por_ra"]; err = p["errores_alta_confianza"]; rep = p["repasos_hoy"]
+    weak = por_ra[0] if por_ra else None
+    wd = weak["dominio"] if weak else None
+    # segmento
+    if n == 0:
+        seg = "nuevo"
+    elif err >= 2 or (weak and weak.get("graduado") and wd is not None and wd < 45):
+        seg = "dificultades"
+    elif p["verificados"] >= 3 and (wd is None or wd >= 70):
+        seg = "constante"
+    else:
+        seg = "irregular"
+    # recomendación (acción dominante)
+    if rep > 0:
+        rec = {"tipo": "repaso_pendiente", "ra": (weak["ra"] if weak else None),
+               "motivo": "Tienes " + str(rep) + " repaso" + ("s" if rep > 1 else "") + " listo para fijar lo aprendido.",
+               "cta": "Hacer mi repaso"}
+    elif n == 0:
+        rec = {"tipo": "primer_paso", "ra": None, "motivo": "Arranca con un repaso corto y mide tu confianza.",
+               "cta": "Repaso de 5 min"}
+    elif weak and wd is not None and wd < 70:
+        rec = {"tipo": "reforzar", "ra": weak["ra"],
+               "motivo": "Tu punto más flojo ahora es " + weak["ra"] + " (" + str(wd) + "%).",
+               "cta": "Reforzar " + weak["ra"]}
+    else:
+        rec = {"tipo": "reto", "ra": (weak["ra"] if weak else None),
+               "motivo": "Vas bien — sube el nivel con preguntas de transferencia.", "cta": "Reto de dominio"}
+    return {"ok": True, "segmento": seg, "recomendacion": rec, "progreso": p}
+
+
 def resumen_docente(db: Session, course: str, dias: int = 14) -> dict:
     """B8 · Dashboard docente de DECISIONES (no gráficos): pulso del curso + RA con mayor dificultad
     (dominio + errores de alta confianza) + alertas pedagógicas accionables."""

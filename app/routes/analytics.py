@@ -74,6 +74,11 @@ def episode_mi_progreso(pseudo_id: str = "", db: Session = Depends(get_db)):
     return eps.mi_progreso(db, pseudo_id)
 
 
+@router.get("/episodes/mi-plan")
+def episode_mi_plan(pseudo_id: str = "", db: Session = Depends(get_db)):
+    return eps.mi_plan(db, pseudo_id)
+
+
 # ── B12 · Consentimiento + privacidad (versionado, revocable) ────────────────────
 @router.get("/alumno/consent")
 def consent_estado(pseudo_id: str = "", db: Session = Depends(get_db)):
