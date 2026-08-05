@@ -95,3 +95,5 @@ from app.routes.analytics import router as analytics_router
 api_router.include_router(analytics_router)
 from app.routes.ia_eval import router as ia_eval_router
 api_router.include_router(ia_eval_router)
+from app.routes.logros import router as logros_router
+api_router.include_router(logros_router)

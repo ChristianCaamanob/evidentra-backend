@@ -1,0 +1,32 @@
+{
+  "version": "3.0.0",
+  "principle": "Una medalla exige umbral acumulado y evidencia verificable; los puntos por sí solos nunca desbloquean.",
+  "antiFarming": {"passiveActionsXp": 0, "peerSupportDailyCap": 2, "repeatedIdenticalEvidenceCounts": false, "lostStreakPenalty": false},
+  "xpEvents": {
+    "verifiedLearningEpisode": {"min": 10, "max": 25},
+    "delayedCheck": 25,
+    "correctedHighConfidenceError": 30,
+    "novelTransferCase": 40,
+    "validatedPeerSupport": 20
+  },
+  "tiers": [
+    {"id":"impulso","label":"Impulso","medals":[1,2,3]},
+    {"id":"consolidacion","label":"Consolidación","medals":[4,5,6]},
+    {"id":"transferencia","label":"Transferencia","medals":[7,8,9]},
+    {"id":"maestria_compartida","label":"Maestría compartida","medals":[10,11,12]}
+  ],
+  "medals": [
+    {"id":1,"slug":"primer-impulso","xp":120,"gate":{"verifiedLearningEpisodes":3,"activeDays":2}},
+    {"id":2,"slug":"ritmo-en-marcha","xp":300,"gate":{"verifiedLearningEpisodes":8,"activeDays":4}},
+    {"id":3,"slug":"duda-valiente","xp":520,"gate":{"resolvedUncertaintyEvents":3}},
+    {"id":4,"slug":"conexion-lograda","xp":800,"gate":{"delayedChecks":1,"linkedConcepts":2}},
+    {"id":5,"slug":"transferencia-aplicada","xp":1150,"gate":{"novelTransferCases":2}},
+    {"id":6,"slug":"constancia","xp":1550,"gate":{"verifiedLearningEpisodes":12,"activeDays":10}},
+    {"id":7,"slug":"integracion-profunda","xp":2050,"gate":{"integratedOutcomes":1,"conceptsIntegrated":3}},
+    {"id":8,"slug":"rumbo-propio","xp":2650,"gate":{"weeklyPlanCompletionAtLeast80Percent":2}},
+    {"id":9,"slug":"retencion-confirmada","xp":3350,"gate":{"delayedRetentionAtLeast75Percent":1,"delayDaysMin":7,"delayDaysMax":21}},
+    {"id":10,"slug":"apoyo-responsable","xp":4100,"gate":{"validatedPeerSupports":5}},
+    {"id":11,"slug":"pandilla-en-sintonia","xp":5000,"gate":{"sharedGroupGoalsCompleted":1}},
+    {"id":12,"slug":"maestria-runi","xp":6200,"gate":{"courseDefinedLongitudinalMastery":true}}
+  ]
+}
