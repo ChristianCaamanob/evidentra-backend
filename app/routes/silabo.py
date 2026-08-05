@@ -12,7 +12,7 @@ Público (alumno, sin login):
 """
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, req_profesor, usuario_actual
@@ -538,31 +538,40 @@ def anuncio_listar_alumno(codigo: str, db: Session = Depends(get_db)):
     return ans.listar_por_codigo(db, codigo)
 
 
-# ── Notas de la Pandilla (v2.0 social, efímeras 24 h) ──────────────────────────
+# ── Notas de la Pandilla (v2.0 social · SOLO verificados, aislado por curso) ────
+# La membresía se prueba con el `membresia_token` (= ubicacion_token) emitido tras identificarse
+# por RUT contra la NÓMINA del curso. Devuelve (owner_key, course_id, nombre) firmados; el curso
+# lo define el token, no el cliente → aislamiento estricto (nadie ve otro grupo/curso).
+def _membresia(tok: str):
+    from app.services.pandilla_service import _tok_ok
+    try:
+        return _tok_ok(tok or "")
+    except Exception:
+        raise HTTPException(403, "Verifícate con tu RUT en tu curso para participar en tu Pandilla.")
+
+
 @router.post("/alumno/pandilla/nota")
 @limit("30/minute")
 def pand_nota_set(request: Request, payload: dict, db: Session = Depends(get_db)):
     from app.services import pand_nota_service as ns
-    from app.services import horario_service as hs
     p = payload or {}
-    ow = hs.owner_key(db, p.get("device_id", ""), p.get("sesion", ""))
-    return ns.set_nota(db, ow, p)
+    ow, cid, nom = _membresia(p.get("membresia_token") or p.get("ubicacion_token"))
+    return ns.set_nota(db, ow, cid, nom, p)
 
 
 @router.get("/alumno/pandilla/nota")
-def pand_nota_mia(device_id: str = "", sesion: str = "", curso: str = "", db: Session = Depends(get_db)):
+def pand_nota_mia(membresia_token: str = "", db: Session = Depends(get_db)):
     from app.services import pand_nota_service as ns
-    from app.services import horario_service as hs
-    return ns.mi_nota(db, hs.owner_key(db, device_id, sesion), curso)
+    ow, cid, nom = _membresia(membresia_token)
+    return ns.mi_nota(db, ow, cid)
 
 
 @router.delete("/alumno/pandilla/nota")
 @limit("30/minute")
 def pand_nota_del(request: Request, payload: dict = None, db: Session = Depends(get_db)):
     from app.services import pand_nota_service as ns
-    from app.services import horario_service as hs
     p = payload or {}
-    ow = hs.owner_key(db, p.get("device_id", ""), p.get("sesion", ""))
+    ow, cid, nom = _membresia(p.get("membresia_token") or p.get("ubicacion_token"))
     return ns.eliminar(db, ow)
 
 
@@ -571,26 +580,24 @@ def pand_nota_del(request: Request, payload: dict = None, db: Session = Depends(
 @limit("15/minute")
 def pand_momento_publicar(request: Request, payload: dict, db: Session = Depends(get_db)):
     from app.services import pand_momento_service as ms
-    from app.services import horario_service as hs
     p = payload or {}
-    ow = hs.owner_key(db, p.get("device_id", ""), p.get("sesion", ""))
-    return ms.publicar(db, ow, p)
+    ow, cid, nom = _membresia(p.get("membresia_token") or p.get("ubicacion_token"))
+    return ms.publicar(db, ow, cid, nom, p)
 
 
 @router.get("/alumno/pandilla/momento")
-def pand_momento_feed(device_id: str = "", sesion: str = "", curso: str = "", db: Session = Depends(get_db)):
+def pand_momento_feed(membresia_token: str = "", db: Session = Depends(get_db)):
     from app.services import pand_momento_service as ms
-    from app.services import horario_service as hs
-    return ms.feed(db, hs.owner_key(db, device_id, sesion), curso)
+    ow, cid, nom = _membresia(membresia_token)
+    return ms.feed(db, ow, cid)
 
 
 @router.delete("/alumno/pandilla/momento")
 @limit("30/minute")
 def pand_momento_del(request: Request, payload: dict = None, db: Session = Depends(get_db)):
     from app.services import pand_momento_service as ms
-    from app.services import horario_service as hs
     p = payload or {}
-    ow = hs.owner_key(db, p.get("device_id", ""), p.get("sesion", ""))
+    ow, cid, nom = _membresia(p.get("membresia_token") or p.get("ubicacion_token"))
     return ms.eliminar(db, ow)
 
 
@@ -598,6 +605,8 @@ def pand_momento_del(request: Request, payload: dict = None, db: Session = Depen
 @limit("30/minute")
 def pand_momento_reportar(request: Request, mid: str, payload: dict = None, db: Session = Depends(get_db)):
     from app.services import pand_momento_service as ms
+    p = payload or {}
+    _membresia(p.get("membresia_token") or p.get("ubicacion_token"))   # solo verificados pueden reportar
     return ms.reportar(db, mid)
 
 

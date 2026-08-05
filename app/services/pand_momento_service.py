@@ -40,7 +40,8 @@ def _dict(r: PandMomento, con_imagen: bool = True) -> dict:
     return d
 
 
-def publicar(db: Session, owner_key: str, payload: dict) -> dict:
+def publicar(db: Session, owner_key: str, curso: str, nombre: str, payload: dict) -> dict:
+    """owner_key/curso/nombre vienen del TOKEN de membresía verificado — solo participan verificados."""
     p = payload or {}
     img = str(p.get("imagen") or "").strip()
     if not img.startswith("data:image/"):
@@ -54,8 +55,8 @@ def publicar(db: Session, owner_key: str, payload: dict) -> dict:
     r.imagen = img
     r.caption = (str(p.get("caption") or "").strip()[:140] or None)
     r.char = (str(p.get("char") or "").strip()[:40] or None)
-    r.nombre = (str(p.get("nombre") or "").strip()[:80] or None)
-    r.curso = (str(p.get("curso") or "").strip()[:40] or None)
+    r.nombre = (str(nombre or "").strip()[:80] or (str(p.get("nombre") or "").strip()[:80] or None))
+    r.curso = (str(curso or "").strip()[:40] or None)
     r.reportes = 0
     r.oculto = False
     r.created_at = _dt.datetime.utcnow()   # renueva la ventana de 24 h
