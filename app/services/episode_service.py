@@ -125,6 +125,36 @@ def pendientes_diferidas(db: Session, pseudo_id: str) -> dict:
                                         "course_id": c.course_id} for c in filas]}
 
 
+def mi_progreso(db: Session, pseudo_id: str) -> dict:
+    """Progreso REAL del estudiante para su home: dominio por RA, episodios, errores de alta
+    confianza y repasos pendientes. Dominio = % correcto sobre observaciones graduadas; si un RA
+    solo tiene auto-reporte (sílabo), se usa la confianza como proxy (marcado `graduado:false`)."""
+    pid = str(pseudo_id or "")
+    if not pid:
+        return {"ok": True, "episodios": 0, "verificados": 0, "por_ra": [], "errores_alta_confianza": 0, "repasos_hoy": 0}
+    eps = db.query(Episode).filter(Episode.pseudo_id == pid).all()
+    obs = db.query(ConfidenceObs).filter(ConfidenceObs.pseudo_id == pid).all()
+    ras: dict[str, dict] = {}
+    for o in obs:
+        r = o.ra or "General"
+        d = ras.setdefault(r, {"ok": 0, "ng": 0, "conf": 0, "n": 0})
+        d["n"] += 1; d["conf"] += (o.confidence or 0)
+        if o.correct is not None:
+            d["ng"] += 1; d["ok"] += (1 if o.correct else 0)
+    por_ra = []
+    for r, d in ras.items():
+        dominio = round(d["ok"] / d["ng"] * 100) if d["ng"] else round(d["conf"] / max(1, d["n"]))
+        por_ra.append({"ra": r, "dominio": dominio, "n": d["n"], "graduado": d["ng"] > 0})
+    por_ra.sort(key=lambda x: x["dominio"])   # lo más débil primero (para intervención)
+    ahora = _dt.datetime.utcnow()
+    repasos = (db.query(RetentionCheck)
+               .filter(RetentionCheck.pseudo_id == pid, RetentionCheck.done_at.is_(None),
+                       RetentionCheck.scheduled_for <= ahora).count())
+    return {"ok": True, "episodios": len(eps), "verificados": sum(1 for e in eps if e.verificado),
+            "por_ra": por_ra[:6], "errores_alta_confianza": sum(1 for o in obs if o.correct is False and (o.confidence or 0) >= 80),
+            "repasos_hoy": repasos}
+
+
 def metricas(db: Session, course_id: str | None = None, dias: int = 7) -> dict:
     """North Star + calibración en ventana de `dias`. Para dashboards (no califica estudiantes)."""
     desde = _dt.datetime.utcnow() - _dt.timedelta(days=max(1, int(dias or 7)))

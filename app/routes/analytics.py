@@ -69,6 +69,11 @@ def episode_pendientes(pseudo_id: str = "", db: Session = Depends(get_db)):
     return eps.pendientes_diferidas(db, pseudo_id)
 
 
+@router.get("/episodes/mi-progreso")
+def episode_mi_progreso(pseudo_id: str = "", db: Session = Depends(get_db)):
+    return eps.mi_progreso(db, pseudo_id)
+
+
 @router.get("/episodes/metricas", dependencies=[Depends(req_profesor)])
 def episode_metricas(course_id: str = "", dias: int = 7, db: Session = Depends(get_db)):
     return eps.metricas(db, course_id or None, dias)

@@ -260,10 +260,10 @@ def set_confianza(db: Session, mensaje_id, device_id, confianza) -> dict:
     # (objetivo=tema, feedback dado, cierre=respuesta) + comprobación diferida 7d. Aditivo: si falla,
     # nunca rompe la acción del alumno.
     try:
-        import hashlib
         from app.services import episode_service as _eps
         a = db.query(SilaboAgente).filter(SilaboAgente.id == m.agente_id).first()
-        pid = "silabo:" + hashlib.sha256(str(device_id or m.device_id or "anon").encode()).hexdigest()[:16]
+        # pseudo_id consistente con el frontend ('stu:'+device) para que el alumno vea su propio progreso.
+        pid = "stu:" + str(device_id or m.device_id or "anon")
         _eps.registrar_silabo(db, pid, (a.course_id if a else None), (m.tema or "consulta"),
                               confianza, (m.respuesta_ia or "")[:500])
     except Exception:
