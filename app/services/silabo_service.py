@@ -533,6 +533,11 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
     # en su dispositivo, no se almacena aquí. Runi conversa sobre él como aprendizaje, no como parámetro del curso.
     material = (material or "").strip()[:16000] or None
     imagenes = [im for im in (imagenes or []) if isinstance(im, dict) and (im.get("data"))][:6] or None
+    # v4-F5 · modo evaluación FORZADO en servidor: en ventana de evaluación (modo 'cerrado') se NIEGAN adjuntos y
+    # cámara aquí (no solo en el cliente). La abstención de resolver contenido evaluable ya la aplica la política 'cerrado'.
+    if str((a.config or {}).get("modo_pedagogico") or "").lower() == "cerrado":
+        imagenes = None
+        material = None
     if imagenes and len(pregunta) < 3:
         pregunta = "Explícame lo que ves en la(s) imagen(es) que te adjunté."
 

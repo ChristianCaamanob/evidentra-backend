@@ -58,6 +58,36 @@ EVENT_SCHEMA: dict[str, tuple[str, list[str]]] = {
 _DEVICES = {"movil", "tablet", "desktop"}
 
 
+# v4-F5 · propiedades PROHIBIDAS en analítica (contrato v4): jamás se persisten. Se comparan normalizadas
+# (sin espacios/guiones, minúsculas) para atrapar variantes (messageText, exact_coordinates, RUT, etc.).
+_PROPS_PROHIBIDAS = {
+    "messagetext", "message", "text", "texto", "mensaje", "body", "cuerpo", "respuesta", "pregunta", "prompt",
+    "exactcoordinates", "coordinates", "coords", "lat", "lng", "lon", "latitude", "longitude", "gps", "ubicacionexacta",
+    "rut", "dni", "documento", "nombre", "name", "email", "correo", "telefono", "phone",
+    "medicaldata", "salud", "health", "diagnostico", "diagnosis",
+    "filecontents", "filedata", "archivo", "attachment", "adjunto", "base64", "imagen", "image", "foto",
+    "rawvoice", "voice", "audio", "voz", "waveform",
+}
+
+
+def _norm_key(k: str) -> str:
+    return str(k).strip().lower().replace(" ", "").replace("_", "").replace("-", "")
+
+
+def _limpiar_props(props: dict) -> dict:
+    """Elimina cualquier propiedad prohibida y recorta strings largos (posible cuerpo de mensaje colado)."""
+    if not isinstance(props, dict):
+        return {}
+    out = {}
+    for k, v in props.items():
+        if _norm_key(k) in _PROPS_PROHIBIDAS:
+            continue
+        if isinstance(v, str) and len(v) > 200:
+            v = v[:200]
+        out[k] = v
+    return out
+
+
 def _validar(e: dict) -> dict:
     ev = str(e.get("event") or "")
     if ev not in EVENT_SCHEMA:
@@ -67,7 +97,7 @@ def _validar(e: dict) -> dict:
         raise unprocessable("Versión de evento no soportada.")
     if not (e.get("pseudo_id") or "").strip():
         raise unprocessable("Falta pseudo_id (identidad seudonimizada).")
-    props = e.get("props") or {}
+    props = _limpiar_props(e.get("props") or {})
     faltan = [k for k in req if props.get(k) is None]
     if faltan:
         raise unprocessable(f"Evento '{ev}' incompleto; faltan props: {', '.join(faltan)}.")
