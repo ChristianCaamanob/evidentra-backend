@@ -60,6 +60,12 @@ def _signals(db: Session, pseudo_id: str) -> dict:
     # "duda valiente": marcó baja confianza (≤40) y aun así resultó correcta (reconocer la incertidumbre y resolverla)
     duda_valiente = sum(1 for o in obs if o.confidence <= 40 and o.correct is True)
 
+    # F7 · señales de Maestría compartida (Pandilla), instrumentadas con anti-farming
+    try:
+        from app.services import pandilla_logros_service as pls
+        sm = pls.senales(db, pseudo_id)
+    except Exception:  # noqa: BLE001
+        sm = {"validatedPeerSupports": 0, "sharedGroupGoalsCompleted": 0, "courseDefinedLongitudinalMastery": False}
     return {
         "verifiedLearningEpisodes": verificados,
         "completedEpisodes": completos,
@@ -69,15 +75,16 @@ def _signals(db: Session, pseudo_id: str) -> dict:
         "delayedRetentionPct": round(retencion * 100, 1) if retencion is not None else None,
         "correctedHighConfidenceErrors": corregidos,
         "resolvedUncertaintyEvents": duda_valiente,
+        # Maestría compartida (F7) — reales
+        "validatedPeerSupports": sm.get("validatedPeerSupports", 0),
+        "sharedGroupGoalsCompleted": sm.get("sharedGroupGoalsCompleted", 0),
+        "courseDefinedLongitudinalMastery": bool(sm.get("courseDefinedLongitudinalMastery", False)),
         # aún no instrumentadas (honestas en 0 → medalla pendiente, nunca inventada)
         "novelTransferCases": 0,
-        "validatedPeerSupports": 0,
         "linkedConcepts": 0,
         "conceptsIntegrated": 0,
         "integratedOutcomes": 0,
         "weeklyPlanCompletionAtLeast80Percent": 0,
-        "sharedGroupGoalsCompleted": 0,
-        "courseDefinedLongitudinalMastery": False,
     }
 
 
@@ -121,9 +128,12 @@ def _cond(sig: dict, key: str, need):
         "conceptsIntegrated": lambda: (0.0, f"Integra {need} conceptos en un resultado (en preparación)", False),
         "integratedOutcomes": lambda: (0.0, "Logra un resultado de aprendizaje integrado (en preparación)", False),
         "weeklyPlanCompletionAtLeast80Percent": lambda: (0.0, f"Cumple ≥80% de tu plan semanal en {need} semanas (en preparación)", False),
-        "validatedPeerSupports": lambda: (0.0, f"Recibe validación por {need} apoyos a compañeros (en preparación)", False),
-        "sharedGroupGoalsCompleted": lambda: (0.0, "Completa una meta grupal con tu Pandilla (en preparación)", False),
-        "courseDefinedLongitudinalMastery": lambda: (0.0, "Alcanza la maestría longitudinal que define tu curso (en preparación)", False),
+        "validatedPeerSupports": lambda: (frac(S["validatedPeerSupports"], need),
+                                          f"Ayuda a {need} compañeros con validación (llevas {S['validatedPeerSupports']})", True),
+        "sharedGroupGoalsCompleted": lambda: (frac(S["sharedGroupGoalsCompleted"], need),
+                                             f"Completa {need} meta(s) grupal(es) con tu Pandilla (llevas {S['sharedGroupGoalsCompleted']})", True),
+        "courseDefinedLongitudinalMastery": lambda: ((1.0 if S["courseDefinedLongitudinalMastery"] else 0.0),
+                                                     "Alcanza la maestría longitudinal que define tu curso (la certifica tu docente)", True),
     }
     f = tbl.get(key)
     if not f:
