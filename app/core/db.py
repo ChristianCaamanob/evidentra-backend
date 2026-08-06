@@ -40,6 +40,7 @@ from app.models.analytics import AnalyticsEvent  # noqa: F401
 from app.models.consent import Consent  # noqa: F401
 from app.models.ia_eval import IAEvalCase, IAEvalRun, IAEvalResult  # noqa: F401
 from app.models.logros import MedalUnlock  # noqa: F401
+from app.models.terminologia import TermProfile, TermEntry, CourseTermBinding  # noqa: F401
 
 # Normaliza el esquema de Render/Heroku: SQLAlchemy 2.0 exige 'postgresql://'.
 _db_url = settings.database_url
