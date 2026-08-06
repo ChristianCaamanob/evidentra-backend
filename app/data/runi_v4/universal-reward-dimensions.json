@@ -1,0 +1,14 @@
+{
+  "version":"4.0.0",
+  "principle":"Cada dimensión usa evidencia distinta; no se suman como una nota única ni se convierten en ranking público.",
+  "dimensions":[
+    {"id":"mastery","label":"Dominio","color":"#34e5a8","earnsFrom":["verified_learning_episode","delayed_retention","transfer"],"neverFrom":["screen_time","click","message_count"]},
+    {"id":"curiosity","label":"Curiosidad","color":"#55b9ff","earnsFrom":["productive_question","hypothesis","source_exploration"],"neverFrom":["random_question_volume"]},
+    {"id":"consistency","label":"Constancia","color":"#f0954a","earnsFrom":["planned_session_completed","distributed_practice"],"neverFrom":["punitive_streak","overnight_usage"]},
+    {"id":"courage","label":"Valentía","color":"#ff6f9f","earnsFrom":["uncertainty_declared","high_confidence_error_corrected","help_requested"],"neverFrom":["public_failure"]},
+    {"id":"community","label":"Comunidad","color":"#45d7c1","earnsFrom":["validated_peer_support","shared_goal"],"neverFrom":["popularity","follower_count"]},
+    {"id":"creation","label":"Creación","color":"#9d7cff","earnsFrom":["artifact_iteration","design_rationale","original_solution"],"neverFrom":["file_upload_only"]},
+    {"id":"integrity","label":"Integridad","color":"#ffd477","earnsFrom":["source_citation","limitation_declared","responsible_ai_use","replicable_record"],"neverFrom":["self_report_only"]}
+  ],
+  "display":{"publicLeaderboard":false,"studentOwnsDetail":true,"teacherSeesEvidenceWithinRole":true,"showWhyAwarded":true}
+}

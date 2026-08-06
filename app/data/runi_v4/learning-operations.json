@@ -1,0 +1,15 @@
+{
+  "version":"4.0.0",
+  "operations":[
+    {"id":"remember","label":"Recordar","evidence":["retrieval_attempt","delayed_recall"],"recommendedMoment":"short_practice"},
+    {"id":"understand","label":"Comprender","evidence":["self_explanation","concept_connection"],"recommendedMoment":"guided_dialogue"},
+    {"id":"apply","label":"Aplicar","evidence":["worked_case","procedure_execution"],"recommendedMoment":"practice"},
+    {"id":"analyze","label":"Analizar","evidence":["comparison","causal_reasoning","error_analysis"],"recommendedMoment":"deep_work"},
+    {"id":"argue","label":"Argumentar","evidence":["claim_evidence_reasoning","counterargument"],"recommendedMoment":"challenge"},
+    {"id":"create","label":"Crear","evidence":["artifact","iteration","design_rationale"],"recommendedMoment":"project"},
+    {"id":"design","label":"Diseñar","evidence":["requirements","prototype","validation"],"recommendedMoment":"project"},
+    {"id":"communicate","label":"Comunicar","evidence":["audience_adaptation","clarity","feedback_integration"],"recommendedMoment":"presentation"},
+    {"id":"collaborate","label":"Colaborar","evidence":["peer_contribution","coordination","responsible_support"],"recommendedMoment":"group"},
+    {"id":"research","label":"Investigar","evidence":["question_formulation","source_appraisal","method","replicable_record"],"recommendedMoment":"inquiry"}
+  ]
+}

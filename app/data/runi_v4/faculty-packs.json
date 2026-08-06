@@ -1,0 +1,22 @@
+{
+  "version":"4.0.0",
+  "fallback":"general",
+  "packs":[
+    {"id":"general","label":"Interdisciplinario","accent":"#34e5a8","world":"studio","metaphors":["ruta","conexión","taller"],"operations":["understand","apply","communicate"]},
+    {"id":"health","label":"Salud","accent":"#45d7c1","world":"clinical_simulation","metaphors":["caso","secuencia segura","decisión clínica"],"operations":["apply","analyze","communicate"],"guardrails":["no_patient_identifiers","no_diagnosis_without_scope","clinical_terms_from_versioned_glossary"]},
+    {"id":"engineering","label":"Ingeniería","accent":"#55b9ff","world":"prototype_lab","metaphors":["sistema","restricción","iteración"],"operations":["analyze","design","apply"]},
+    {"id":"computing","label":"Computación","accent":"#63c7ff","world":"systems_lab","metaphors":["flujo","depuración","arquitectura"],"operations":["analyze","design","create"]},
+    {"id":"law","label":"Derecho","accent":"#ffd477","world":"deliberation_hall","metaphors":["tesis","precedente","ponderación"],"operations":["argue","analyze","research"]},
+    {"id":"humanities","label":"Humanidades","accent":"#c7a7ff","world":"archive","metaphors":["lectura","contexto","interpretación"],"operations":["understand","argue","research"]},
+    {"id":"social_sciences","label":"Ciencias sociales","accent":"#ff8fb3","world":"observatory","metaphors":["perspectiva","patrón","evidencia situada"],"operations":["analyze","research","communicate"]},
+    {"id":"education","label":"Educación","accent":"#8de37b","world":"learning_studio","metaphors":["andamiaje","experiencia","retroalimentación"],"operations":["design","communicate","collaborate"]},
+    {"id":"basic_sciences","label":"Ciencias básicas","accent":"#73e0ff","world":"discovery_lab","metaphors":["hipótesis","modelo","replicación"],"operations":["research","analyze","apply"]},
+    {"id":"business","label":"Negocios y economía","accent":"#ffb461","world":"decision_room","metaphors":["escenario","trade-off","impacto"],"operations":["analyze","argue","design"]},
+    {"id":"architecture","label":"Arquitectura y diseño","accent":"#ff986e","world":"atelier","metaphors":["habitar","prototipo","criterio"],"operations":["design","create","communicate"]},
+    {"id":"arts","label":"Artes","accent":"#d68cff","world":"creative_stage","metaphors":["lenguaje","obra","proceso"],"operations":["create","communicate","analyze"]},
+    {"id":"communications","label":"Comunicaciones","accent":"#ff739d","world":"media_studio","metaphors":["audiencia","relato","edición"],"operations":["communicate","create","research"]},
+    {"id":"agriculture_environment","label":"Agronomía y ambiente","accent":"#84d66b","world":"field_station","metaphors":["ecosistema","ciclo","observación"],"operations":["research","apply","design"]},
+    {"id":"research","label":"Investigación avanzada","accent":"#9d7cff","world":"evidence_observatory","metaphors":["pregunta","método","trazabilidad"],"operations":["research","analyze","argue"],"guardrails":["source_provenance","method_versioning","limitations_required"]}
+  ],
+  "rules":{"packIsVisualAndLinguisticNotAbilityLabel":true,"studentCanOverridePack":true,"professionCostumeIsOptionalCosmetic":true,"noStereotypeByCareer":true}
+}

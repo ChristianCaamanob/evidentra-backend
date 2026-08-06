@@ -101,3 +101,5 @@ from app.routes.terminologia import router as terminologia_router
 api_router.include_router(terminologia_router)
 from app.routes.pandilla_logros import router as pandilla_logros_router
 api_router.include_router(pandilla_logros_router)
+from app.routes.experiencia import router as experiencia_router
+api_router.include_router(experiencia_router)

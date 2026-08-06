@@ -1,0 +1,8 @@
+{
+  "version":"4.0.0",
+  "priority":["safety_and_assessment_mode","accessibility","explicit_student_choice","current_task","course_context","recent_preference","default"],
+  "defaults":{"relationshipMode":"companion","facultyPack":"general","operation":"understand","motion":"system","sound":"off_until_user_gesture","proactivity":"medium"},
+  "assessmentMode":{"hideAcademicChat":true,"denyUploads":true,"denyCamera":true,"denyAnswerGeneration":true,"allowAccessibilityTools":true,"serverEnforced":true},
+  "constraints":{"maxUnsolicitedInterventionsPerSession":2,"cooldownMinutes":15,"explainContextualModeChange":true,"persistOnlyWithConsent":true,"protectedAttributesForbidden":true},
+  "fallback":{"missingPack":"general","missingGlossary":"plain_language","missingAsset":"runi_core","telemetryFailure":"continue_without_tracking"}
+}
