@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://evalys.app/schemas/research-event.v1.json",
+  "title": "Evalys Research Event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "eventId",
+    "eventName",
+    "occurredAt",
+    "sessionId",
+    "studyId",
+    "appVersion",
+    "payload"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "eventId": { "type": "string", "format": "uuid" },
+    "eventName": {
+      "type": "string",
+      "enum": [
+        "session_started",
+        "session_ended",
+        "consent_updated",
+        "experiment_assigned",
+        "challenge_presented",
+        "challenge_started",
+        "attempt_submitted",
+        "confidence_recorded",
+        "hint_requested",
+        "feedback_opened",
+        "challenge_completed",
+        "assessment_completed",
+        "reward_earned",
+        "voluntary_return_detected",
+        "ai_score_created",
+        "ai_scoring_abstained",
+        "human_review_completed",
+        "technical_incident"
+      ]
+    },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "sessionId": { "type": "string", "format": "uuid" },
+    "studyId": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "experimentId": { "type": ["string", "null"], "maxLength": 80 },
+    "assignmentId": { "type": ["string", "null"], "format": "uuid" },
+    "appVersion": { "type": "string", "minLength": 1, "maxLength": 40 },
+    "contentVersion": { "type": ["string", "null"], "maxLength": 40 },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "challengeId": { "type": "string", "maxLength": 100 },
+        "conceptId": { "type": "string", "maxLength": 100 },
+        "modality": {
+          "type": "string",
+          "enum": ["adaptive_practice", "teach_runi", "living_case", "none"]
+        },
+        "conditionId": { "type": "string", "maxLength": 80 },
+        "difficultyBand": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "score01": { "type": "number", "minimum": 0, "maximum": 1 },
+        "confidence01": { "type": "number", "minimum": 0, "maximum": 1 },
+        "correctness01": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "activeSeconds": { "type": "integer", "minimum": 0, "maximum": 14400 },
+        "hintsUsed": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "assessmentWindow": {
+          "type": "string",
+          "enum": ["baseline", "immediate", "day_7", "day_21", "day_45"]
+        },
+        "rewardTier": {
+          "type": "string",
+          "enum": ["spark", "achievement", "milestone", "legendary"]
+        },
+        "aiDecision": {
+          "type": "string",
+          "enum": ["not_used", "scored", "abstained", "needs_human_review"]
+        },
+        "technicalCode": { "type": "string", "maxLength": 80 }
+      }
+    }
+  }
+}
+

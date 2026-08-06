@@ -1,0 +1,56 @@
+{
+  "catalogVersion": "1.0.0",
+  "experiments": [
+    {
+      "id": "learning-modality-crossover-v1",
+      "status": "draft",
+      "design": "counterbalanced_crossover",
+      "conditions": ["adaptive_practice", "teach_runi", "living_case"],
+      "primaryOutcome": "transfer_day_21",
+      "secondaryOutcomes": [
+        "immediate_score",
+        "retention_day_7",
+        "retention_day_45",
+        "calibration_error",
+        "active_seconds",
+        "intrinsic_motivation",
+        "cognitive_load"
+      ],
+      "stratification": ["course_id", "baseline_band"],
+      "featureFlag": "teachRuniPilot"
+    },
+    {
+      "id": "reward-authenticity-v1",
+      "status": "draft",
+      "design": "micro_randomized",
+      "conditions": [
+        "narrative_feedback_only",
+        "evidence_linked_reward",
+        "evidence_linked_reward_with_sound"
+      ],
+      "primaryOutcome": "voluntary_return_48h",
+      "secondaryOutcomes": [
+        "next_challenge_started",
+        "perceived_autonomy",
+        "reward_satisfaction",
+        "transfer_day_21"
+      ],
+      "exclusionRule": "no_reward_when_mastery_evidence_is_missing",
+      "featureFlag": "rewardExperimentV1"
+    },
+    {
+      "id": "high-confidence-error-support-v1",
+      "status": "draft",
+      "design": "micro_randomized",
+      "conditions": ["targeted_hint", "runi_explanation", "parallel_case"],
+      "primaryOutcome": "correctness_next_parallel_item",
+      "secondaryOutcomes": [
+        "confidence_recalibration",
+        "help_acceptance",
+        "retention_day_7"
+      ],
+      "eligibility": "incorrect_response_and_confidence_gte_0_80",
+      "featureFlag": "adaptivePracticePilot"
+    }
+  ]
+}

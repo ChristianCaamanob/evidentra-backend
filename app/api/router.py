@@ -103,3 +103,5 @@ from app.routes.pandilla_logros import router as pandilla_logros_router
 api_router.include_router(pandilla_logros_router)
 from app.routes.experiencia import router as experiencia_router
 api_router.include_router(experiencia_router)
+from app.routes.research import router as research_router
+api_router.include_router(research_router)
