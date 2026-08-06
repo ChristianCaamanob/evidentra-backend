@@ -578,9 +578,15 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
         else:
             intentos = _intentos_equivalentes(db, a, pregunta, device_id)
             historial = _historial_reciente(db, a.id, device_id)
+            vinculo = None   # v4-F2 · modo de vínculo elegido por el estudiante (adapta el tono de Runi)
+            try:
+                from app.services import experiencia_service as _xs
+                vinculo = _xs.tono_de_modo(db, "stu:" + str(device_id or "anon"))
+            except Exception:  # noqa: BLE001
+                vinculo = None
             tipo, respuesta, categoria, urgencia, necesita, cita, tema, fuente, evidencia = \
                 _clasificar_y_responder(a, pregunta, intentos, material=material, imagenes=imagenes,
-                                        historial=historial)
+                                        historial=historial, vinculo=vinculo)
 
     # ── Motor de ética: consecuencia 0–5 + Puerta 3 (verificación de SALIDA sobre la respuesta ya generada).
     from app.services import etica_service as etica
@@ -808,8 +814,32 @@ def _evidencia(hecho="", inferencia="", recomendacion="", decision="", *,
     return ev
 
 
+def _bloque_vinculo(vinculo: dict | None) -> str:
+    """v4-F2 · Instrucción de VÍNCULO: adapta el TONO/iniciativa de Runi al modo elegido por el estudiante,
+    sin cambiar identidad, honestidad ni rigor."""
+    if not vinculo:
+        return ""
+    lbl = vinculo.get("label", "Compañero"); tono = vinculo.get("tone", "cálido y breve")
+    des = vinculo.get("challenge", "low"); ini = vinculo.get("initiative", "medium"); mid = vinculo.get("id", "companion")
+    matices = {
+        "companion": "Acompaña horizontal y cálido; el estudiante marca el ritmo.",
+        "mentor": "Muestra la ESTRUCTURA y ayuda a decidir con criterio; sereno y explicativo.",
+        "coach": "Empuja a una repetición MEJOR (no solo una más); enérgico, directo y respetuoso.",
+        "navigator": "Anticipa el SIGUIENTE PASO y por qué conviene; claro y ordenado.",
+        "teammate": "Coordina aportes para que el grupo avance; colaborativo y concreto.",
+        "challenger": "Pon a prueba la idea con MÉTODO socrático, exigente y justo, SIN juzgar.",
+        "quiet": "Sé MÍNIMO y no intrusivo: responde lo justo, sin sugerencias extra ni celebraciones.",
+        "explorer": "Sigue la CURIOSIDAD del estudiante con rigor; imaginativo pero preciso.",
+    }
+    return ("\nVÍNCULO CON EL ESTUDIANTE (lo eligió él, es reversible): eres Runi en modo «" + lbl + "». Tu TONO es "
+            + tono + "; desafío=" + des + "; iniciativa=" + ini + ". " + matices.get(mid, "")
+            + " Adapta tu FORMA de acompañar (cómo hablas, cuánto empujas, cuándo celebras) a este vínculo, PERO "
+            "mantén intactas tu identidad, tu honestidad y el rigor: nunca inventes, nunca bajes la exactitud ni "
+            "contradigas el material del profesor. El vínculo cambia el estilo, jamás la verdad.\n")
+
+
 def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, material: str | None = None,
-                            imagenes: list | None = None, historial: str | None = None):
+                            imagenes: list | None = None, historial: str | None = None, vinculo: dict | None = None):
     """Runi, copiloto de APRENDIZAJE. DOS ámbitos: (1) APRENDIZAJE en general → LIBRE, usa el conocimiento
     de la IA como apoyo estratégico para cerrar brechas, anclado al programa y sin contradecir al profesor;
     (2) PARÁMETROS de la asignatura (fechas/ponderaciones/reglas/alcance/ventana) → ESTRICTO: solo el corpus,
@@ -911,6 +941,7 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, m
             '"urgencia":"..","necesita_docente":true|false,"hecho":"..","inferencia":"..","recomendacion":"..",'
             '"decision_docente":"..","certeza":".."}.'
         )
+        system += _bloque_vinculo(vinculo)   # v4-F2 · adapta el tono/iniciativa de Runi al vínculo elegido
         ctx = (a.contexto or "")[:20000]
         user = "CONTEXTO DEL CURSO:\n" + (ctx or "(el docente aún no cargó material; responde el aprendizaje general y marca fuera_corpus solo los parámetros del curso)")
         if historial:

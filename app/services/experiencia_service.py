@@ -154,6 +154,22 @@ def vincular_facultad(db: Session, course_code: str, faculty_pack_id: str, quien
     return {"ok": True, "course_code": course_code, "faculty_pack_id": faculty_pack_id}
 
 
+def tono_de_modo(db: Session | None, pseudo_id: str) -> dict:
+    """v4-F2 · Devuelve el modo de vínculo del estudiante (con tono/desafío/iniciativa del catálogo) para
+    inyectarlo al prompt de Runi. Default 'companion'. Nunca falla: cae a compañero."""
+    mode_id = "companion"
+    try:
+        if db is not None and pseudo_id:
+            r = db.query(StudentRelationship).filter(StudentRelationship.pseudo_id == pseudo_id).first()
+            if r and r.primary_mode:
+                mode_id = r.primary_mode
+    except Exception:  # noqa: BLE001
+        mode_id = "companion"
+    c = _cat()
+    return c["rel_by"].get(mode_id) or c["rel_by"].get("companion") or {"id": "companion", "label": "Compañero",
+            "tone": "cálido, horizontal y breve", "challenge": "low", "initiative": "medium"}
+
+
 def relacion_get(db: Session, pseudo_id: str) -> dict:
     r = db.query(StudentRelationship).filter(StudentRelationship.pseudo_id == pseudo_id).first()
     return {"ok": True, "primary_mode": (r.primary_mode if r else "companion"), "proactivity": (r.proactivity if r else "medium")}
