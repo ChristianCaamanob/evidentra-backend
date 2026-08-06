@@ -88,6 +88,52 @@ def _signals(db: Session, pseudo_id: str) -> dict:
     }
 
 
+_DIMS = None
+
+
+def _dims_cat() -> list:
+    """Catálogo v4 de las 7 dimensiones (id/label/color/earnsFrom). Cae a un default si falta el archivo."""
+    global _DIMS
+    if _DIMS is None:
+        try:
+            path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "runi_v4", "universal-reward-dimensions.json")
+            with open(path, "r", encoding="utf-8") as fh:
+                _DIMS = json.load(fh).get("dimensions", [])
+        except Exception:  # noqa: BLE001
+            _DIMS = []
+    return _DIMS
+
+
+def dimensiones(sig: dict) -> list:
+    """v4-F4 · reparte la evidencia REAL en las 7 dimensiones (cada una con su evidencia propia; NO se suman
+    en una nota única ni forman ranking). Adaptador v3→v4: episodio/diferida/transfer→dominio, error alta conf
+    corregido→valentía, apoyo validado/meta→comunidad. Las no instrumentadas quedan en 0 (honesto)."""
+    puntos = {
+        "mastery": sig["verifiedLearningEpisodes"] * 18 + sig["delayedChecks"] * 25,
+        "courage": sig["correctedHighConfidenceErrors"] * 30 + sig["resolvedUncertaintyEvents"] * 15,
+        "consistency": sig["activeDays"] * 12,
+        "community": sig["validatedPeerSupports"] * 20 + sig["sharedGroupGoalsCompleted"] * 40,
+        "curiosity": 0, "creation": 0, "integrity": 0,
+    }
+    instrumentadas = {"mastery", "courage", "consistency", "community"}
+    ayuda = {
+        "mastery": "Episodios verificados, retención diferida y transferencia.",
+        "curiosity": "Preguntas productivas, hipótesis y exploración de fuentes (en preparación).",
+        "consistency": "Sesiones planificadas y práctica distribuida en el tiempo.",
+        "courage": "Declarar incertidumbre y corregir errores de alta confianza.",
+        "community": "Apoyo entre pares validado y metas compartidas.",
+        "creation": "Iteración de artefactos y soluciones originales (en preparación).",
+        "integrity": "Citar fuentes, declarar límites y uso responsable de IA (en preparación).",
+    }
+    out = []
+    for d in (_dims_cat() or []):
+        did = d.get("id")
+        out.append({"id": did, "label": d.get("label", did), "color": d.get("color", "#7785a3"),
+                    "points": int(puntos.get(did, 0)), "instrumented": did in instrumentadas,
+                    "earns": ayuda.get(did, "")})
+    return out
+
+
 def _xp(sig: dict) -> int:
     ev = _rules()["xpEvents"]
     vle = ev["verifiedLearningEpisode"]
@@ -208,6 +254,7 @@ def estado(db: Session, pseudo_id: str) -> dict:
     pendientes = [x for x in medals_out if not x["unlocked"]]
     proxima = max(pendientes, key=lambda x: x["progress"]) if pendientes else None
     return {"ok": True, "rule_version": rules.get("version"), "xp": xp, "signals": sig,
+            "dimensiones": dimensiones(sig),
             "tiers": rules["tiers"], "medals": medals_out,
             "desbloqueadas": sum(1 for x in medals_out if x["unlocked"]),
             "total": len(medals_out), "nuevas": nuevos,
