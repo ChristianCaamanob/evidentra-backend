@@ -41,3 +41,24 @@ def research_consent_revoke(request: Request, payload: dict, db: Session = Depen
 @router.get("/flags")
 def research_flags(db: Session = Depends(get_db)):
     return rs.flags(db)
+
+
+# ── motor experimental (Fase 2) ───────────────────────────────────────────────
+@router.post("/assignments")
+@limit("60/minute")
+def research_assign(request: Request, payload: dict, db: Session = Depends(get_db)):
+    p = payload or {}
+    return rs.asignar(db, p.get("experiment", ""), p.get("participant", ""), p.get("strata") or {})
+
+
+@router.get("/assignments/{experiment_id}")
+def research_assignment_get(experiment_id: str, participant: str = "", db: Session = Depends(get_db)):
+    return rs.asignacion_de(db, experiment_id, participant)
+
+
+@router.post("/deviations")
+@limit("30/minute")
+def research_deviation(request: Request, payload: dict, db: Session = Depends(get_db)):
+    p = payload or {}
+    return rs.registrar_desviacion(db, p.get("experiment", ""), p.get("participant", ""),
+                                   p.get("kind", "deviation"), p.get("reason", ""))

@@ -5,7 +5,7 @@ institucional; la llave de reidentificación NO vive aquí. Eventos APPEND-ONLY,
 """
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, Text
+from sqlalchemy import DateTime, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -49,6 +49,32 @@ class ResearchEvent(Base):
     occurred_at: Mapped[str] = mapped_column(String(40))
     payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ResearchAssignment(Base):
+    __tablename__ = "research_assignments"
+    __table_args__ = (UniqueConstraint("experiment_id", "participant_pseudo", name="uq_asignacion_por_experimento"),)
+
+    assignment_id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    study_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    experiment_id: Mapped[str] = mapped_column(String(80), index=True)
+    participant_pseudo: Mapped[str] = mapped_column(String(80), index=True)
+    condition_id: Mapped[str] = mapped_column(String(80))
+    stratum_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    seed: Mapped[str] = mapped_column(String(64), default="")
+    algorithm_version: Mapped[str] = mapped_column(String(24), default="v1-hash")
+    assigned_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ResearchDeviation(Base):
+    __tablename__ = "research_deviations"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    experiment_id: Mapped[str] = mapped_column(String(80), index=True)
+    participant_pseudo: Mapped[str] = mapped_column(String(80), index=True)
+    kind: Mapped[str] = mapped_column(String(16), default="deviation")   # exclusion | deviation
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class ResearchAuditLog(Base):

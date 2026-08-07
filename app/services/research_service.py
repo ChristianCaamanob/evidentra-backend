@@ -15,7 +15,8 @@ import uuid as _uuid
 from sqlalchemy.orm import Session
 
 from app.core.errors import unprocessable
-from app.models.research import (ResearchAuditLog, ResearchConsent, ResearchEvent, ResearchParticipant)
+from app.models.research import (ResearchAssignment, ResearchAuditLog, ResearchConsent, ResearchDeviation,
+                                 ResearchEvent, ResearchParticipant)
 
 SCHEMA_VERSION = "1.0.0"
 
@@ -144,6 +145,87 @@ def ingest(db: Session, evento: dict) -> dict:
     db.commit()
     # responde SIN identidad real
     return {"ok": True, "stored": True, "serverEventId": sev, "receivedAt": _dt.datetime.utcnow().isoformat()}
+
+
+# ── motor experimental (Fase 2): asignación en servidor, reproducible, congelada ──────────────
+_ALGO = "v1-hash"
+
+
+def _experimento(experiment_id: str) -> dict | None:
+    for x in (_catalogo().get("experiments") or []):
+        if x.get("id") == experiment_id:
+            return x
+    return None
+
+
+def _stratum_id(strata: dict, keys: list) -> str:
+    strata = strata or {}
+    partes = [str(k) + "=" + str(strata.get(k, "na")) for k in (keys or [])]
+    return "|".join(partes) if partes else "all"
+
+
+def _condicion_reproducible(experiment_id: str, participant: str, conditions: list) -> tuple[str, str]:
+    """Asignación DETERMINISTA (misma entrada → misma condición): hash(experimento|participante|algo).
+    Server-side y reproducible; el cliente nunca la calcula. Distribución ~uniforme entre condiciones."""
+    import hashlib
+    h = hashlib.sha256((experiment_id + "|" + participant + "|" + _ALGO).encode("utf-8")).hexdigest()
+    idx = int(h[:8], 16) % max(1, len(conditions))
+    return conditions[idx], h[:16]
+
+
+def asignar(db: Session, experiment_id: str, participant: str, strata: dict | None = None) -> dict:
+    if not experiment_id or not participant:
+        return {"ok": False, "error": "faltan experiment/participant"}
+    exp = _experimento(experiment_id)
+    if not exp:
+        return {"ok": False, "error": "experimento no catalogado"}
+    # feature flag obligatoria para toda intervención experimental
+    if not FLAGS.get(exp.get("featureFlag") or "", False):
+        return {"ok": False, "reason": "flag_off", "flag": exp.get("featureFlag")}
+    # requiere consentimiento de investigación
+    if consent_estado(db, participant)["state"] != "consented":
+        return {"ok": False, "reason": "no_consent"}
+    conditions = exp.get("conditions") or []
+    if not conditions:
+        return {"ok": False, "error": "experimento sin condiciones"}
+    # congelada + idempotente: una asignación por (experimento, participante)
+    ya = (db.query(ResearchAssignment)
+          .filter(ResearchAssignment.experiment_id == experiment_id, ResearchAssignment.participant_pseudo == participant)
+          .first())
+    if ya:
+        return {"ok": True, "assignmentId": ya.assignment_id, "experimentId": experiment_id,
+                "conditionId": ya.condition_id, "stratumId": ya.stratum_id, "frozen": True}
+    cond, seed = _condicion_reproducible(experiment_id, participant, conditions)
+    stratum = _stratum_id(strata, exp.get("stratification") or [])
+    aid = _uid()
+    db.add(ResearchAssignment(assignment_id=aid, study_id=(exp.get("studyId") or None), experiment_id=experiment_id,
+                              participant_pseudo=participant, condition_id=cond, stratum_id=stratum, seed=seed,
+                              algorithm_version=_ALGO))
+    db.add(ResearchAuditLog(id=_uid(), actor_pseudo_role="system", action="assignment_created",
+                            detail=experiment_id + " · stratum=" + stratum))
+    db.commit()
+    return {"ok": True, "assignmentId": aid, "experimentId": experiment_id, "conditionId": cond,
+            "stratumId": stratum, "frozen": True}
+
+
+def asignacion_de(db: Session, experiment_id: str, participant: str) -> dict:
+    a = (db.query(ResearchAssignment)
+         .filter(ResearchAssignment.experiment_id == experiment_id, ResearchAssignment.participant_pseudo == participant)
+         .first())
+    if not a:
+        return {"ok": True, "assigned": False}   # condición OCULTA hasta que exista asignación
+    return {"ok": True, "assigned": True, "assignmentId": a.assignment_id, "conditionId": a.condition_id,
+            "stratumId": a.stratum_id, "algorithm_version": a.algorithm_version}
+
+
+def registrar_desviacion(db: Session, experiment_id: str, participant: str, kind: str = "deviation", reason: str = "") -> dict:
+    if kind not in ("exclusion", "deviation"):
+        kind = "deviation"
+    db.add(ResearchDeviation(id=_uid(), experiment_id=experiment_id, participant_pseudo=participant,
+                             kind=kind, reason=(reason or None)))
+    db.add(ResearchAuditLog(id=_uid(), actor_pseudo_role="researcher", action="deviation_" + kind, detail=experiment_id))
+    db.commit()
+    return {"ok": True, "kind": kind}
 
 
 _CATALOG = None
