@@ -77,6 +77,28 @@ class ResearchDeviation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class ResearchAIReview(Base):
+    __tablename__ = "research_ai_reviews"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    participant_pseudo: Mapped[str] = mapped_column(String(80), index=True)
+    concept_id: Mapped[str] = mapped_column(String(100), index=True)
+    modality: Mapped[str] = mapped_column(String(24), default="teach_runi")
+    ai_decision: Mapped[str] = mapped_column(String(24), default="scored")   # scored|abstained|needs_human_review|not_used
+    score01: Mapped[float | None] = mapped_column(nullable=True)
+    uncertainty01: Mapped[float] = mapped_column(default=0.0)
+    criterion_scores: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    rubric_version: Mapped[str] = mapped_column(String(24), default="teach-runi-v1")
+    model_version: Mapped[str] = mapped_column(String(48), default="")
+    prompt_version: Mapped[str] = mapped_column(String(24), default="v1")
+    human_review_required: Mapped[bool] = mapped_column(default=False)
+    human_verdict: Mapped[str | None] = mapped_column(String(24), nullable=True)   # agree|adjust|reject (docente)
+    human_score01: Mapped[float | None] = mapped_column(nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class ResearchAuditLog(Base):
     __tablename__ = "research_audit_log"
 

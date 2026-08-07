@@ -6,7 +6,7 @@ El gateway valida contra el esquema v1, es idempotente y append-only; responde S
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db
+from app.api.deps import get_db, req_profesor
 from app.core.ratelimit import limit
 from app.services import research_service as rs
 
@@ -62,3 +62,31 @@ def research_deviation(request: Request, payload: dict, db: Session = Depends(ge
     p = payload or {}
     return rs.registrar_desviacion(db, p.get("experiment", ""), p.get("participant", ""),
                                    p.get("kind", "deviation"), p.get("reason", ""))
+
+
+# ── Fase 3 · modalidad teach_runi ─────────────────────────────────────────────
+@router.post("/teach/evaluate")
+@limit("40/minute")
+def research_teach_eval(request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import teach_runi_service as tr
+    p = payload or {}
+    part = p.get("participant", "")
+    if not rs.FLAGS.get("teachRuniPilot", False):
+        return {"ok": False, "reason": "flag_off", "flag": "teachRuniPilot"}
+    if rs.consent_estado(db, part)["state"] != "consented":
+        return {"ok": False, "reason": "no_consent"}
+    return tr.evaluar(db, part, p.get("conceptId", ""), p.get("tema", ""), p.get("explicacion", ""), p.get("contexto", ""))
+
+
+@router.get("/teach/reviews", dependencies=[Depends(req_profesor)])
+def research_teach_reviews(limite: int = 50, db: Session = Depends(get_db)):
+    from app.services import teach_runi_service as tr
+    return tr.pendientes_revision(db, limite)
+
+
+@router.post("/teach/reviews/{review_id}", dependencies=[Depends(req_profesor)])
+@limit("60/minute")
+def research_teach_review(request: Request, review_id: str, payload: dict, db: Session = Depends(get_db)):
+    from app.services import teach_runi_service as tr
+    p = payload or {}
+    return tr.revisar(db, review_id, p.get("verdict", ""), p.get("score01"), p.get("quien", "docente"))
