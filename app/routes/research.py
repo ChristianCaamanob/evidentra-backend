@@ -78,6 +78,35 @@ def research_teach_eval(request: Request, payload: dict, db: Session = Depends(g
     return tr.evaluar(db, part, p.get("conceptId", ""), p.get("tema", ""), p.get("explicacion", ""), p.get("contexto", ""))
 
 
+# ── Fase 4 · scheduler de medición longitudinal (7/21/45 días, ítems paralelos) ──
+@router.post("/assessment/schedule")
+@limit("60/minute")
+def research_assessment_schedule(request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import research_assessment_service as ra
+    p = payload or {}
+    part = p.get("participant", "")
+    if not rs.FLAGS.get("delayedAssessmentScheduler", False):
+        return {"ok": False, "reason": "flag_off", "flag": "delayedAssessmentScheduler"}
+    if rs.consent_estado(db, part)["state"] != "consented":
+        return {"ok": False, "reason": "no_consent"}
+    return ra.programar(db, part, p.get("conceptId", ""), int(p.get("difficultyBand", 3) or 3),
+                        p.get("transferDistance", "near"), p.get("immediateScore"))
+
+
+@router.get("/assessment/due")
+def research_assessment_due(participant: str = "", db: Session = Depends(get_db)):
+    from app.services import research_assessment_service as ra
+    return ra.due(db, participant)
+
+
+@router.post("/assessment/{assessment_id}/respond")
+@limit("60/minute")
+def research_assessment_respond(request: Request, assessment_id: str, payload: dict, db: Session = Depends(get_db)):
+    from app.services import research_assessment_service as ra
+    p = payload or {}
+    return ra.responder(db, assessment_id, p.get("score01", 0), p.get("confidence01"), p.get("activeSeconds"))
+
+
 # ── Fase 3 · modalidad living_case (caso ramificado) ─────────────────────────
 @router.get("/case/start")
 def research_case_start(case: str = "estudio-bajo-presion", db: Session = Depends(get_db)):

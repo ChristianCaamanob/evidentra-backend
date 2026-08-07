@@ -77,6 +77,29 @@ class ResearchDeviation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class ResearchAssessment(Base):
+    """Medición longitudinal: una fila por (participante, concepto, ventana). El scheduler la crea al completar la
+    intervención; el estudiante la responde cuando vence, con un ÍTEM PARALELO distinto (nunca el mismo)."""
+    __tablename__ = "research_assessments"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    participant_pseudo: Mapped[str] = mapped_column(String(80), index=True)
+    concept_id: Mapped[str] = mapped_column(String(100), index=True)
+    window: Mapped[str] = mapped_column(String(16), index=True)   # baseline|immediate|day_7|day_21|day_45
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime, index=True)
+    item_id: Mapped[str] = mapped_column(String(100), default="")   # ítem paralelo elegido
+    item_set_version: Mapped[str] = mapped_column(String(24), default="items-v1")
+    difficulty_band: Mapped[int] = mapped_column(default=3)
+    transfer_distance: Mapped[str] = mapped_column(String(16), default="near")   # near|far
+    done: Mapped[bool] = mapped_column(default=False)
+    score01: Mapped[float | None] = mapped_column(nullable=True)
+    confidence01: Mapped[float | None] = mapped_column(nullable=True)
+    active_seconds: Mapped[int | None] = mapped_column(nullable=True)
+    reminded: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    done_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class ResearchAIReview(Base):
     __tablename__ = "research_ai_reviews"
 
