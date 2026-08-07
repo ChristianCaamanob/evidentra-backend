@@ -6,11 +6,22 @@ El gateway valida contra el esquema v1, es idempotente y append-only; responde S
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, req_profesor
+from app.api.deps import get_db, req_investigador, req_profesor
 from app.core.ratelimit import limit
 from app.services import research_service as rs
 
 router = APIRouter(prefix="/research", tags=["research"])
+
+
+# ── Fase 6 · panel investigador (investigador/creador; NO docente) ────────────
+@router.get("/dashboard", dependencies=[Depends(req_investigador)])
+def research_dashboard(db: Session = Depends(get_db)):
+    from app.models.research import ResearchAuditLog
+    import uuid as _u
+    from app.services import research_dashboard_service as rd
+    db.add(ResearchAuditLog(id=_u.uuid4().hex[:32], actor_pseudo_role="researcher", action="dashboard_view"))
+    db.commit()
+    return rd.resumen(db)
 
 
 @router.post("/events")
