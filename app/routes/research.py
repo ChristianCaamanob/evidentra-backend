@@ -78,6 +78,31 @@ def research_teach_eval(request: Request, payload: dict, db: Session = Depends(g
     return tr.evaluar(db, part, p.get("conceptId", ""), p.get("tema", ""), p.get("explicacion", ""), p.get("contexto", ""))
 
 
+# ── Fase 3 · modalidad living_case (caso ramificado) ─────────────────────────
+@router.get("/case/start")
+def research_case_start(case: str = "estudio-bajo-presion", db: Session = Depends(get_db)):
+    from app.services import modalidades_service as ms
+    if not rs.FLAGS.get("livingCasePilot", False):
+        return {"ok": False, "reason": "flag_off", "flag": "livingCasePilot"}
+    return ms.caso_inicio(case)
+
+
+@router.post("/case/step")
+@limit("120/minute")
+def research_case_step(request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import modalidades_service as ms
+    p = payload or {}
+    return ms.caso_paso(p.get("case", "estudio-bajo-presion"), p.get("stepId", ""), p.get("optionId", ""))
+
+
+@router.post("/case/score")
+@limit("60/minute")
+def research_case_score(request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import modalidades_service as ms
+    p = payload or {}
+    return ms.caso_score(p.get("case", "estudio-bajo-presion"), p.get("choices") or [])
+
+
 @router.get("/teach/reviews", dependencies=[Depends(req_profesor)])
 def research_teach_reviews(limite: int = 50, db: Session = Depends(get_db)):
     from app.services import teach_runi_service as tr
