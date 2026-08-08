@@ -104,6 +104,16 @@ def obtener(pid: UUID, db: Session = Depends(get_db),
     return _dto(_mio(db, pid, usuario))
 
 
+@router.get("/{pid}/defendibilidad")
+def defendibilidad(pid: UUID, db: Session = Depends(get_db),
+                   usuario: Teacher = Depends(req_investigador)):
+    """Defendibilidad metodológica (criterios versionados evaluados sobre el estado real del proyecto).
+    `_mio` verifica propiedad (un investigador no ve estudios ajenos)."""
+    from app.services import defendibilidad_service as dfs
+    p = _mio(db, pid, usuario)
+    return dfs.evaluar(p.tipo, p.datos or {}, p.pregunta)
+
+
 @router.patch("/{pid}")
 def actualizar(pid: UUID, body: ProyectoActualizar, db: Session = Depends(get_db),
                usuario: Teacher = Depends(req_investigador)):
