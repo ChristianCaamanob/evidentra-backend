@@ -23,6 +23,7 @@ class SalaEstudio(UUIDMixin, TimestampMixin, Base):
     codigo: Mapped[str] = mapped_column(String(12), unique=True, index=True)     # código de unión
     titulo: Mapped[str] = mapped_column(String(160), default="Sala de estudio")
     creador_alias: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    creador_device: Mapped[str | None] = mapped_column(String(64), nullable=True)   # owner-check: solo el creador cierra (salas legadas sin esto → abiertas a cerrar)
     activa: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
     # {device_id: {alias, puntos, aportes, ultimo_ts}} — presencia + puntaje individual (nombre de trato, sin PII)
     participantes: Mapped[dict | None] = mapped_column(JSON, nullable=True)

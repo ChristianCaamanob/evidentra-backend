@@ -40,5 +40,5 @@ def estado(codigo: str, device_id: str = "", alias: str = "", db: Session = Depe
 
 
 @router.post("/{codigo}/cerrar")
-def cerrar(codigo: str, db: Session = Depends(get_db)):
-    return salas.cerrar(db, codigo)
+def cerrar(codigo: str, payload: dict | None = None, db: Session = Depends(get_db)):
+    return salas.cerrar(db, codigo, (payload or {}).get("device_id"))

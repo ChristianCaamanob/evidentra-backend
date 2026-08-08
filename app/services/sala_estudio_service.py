@@ -13,7 +13,7 @@ import time
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.core.errors import not_found, conflict
+from app.core.errors import not_found, conflict, forbidden
 from app.models.sala_estudio import SalaEstudio, SalaMensaje
 from app.services import silabo_service as sil
 
@@ -56,7 +56,7 @@ def crear_sala(db: Session, codigo_silabo: str, titulo: str, alias: str | None, 
     a = sil.agente_por_codigo(db, codigo_silabo)             # el curso al que pertenece la sala
     s = SalaEstudio(agente_id=a.id, codigo=_codigo(db),
                     titulo=(titulo or "Sala de estudio").strip()[:160] or "Sala de estudio",
-                    creador_alias=(alias or None), activa=True,
+                    creador_alias=(alias or None), creador_device=(device_id or None), activa=True,
                     participantes={}, meta={"puntos_grupo": 0, "temas": [], "hitos": []})
     db.add(s); db.flush()
     _tocar(s, device_id, alias, char)
@@ -122,8 +122,12 @@ def estado(db: Session, codigo: str, device_id: str | None = None, alias: str | 
     return _sala_dict(s, sil_agente(db, s), incluir_mensajes=True)
 
 
-def cerrar(db: Session, codigo: str) -> dict:
+def cerrar(db: Session, codigo: str, device_id: str | None = None) -> dict:
     s = _por_codigo(db, codigo)
+    # owner-check: si la sala tiene creador registrado, solo ese dispositivo puede cerrarla.
+    # Salas legadas (sin creador_device) siguen pudiéndose cerrar, para no romper lo existente.
+    if s.creador_device and device_id and s.creador_device != device_id:
+        raise forbidden("Solo quien abrió la sala puede cerrarla.")
     s.activa = False
     db.add(SalaMensaje(sala_id=s.id, rol="sistema", texto="La sala se cerró. ¡Buen trabajo en equipo! 🎉"))
     db.commit(); db.refresh(s)
