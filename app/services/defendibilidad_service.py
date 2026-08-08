@@ -122,6 +122,18 @@ _ARTEFACTOS = {  # para el Libro Mayor: clave en datos → etiqueta legible + m�
 }
 
 
+# Destino de drill-down: cada criterio → subpestaña real del taller (para "abrir el desglose", spec pto.8).
+_OBJETIVO = {
+    "revision": {"pregunta": "protocolo", "protocolo": "protocolo", "busqueda": "corpus", "corpus": "corpus",
+                 "cribado": "corpus", "extraccion": "extraccion", "rob": "rob2", "sintesis": "meta", "prisma": "prisma"},
+}
+_OBJ_ARTEFACTO = {  # chip del Libro Mayor → subpestaña
+    "protocolo": "protocolo", "estrategia": "corpus", "searchtable": "corpus", "corpus": "corpus",
+    "cribado": "corpus", "cribado_b": "corpus", "extraccion": "extraccion", "rob2": "rob2",
+    "meta": "meta", "prisma": "prisma", "manuscrito": "manuscrito", "variables": "variables",
+}
+
+
 def evaluar(tipo: str, datos: dict | None, pregunta: str | None) -> dict:
     d = datos or {}
     if tipo == "revision":
@@ -130,6 +142,9 @@ def evaluar(tipo: str, datos: dict | None, pregunta: str | None) -> dict:
         crit = _criterios_experimental(d, pregunta)
     else:
         crit = _criterios_datos(d, pregunta)
+    _obj = _OBJETIVO.get(tipo, {})
+    for c in crit:
+        c["objetivo"] = _obj.get(c["id"])   # None si el taller de ese tipo no tiene subpestaña mapeada
     peso_tot = sum(c["peso"] for c in crit) or 1
     logrado = sum(c["peso"] * (1.0 if c["estado"] == "completo" else (0.5 if c["estado"] == "parcial" else 0.0)) for c in crit)
     puntaje = round(logrado / peso_tot * 10, 1)
@@ -137,10 +152,15 @@ def evaluar(tipo: str, datos: dict | None, pregunta: str | None) -> dict:
     completos = [c for c in crit if c["estado"] == "completo"]
     etapa = completos[-1]["fase"] if completos else "Sin iniciar"
     prox = next((c for c in crit if c["estado"] != "completo"), None)
-    proximo_paso = ({"criterio": prox["id"], "label": prox["label"], "detalle": prox["detalle"], "fase": prox["fase"]}
-                    if prox else {"criterio": None, "label": "Estudio defendible en todos los criterios", "detalle": "Prepara el borrador para la revista objetivo.", "fase": "Reporte"})
+    proximo_paso = ({"criterio": prox["id"], "label": prox["label"], "detalle": prox["detalle"], "fase": prox["fase"], "objetivo": prox.get("objetivo")}
+                    if prox else {"criterio": None, "label": "Estudio defendible en todos los criterios", "detalle": "Prepara el borrador para la revista objetivo.", "fase": "Reporte", "objetivo": ("manuscrito" if tipo == "revision" else None)})
     # Libro Mayor liviano: artefactos presentes en datos (procedencia por fase). Sin hash (no se persiste snapshot aún).
-    ledger = [{"clave": k, "label": lab, "plano": plano}
+    # `objetivo` = subpestaña del taller para abrir el artefacto (drill-down); `n` = tamaño si es lista/dict.
+    def _tam(v):
+        return len(v) if isinstance(v, (list, dict)) else None
+    ledger = [{"clave": k, "label": lab, "plano": plano,
+               "objetivo": (_OBJ_ARTEFACTO.get(k) if tipo == "revision" else None),
+               "n": _tam(d.get(k))}
               for k, (lab, plano) in _ARTEFACTOS.items() if _has(d, k)]
     return {"version": CRITERIOS_VERSION, "tipo": tipo, "puntaje": puntaje, "progreso": progreso,
             "etapa": etapa, "criterios": crit, "proximo_paso": proximo_paso, "libro_mayor": ledger}
