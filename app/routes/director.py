@@ -151,3 +151,18 @@ def decisiones_actualizar(did: UUID, body: DecisionActualizar, db: Session = Dep
     db.commit()
     db.refresh(d)
     return _dg_dto(d)
+
+
+@router.delete("/decisiones/{did}", status_code=204)
+def decisiones_borrar(did: UUID, db: Session = Depends(get_db),
+                      usuario: Teacher = Depends(req_direccion)):
+    """Elimina una decisión ERRÓNEA (solo su autor o el creador). La bitácora es la memoria
+    auditable de una decisión válida; un registro creado por error sí puede corregirse."""
+    d = db.get(DecisionGov, did)
+    if not d:
+        raise not_found("Decisión no encontrada.")
+    if str(d.autor_id) != str(usuario.id) and usuario.rol != "creador":
+        raise forbidden("Solo el autor o el creador puede eliminar esta decisión.")
+    db.delete(d)
+    db.commit()
+    return None
