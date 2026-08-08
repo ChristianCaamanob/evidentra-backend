@@ -122,29 +122,134 @@ _ARTEFACTOS = {  # para el Libro Mayor: clave en datos → etiqueta legible + m�
 }
 
 
-# Destino de drill-down: cada criterio → subpestaña real del taller (para "abrir el desglose", spec pto.8).
+# Destino de drill-down: cada CRITERIO → subpestaña real del taller de su tipo (para "abrir el desglose", spec pto.8).
+# revisión → rsSub(...) · datos → pjdTab(...) · experimental → expwTab(...)  (el frontend resuelve el prefijo)
 _OBJETIVO = {
     "revision": {"pregunta": "protocolo", "protocolo": "protocolo", "busqueda": "corpus", "corpus": "corpus",
                  "cribado": "corpus", "extraccion": "extraccion", "rob": "rob2", "sintesis": "meta", "prisma": "prisma"},
+    "datos": {"pregunta": "analisis", "fuente": "analisis", "grupos": "analisis", "variables": "analisis", "analisis": "analisis"},
+    "experimental": {"pregunta": "diseno", "diseno": "diseno", "protocolo": "protocolo", "variables": "datos", "reporte": "reporte"},
 }
-_OBJ_ARTEFACTO = {  # chip del Libro Mayor → subpestaña
-    "protocolo": "protocolo", "estrategia": "corpus", "searchtable": "corpus", "corpus": "corpus",
-    "cribado": "corpus", "cribado_b": "corpus", "extraccion": "extraccion", "rob2": "rob2",
-    "meta": "meta", "prisma": "prisma", "manuscrito": "manuscrito", "variables": "variables",
+# Chip del Libro Mayor (clave en `datos`) → subpestaña, por tipo de proyecto.
+_OBJ_ARTEFACTO = {
+    "revision": {"protocolo": "protocolo", "estrategia": "corpus", "searchtable": "corpus", "corpus": "corpus",
+                 "cribado": "corpus", "cribado_b": "corpus", "extraccion": "extraccion", "rob2": "rob2",
+                 "meta": "meta", "prisma": "prisma", "manuscrito": "manuscrito", "variables": "variables"},
+    "datos": {"estrategia": "biblio", "searchtable": "biblio", "corpus": "biblio", "cribado": "biblio", "cribado_b": "biblio",
+              "protocolo": "analisis", "extraccion": "analisis", "meta": "analisis", "prisma": "analisis",
+              "manuscrito": "analisis", "variables": "analisis"},
+    "experimental": {"corpus": "biblio", "estrategia": "biblio", "cribado": "biblio", "cribado_b": "biblio",
+                     "protocolo": "protocolo", "experimental": "diseno", "variables": "datos", "extraccion": "datos",
+                     "meta": "analisis", "prisma": "analisis", "manuscrito": "manuscrito"},
 }
+
+
+def _num(x):
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
+def _kappa(a: dict, b: dict):
+    """κ de Cohen sobre las decisiones compartidas de dos revisores (dicts DOI→decisión)."""
+    keys = [k for k in a if k in b and a[k] and b[k]]
+    n = len(keys)
+    if n == 0:
+        return None
+    cats = set(a[k] for k in keys) | set(b[k] for k in keys)
+    po = sum(1 for k in keys if a[k] == b[k]) / n
+    pe = sum((sum(1 for k in keys if a[k] == c) / n) * (sum(1 for k in keys if b[k] == c) / n) for c in cats)
+    kap = 1.0 if pe >= 1 else (po - pe) / (1 - pe)
+    return {"kappa": round(kap, 2), "n": n}
+
+
+def _metricas_revision(d: dict) -> dict:
+    """Números REALES por criterio (no inventa: si el dato no está, no hay métrica)."""
+    m = {}
+    corpus = d.get("corpus") or []
+    if corpus:
+        m["corpus"] = str(len(corpus)) + " registros"
+    est = d.get("estrategia") or {}
+    blocks = est.get("blocks") if isinstance(est, dict) else None
+    if isinstance(blocks, list) and blocks:
+        m["busqueda"] = str(len(blocks)) + " bloques booleanos"
+    crib = d.get("cribado") or {}
+    crib_b = d.get("cribado_b") or {}
+    if crib:
+        inc = sum(1 for v in crib.values() if v == "incluir")
+        if crib_b:
+            k = _kappa(crib, crib_b)
+            pre = ("κ=" + str(k["kappa"]) + " (n=" + str(k["n"]) + ") · ") if k else ""
+            m["cribado"] = pre + str(inc) + " incluidos de " + str(len(crib))
+        else:
+            m["cribado"] = str(len(crib)) + " decididos · " + str(inc) + " incluidos · 1 revisor"
+    ext = d.get("extraccion") or {}
+    if ext:
+        m["extraccion"] = str(len(ext)) + " estudios extraídos"
+    rob = (d.get("rob2") or {}).get("studies") or []
+    if rob:
+        m["rob"] = str(len(rob)) + " estudios evaluados"
+    res = (d.get("meta") or {}).get("resumen") or {}
+    if res:
+        parts = []
+        med = str(res.get("medida") or (d.get("meta") or {}).get("medida") or "").upper()
+        if res.get("k") is not None:
+            parts.append("k=" + str(res["k"]))
+        est_v = _num(res.get("estimador"))
+        if est_v is not None:
+            parts.append(((med + " ") if med else "") + str(round(est_v, 2)))
+        if res.get("I2") is not None:
+            parts.append("I²=" + str(res["I2"]) + "%")
+        if parts:
+            m["sintesis"] = " · ".join(parts)
+    prisma = d.get("prisma") or {}
+    if prisma:
+        ch = prisma.get("checklist") or {}
+        modo = prisma.get("modo")
+        m["prisma"] = (("modo " + str(modo).upper() + " · ") if modo else "") + str(len(ch)) + " ítems de checklist"
+    return m
+
+
+def _metricas_datos(d: dict) -> dict:
+    m = {}
+    ci, ai = d.get("course_ids") or [], d.get("assessment_ids") or []
+    if ci or ai:
+        m["fuente"] = str(len(ci)) + " curso(s) · " + str(len(ai)) + " evaluación(es)"
+    g = d.get("grupos") or []
+    if g:
+        m["grupos"] = str(len(g)) + " grupo(s)"
+    v = d.get("variables") or {}
+    vlist = v.get("list") if isinstance(v, dict) else (v if isinstance(v, list) else None)
+    if isinstance(vlist, list) and vlist:
+        m["variables"] = str(len(vlist)) + " variables"
+    return m
+
+
+def _metricas_experimental(d: dict) -> dict:
+    m = {}
+    v = d.get("variables") or {}
+    vlist = v.get("list") if isinstance(v, dict) else (v if isinstance(v, list) else None)
+    if isinstance(vlist, list) and vlist:
+        m["variables"] = str(len(vlist)) + " variables"
+    return m
 
 
 def evaluar(tipo: str, datos: dict | None, pregunta: str | None) -> dict:
     d = datos or {}
     if tipo == "revision":
         crit = _criterios_revision(d, pregunta)
+        met = _metricas_revision(d)
     elif tipo == "experimental":
         crit = _criterios_experimental(d, pregunta)
+        met = _metricas_experimental(d)
     else:
         crit = _criterios_datos(d, pregunta)
+        met = _metricas_datos(d)
     _obj = _OBJETIVO.get(tipo, {})
     for c in crit:
         c["objetivo"] = _obj.get(c["id"])   # None si el taller de ese tipo no tiene subpestaña mapeada
+        c["metrica"] = met.get(c["id"])     # número real (κ, I², incluidos…) o None si no aplica
     peso_tot = sum(c["peso"] for c in crit) or 1
     logrado = sum(c["peso"] * (1.0 if c["estado"] == "completo" else (0.5 if c["estado"] == "parcial" else 0.0)) for c in crit)
     puntaje = round(logrado / peso_tot * 10, 1)
@@ -158,8 +263,9 @@ def evaluar(tipo: str, datos: dict | None, pregunta: str | None) -> dict:
     # `objetivo` = subpestaña del taller para abrir el artefacto (drill-down); `n` = tamaño si es lista/dict.
     def _tam(v):
         return len(v) if isinstance(v, (list, dict)) else None
+    _objart = _OBJ_ARTEFACTO.get(tipo, {})
     ledger = [{"clave": k, "label": lab, "plano": plano,
-               "objetivo": (_OBJ_ARTEFACTO.get(k) if tipo == "revision" else None),
+               "objetivo": _objart.get(k),
                "n": _tam(d.get(k))}
               for k, (lab, plano) in _ARTEFACTOS.items() if _has(d, k)]
     return {"version": CRITERIOS_VERSION, "tipo": tipo, "puntaje": puntaje, "progreso": progreso,
