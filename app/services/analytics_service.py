@@ -67,6 +67,29 @@ EVENT_SCHEMA: dict[str, tuple[str, list[str]]] = {
     "content_report": ("seguridad", ["tipo"]),
     "admin_access": ("seguridad", ["recurso"]),
     "moderation_action": ("seguridad", ["accion"]),
+    # P2 · embudo de activación DOCENTE (contrato de la directiva; sin PII — el strip lo garantiza)
+    "course_creation_started": ("docente", []),
+    "course_creation_completed": ("docente", []),
+    "roster_import_completed": ("docente", []),
+    "assessment_created": ("docente", []),
+    "rubric_validated": ("docente", []),
+    "scan_started": ("docente", []),
+    "scan_completed": ("docente", []),
+    "scan_failed": ("docente", []),
+    "result_review_completed": ("docente", []),
+    "briefing_generated": ("docente", []),
+    "briefing_exported": ("docente", []),
+    "runi_published": ("docente", []),
+    "runi_question_escalated": ("docente", []),
+    # eventos del cliente ya emitidos (personalización/recompensa/accesibilidad) — antes se descartaban por no estar
+    "accent_previewed": ("identidad", []),
+    "environment_previewed": ("identidad", []),
+    "personalization_saved": ("identidad", []),
+    "personalization_reset": ("identidad", []),
+    "accessibility_contrast_adjusted": ("seguridad", []),
+    "haptics_available": ("producto", []),
+    "reward_shown": ("aprendizaje", []),
+    "reward_dismissed": ("aprendizaje", []),
 }
 
 _DEVICES = {"movil", "tablet", "desktop"}
