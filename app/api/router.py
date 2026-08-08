@@ -105,3 +105,5 @@ from app.routes.experiencia import router as experiencia_router
 api_router.include_router(experiencia_router)
 from app.routes.research import router as research_router
 api_router.include_router(research_router)
+from app.routes.runi_prefs import router as runi_prefs_router
+api_router.include_router(runi_prefs_router)
