@@ -46,6 +46,7 @@ from app.models.experiencia import CourseFacultyBinding, StudentRelationship  # 
 from app.models.research import ResearchParticipant, ResearchConsent, ResearchEvent, ResearchAuditLog, ResearchAssignment, ResearchDeviation, ResearchAIReview, ResearchAssessment  # noqa: F401
 from app.models.libro_mayor import LibroMayorEntrada  # noqa: F401
 from app.models.decision_gov import DecisionGov  # noqa: F401
+from app.models.membresia import Membresia, AccesoPersonalLog  # noqa: F401
 
 # Normaliza el esquema de Render/Heroku: SQLAlchemy 2.0 exige 'postgresql://'.
 _db_url = settings.database_url

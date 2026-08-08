@@ -92,10 +92,13 @@ def _dg_evento(d: DecisionGov, actor: str, evento: str):
     d.bitacora = b
 
 
-@router.get("/decisiones", dependencies=[Depends(req_direccion)])
+@router.get("/decisiones")
 def decisiones_listar(nivel: str | None = None, estado: str | None = None, tipo: str | None = None,
-                      db: Session = Depends(get_db)):
-    """Lista las decisiones/planes (memoria institucional). Filtros por nivel/estado/tipo."""
+                      db: Session = Depends(get_db), usuario: Teacher = Depends(req_direccion)):
+    """Lista las decisiones/planes (memoria institucional). Filtros por nivel/estado/tipo.
+    Aplica RBAC POR ÁMBITO: cada usuario ve solo lo de sus ámbitos (con descenso progresivo);
+    sin membresías → acceso agregado legacy (ve todo)."""
+    from app.services import gobernanza_ambito_service as _gas
     q = db.query(DecisionGov)
     if nivel:
         q = q.filter(DecisionGov.nivel == nivel)
@@ -104,7 +107,9 @@ def decisiones_listar(nivel: str | None = None, estado: str | None = None, tipo:
     if tipo:
         q = q.filter(DecisionGov.tipo == tipo)
     items = q.order_by(DecisionGov.updated_at.desc()).all()
-    return {"n": len(items), "decisiones": [_dg_dto(d) for d in items]}
+    ms = _gas.membresias_activas(db, usuario)
+    visibles = [d for d in items if _gas.puede_ver(usuario, ms, d.nivel, d.ambito or "")]
+    return {"n": len(visibles), "decisiones": [_dg_dto(d) for d in visibles], "ambito_aplicado": bool(ms)}
 
 
 @router.post("/decisiones", status_code=201)
@@ -166,3 +171,92 @@ def decisiones_borrar(did: UUID, db: Session = Depends(get_db),
     db.delete(d)
     db.commit()
     return None
+
+
+# ───────────────────────── RBAC por ÁMBITO (Fase 0A · gobernanza escalonada)
+from app.models.membresia import Membresia, NIVELES as _NIVELES, ACCIONES as _ACCIONES, DETALLE as _DETALLE
+from app.services import gobernanza_ambito_service as gas
+
+req_creador_local = requiere_rol()   # solo creador (gestiona membresías)
+
+
+class MembresiaCrear(BaseModel):
+    teacher_id: UUID
+    nivel: Literal["departamento", "carrera", "escuela", "facultad", "decanatura"]
+    ambito: str = Field(default="", max_length=160)
+    acciones: list[Literal["observar", "comentar", "solicitar", "aprobar", "intervenir"]] = ["observar"]
+    detalle: Literal["agregado", "seudonimizado", "identificable"] = "agregado"
+    finalidad: str = Field(default="", max_length=300)
+    vigente_hasta: str | None = None   # ISO date/datetime opcional
+
+
+class AccesoPersonalCrear(BaseModel):
+    ambito: str = Field(default="", max_length=160)
+    sujeto_ref: str = Field(default="", max_length=160)
+    finalidad: str = Field(min_length=3, max_length=300)
+    justificacion: str = Field(min_length=3)
+    emergencia: bool = False
+
+
+@router.get("/mis-ambitos", dependencies=[Depends(req_direccion)])
+def mis_ambitos(db: Session = Depends(get_db), usuario: Teacher = Depends(req_direccion)):
+    """Ámbitos (membresías activas y vigentes) del usuario. Vacío = acceso agregado legacy."""
+    ms = gas.membresias_activas(db, usuario)
+    return {"rol": usuario.rol, "n": len(ms), "ambitos": [gas.dto_membresia(m) for m in ms],
+            "legacy_agregado": (len(ms) == 0)}
+
+
+@router.get("/membresias", dependencies=[Depends(req_creador_local)])
+def membresias_listar(teacher_id: UUID | None = None, db: Session = Depends(get_db)):
+    """Lista de membresías (solo creador). Filtro opcional por teacher_id."""
+    q = db.query(Membresia)
+    if teacher_id:
+        q = q.filter(Membresia.teacher_id == teacher_id)
+    ms = q.order_by(Membresia.created_at.desc()).all()
+    return {"n": len(ms), "membresias": [gas.dto_membresia(m) for m in ms]}
+
+
+@router.post("/membresias", status_code=201)
+def membresias_crear(body: MembresiaCrear, db: Session = Depends(get_db),
+                     usuario: Teacher = Depends(req_creador_local)):
+    """Otorga una membresía por ámbito (solo creador)."""
+    from datetime import datetime
+    vh = None
+    if body.vigente_hasta:
+        try:
+            vh = datetime.fromisoformat(body.vigente_hasta.replace("Z", "+00:00"))
+        except ValueError:
+            from app.core.errors import unprocessable
+            raise unprocessable("vigente_hasta debe ser fecha ISO (AAAA-MM-DD).")
+    m = Membresia(teacher_id=body.teacher_id, nivel=body.nivel, ambito=body.ambito.strip(),
+                  acciones=",".join(body.acciones) or "observar", detalle=body.detalle,
+                  finalidad=body.finalidad.strip(), vigente_hasta=vh, otorgada_por=usuario.id, activa=True)
+    db.add(m)
+    db.commit()
+    db.refresh(m)
+    return gas.dto_membresia(m)
+
+
+@router.delete("/membresias/{mid}", status_code=204)
+def membresias_revocar(mid: UUID, db: Session = Depends(get_db),
+                       usuario: Teacher = Depends(req_creador_local)):
+    """Revoca (desactiva) una membresía (solo creador)."""
+    m = db.get(Membresia, mid)
+    if not m:
+        raise not_found("Membresía no encontrada.")
+    m.activa = False
+    db.commit()
+    return None
+
+
+@router.post("/acceso-personal", status_code=201)
+def acceso_personal(body: AccesoPersonalCrear, db: Session = Depends(get_db),
+                    usuario: Teacher = Depends(req_direccion)):
+    """Registra un acceso a dato personal (descenso hasta la persona) — exige finalidad + justificación."""
+    try:
+        log = gas.registrar_acceso_personal(db, usuario, body.ambito, body.sujeto_ref,
+                                            body.finalidad, body.justificacion, body.emergencia)
+    except ValueError as e:
+        from app.core.errors import unprocessable
+        raise unprocessable(str(e))
+    return {"id": str(log.id), "registrado": True, "ts": log.created_at.isoformat() if log.created_at else None}
