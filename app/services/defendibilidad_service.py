@@ -151,6 +151,11 @@ def _num(x):
         return None
 
 
+def _pl(n: int, sing: str, plur: str | None = None) -> str:
+    """'1 registro' / '3 registros' — concordancia singular/plural."""
+    return str(n) + " " + (sing if n == 1 else (plur or (sing + "s")))
+
+
 def _kappa(a: dict, b: dict):
     """κ de Cohen sobre las decisiones compartidas de dos revisores (dicts DOI→decisión)."""
     keys = [k for k in a if k in b and a[k] and b[k]]
@@ -169,11 +174,11 @@ def _metricas_revision(d: dict) -> dict:
     m = {}
     corpus = d.get("corpus") or []
     if corpus:
-        m["corpus"] = str(len(corpus)) + " registros"
+        m["corpus"] = _pl(len(corpus), "registro")
     est = d.get("estrategia") or {}
     blocks = est.get("blocks") if isinstance(est, dict) else None
     if isinstance(blocks, list) and blocks:
-        m["busqueda"] = str(len(blocks)) + " bloques booleanos"
+        m["busqueda"] = _pl(len(blocks), "bloque booleano", "bloques booleanos")
     crib = d.get("cribado") or {}
     crib_b = d.get("cribado_b") or {}
     if crib:
@@ -181,15 +186,15 @@ def _metricas_revision(d: dict) -> dict:
         if crib_b:
             k = _kappa(crib, crib_b)
             pre = ("κ=" + str(k["kappa"]) + " (n=" + str(k["n"]) + ") · ") if k else ""
-            m["cribado"] = pre + str(inc) + " incluidos de " + str(len(crib))
+            m["cribado"] = pre + _pl(inc, "incluido") + " de " + str(len(crib))
         else:
-            m["cribado"] = str(len(crib)) + " decididos · " + str(inc) + " incluidos · 1 revisor"
+            m["cribado"] = _pl(len(crib), "decidido") + " · " + _pl(inc, "incluido") + " · 1 revisor"
     ext = d.get("extraccion") or {}
     if ext:
-        m["extraccion"] = str(len(ext)) + " estudios extraídos"
+        m["extraccion"] = _pl(len(ext), "estudio extraído", "estudios extraídos")
     rob = (d.get("rob2") or {}).get("studies") or []
     if rob:
-        m["rob"] = str(len(rob)) + " estudios evaluados"
+        m["rob"] = _pl(len(rob), "estudio evaluado", "estudios evaluados")
     res = (d.get("meta") or {}).get("resumen") or {}
     if res:
         parts = []
@@ -207,7 +212,7 @@ def _metricas_revision(d: dict) -> dict:
     if prisma:
         ch = prisma.get("checklist") or {}
         modo = prisma.get("modo")
-        m["prisma"] = (("modo " + str(modo).upper() + " · ") if modo else "") + str(len(ch)) + " ítems de checklist"
+        m["prisma"] = (("modo " + str(modo).upper() + " · ") if modo else "") + _pl(len(ch), "ítem de checklist", "ítems de checklist")
     return m
 
 
@@ -215,14 +220,14 @@ def _metricas_datos(d: dict) -> dict:
     m = {}
     ci, ai = d.get("course_ids") or [], d.get("assessment_ids") or []
     if ci or ai:
-        m["fuente"] = str(len(ci)) + " curso(s) · " + str(len(ai)) + " evaluación(es)"
+        m["fuente"] = _pl(len(ci), "curso") + " · " + _pl(len(ai), "evaluación", "evaluaciones")
     g = d.get("grupos") or []
     if g:
-        m["grupos"] = str(len(g)) + " grupo(s)"
+        m["grupos"] = _pl(len(g), "grupo")
     v = d.get("variables") or {}
     vlist = v.get("list") if isinstance(v, dict) else (v if isinstance(v, list) else None)
     if isinstance(vlist, list) and vlist:
-        m["variables"] = str(len(vlist)) + " variables"
+        m["variables"] = _pl(len(vlist), "variable")
     return m
 
 
@@ -231,7 +236,7 @@ def _metricas_experimental(d: dict) -> dict:
     v = d.get("variables") or {}
     vlist = v.get("list") if isinstance(v, dict) else (v if isinstance(v, list) else None)
     if isinstance(vlist, list) and vlist:
-        m["variables"] = str(len(vlist)) + " variables"
+        m["variables"] = _pl(len(vlist), "variable")
     return m
 
 
