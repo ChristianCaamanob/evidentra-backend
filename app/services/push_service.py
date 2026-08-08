@@ -15,7 +15,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app.models.push import PushConfig, PushSubscription, StudentCourseFollow, PushSent
+from app.models.push import PushConfig, PushSubscription, StudentCourseFollow, PushSent, PushNativeToken
 from app.models.evaluacion_agenda import EvaluacionAgenda
 
 _log = logging.getLogger("push")
@@ -79,6 +79,23 @@ def guardar_sub(db: Session, owner_key: str, sub: dict) -> dict:
     row.owner_key = owner_key
     row.p256dh = str(keys.get("p256dh") or "")
     row.auth = str(keys.get("auth") or "")
+    db.commit()
+    return {"ok": True}
+
+
+def guardar_native(db: Session, owner_key: str, platform: str, token: str) -> dict:
+    """Registra el token de push nativo (Capacitor/APNs/FCM) del alumno. Idempotente por token.
+    El ENVÍO nativo se activa cuando existan credenciales APNs/FCM en env; por ahora solo se conserva."""
+    token = str(token or "").strip()
+    if not token:
+        return {"ok": False, "error": "sin token"}
+    platform = str(platform or "").strip().lower()[:12]
+    row = db.query(PushNativeToken).filter(PushNativeToken.token == token).first()
+    if not row:
+        row = PushNativeToken(token=token)
+        db.add(row)
+    row.owner_key = owner_key
+    row.platform = platform
     db.commit()
     return {"ok": True}
 

@@ -47,6 +47,18 @@ class StudentCourseFollow(UUIDMixin, Base):
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class PushNativeToken(UUIDMixin, Base):
+    """Token de push NATIVO (APNs/FCM) del shell Capacitor. Se captura desde ya; el envío nativo se activa
+    cuando existan las credenciales (APNs .p8 / FCM) en variables de entorno — hasta entonces se conserva."""
+    __tablename__ = "push_native_tokens"
+    __table_args__ = (UniqueConstraint("token", name="uq_native_token"),)
+
+    owner_key: Mapped[str] = mapped_column(String(80), index=True)   # sid:<uuid> | dev:<device>
+    platform: Mapped[str] = mapped_column(String(12), default="")    # "ios" | "android"
+    token: Mapped[str] = mapped_column(Text)
+    created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class PushSent(UUIDMixin, Base):
     __tablename__ = "push_sent"
     __table_args__ = (UniqueConstraint("eval_id", "owner_key", "hito", name="uq_sent_eval_owner_hito"),)

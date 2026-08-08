@@ -377,6 +377,17 @@ def push_subscribe(request: Request, payload: dict, db: Session = Depends(get_db
     return ps.guardar_sub(db, ow, p.get("subscription") or {})
 
 
+@router.post("/push/native-register")
+@limit("20/minute")
+def push_native_register(request: Request, payload: dict, db: Session = Depends(get_db)):
+    """Registra el token de push nativo (Capacitor iOS/Android). El envío nativo se habilita al configurar APNs/FCM."""
+    from app.services import push_service as ps
+    from app.services import horario_service as hs
+    p = payload or {}
+    ow = hs.owner_key(db, p.get("device_id", ""), p.get("sesion", ""))
+    return ps.guardar_native(db, ow, p.get("platform", ""), p.get("token", ""))
+
+
 @router.post("/push/follow")
 @limit("30/minute")
 def push_follow(request: Request, payload: dict, db: Session = Depends(get_db)):
