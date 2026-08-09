@@ -283,3 +283,13 @@ def departamento_calidad(departamento: str, facultad: str | None = None,
     if not gas.puede_ver(usuario, ms, "departamento", "Departamento: " + departamento):
         raise forbidden("No tienes acceso a este departamento.")
     return director_service.departamento_calidad(db, departamento, facultad)
+
+
+@router.get("/departamento/profundo")
+def departamento_profundo(departamento: str, facultad: str | None = None,
+                          db: Session = Depends(get_db), usuario: Teacher = Depends(req_direccion)):
+    """Sala de Departamento (profundizar): banco de preguntas con calidad + mapa de errores conceptuales."""
+    ms = gas.membresias_activas(db, usuario)
+    if not gas.puede_ver(usuario, ms, "departamento", "Departamento: " + departamento):
+        raise forbidden("No tienes acceso a este departamento.")
+    return director_service.departamento_profundo(db, departamento, facultad)

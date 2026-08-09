@@ -199,7 +199,7 @@ def departamento_calidad(db, departamento: str, facultad: str | None = None) -> 
             e_dis = [it["discriminacion"] for it in por_item if it.get("discriminacion") is not None]
             e_prob = sum(1 for it in por_item if it.get("discriminacion") is not None and it["discriminacion"] < 0.2)
             e_probdif = sum(1 for it in por_item if it.get("pct") is not None and (it["pct"] > 90 or it["pct"] < 25))
-            e_distr = len(an.get("distractores") or [])
+            e_distr = sum(1 for dd in (an.get("distractores") or []) if dd.get("trampa"))
             e_crit = sum(1 for al in (an.get("alertas") or []) if al.get("severidad") == "critica")
             difs += e_dif
             discrs += e_dis
@@ -240,3 +240,74 @@ def departamento_calidad(db, departamento: str, facultad: str | None = None) -> 
             "procedencia": {"fuente": "Centro de Análisis (OMR/en vivo) por evaluación con pauta validada",
                             "calculo": "dificultad = % de acierto; discriminación = punto-biserial ítem–total corregida",
                             "n_scans": n_scans_total, "nota": "Lectura agregada; no altera notas (G1)."}}
+
+
+def departamento_profundo(db, departamento: str, facultad: str | None = None) -> dict:
+    """Sala de Departamento (profundizar): BANCO de preguntas con calidad + MAPA de errores conceptuales.
+
+    · Banco: cada ítem del departamento etiquetado por calidad (gold / a revisar / dificultad extrema / ok),
+      reutilizando dificultad (pct) y discriminación (punto-biserial).
+    · Errores: ítems donde un distractor ATRAE MÁS que la correcta = confusión conceptual sistemática.
+    NO altera notas (G1); lectura agregada.
+    """
+    from app.models.course import Course
+    from app.models.assessment import Assessment
+    from app.services import ficha_service
+
+    cursos = [c for c in db.query(Course).all() if c.code not in COHORTES_OCULTAS]
+    if facultad:
+        cursos = [c for c in cursos if (c.facultad or SIN_FAC) == facultad]
+    cursos = [c for c in cursos if (c.departamento or SIN_DEP) == departamento]
+
+    banco: list[dict] = []
+    errores: list[dict] = []
+    n_items = 0
+    cont = {"gold": 0, "revisar": 0, "extremo": 0, "ok": 0}
+    for c in cursos:
+        for a in db.query(Assessment).filter(Assessment.course_id == c.id).all():
+            try:
+                an = ficha_service.analisis_evaluacion(db, a.id)
+            except Exception:  # noqa: BLE001
+                continue
+            prueba = an.get("prueba") or a.name
+            for it in (an.get("por_item") or []):
+                pct = it.get("pct")
+                dis = it.get("discriminacion")
+                n_items += 1
+                if dis is not None and dis >= 0.3 and pct is not None and 40 <= pct <= 75:
+                    cal = "gold"
+                elif dis is not None and dis < 0.2:
+                    cal = "revisar"
+                elif pct is not None and (pct > 90 or pct < 25):
+                    cal = "extremo"
+                else:
+                    cal = "ok"
+                cont[cal] += 1
+                if len(banco) < 150:
+                    banco.append({"curso": c.name, "curso_code": c.code, "curso_id": str(c.id),
+                                  "prueba": prueba, "q": it.get("q"), "pct": pct,
+                                  "discriminacion": dis, "calidad": cal})
+            for dd in (an.get("distractores") or []):
+                if not dd.get("trampa"):
+                    continue
+                ops = dd.get("opciones") or []
+                to = next((o for o in ops if o.get("letra") == dd["trampa"]), None)
+                co = next((o for o in ops if o.get("correcta")), None)
+                if len(errores) < 150:
+                    errores.append({"curso": c.name, "curso_code": c.code, "curso_id": str(c.id),
+                                    "prueba": prueba, "q": dd.get("q"), "correcta": dd.get("correcta"),
+                                    "trampa": dd.get("trampa"),
+                                    "trampa_pct": (to["pct"] if to else None),
+                                    "correcta_pct": (co["pct"] if co else None)})
+    orden = {"revisar": 0, "extremo": 1, "gold": 2, "ok": 3}
+    banco.sort(key=lambda x: (orden.get(x["calidad"], 9), (x["discriminacion"] if x["discriminacion"] is not None else 1)))
+    errores.sort(key=lambda e: ((e["trampa_pct"] or 0) - (e["correcta_pct"] or 0)) * -1)
+    return {
+        "departamento": departamento,
+        "banco": {"n_items": n_items, **cont, "items": banco},
+        "errores": {"n": len(errores), "items": errores},
+        "procedencia": {"fuente": "Centro de Análisis por evaluación con pauta validada",
+                        "banco": "calidad = discriminación (punto-biserial) + dificultad (% acierto)",
+                        "errores": "un distractor atrae MÁS que la correcta → confusión conceptual sistemática",
+                        "nota": "Lectura agregada; no altera notas (G1)."},
+    }
