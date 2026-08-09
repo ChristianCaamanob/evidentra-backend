@@ -195,10 +195,10 @@ def departamento_calidad(db, departamento: str, facultad: str | None = None) -> 
             if not por_item:
                 continue
             cursos_con.add(str(c.id))
-            e_dif = [it["dificultad"] for it in por_item if it.get("dificultad") is not None]
+            e_dif = [it["pct"] for it in por_item if it.get("pct") is not None]
             e_dis = [it["discriminacion"] for it in por_item if it.get("discriminacion") is not None]
             e_prob = sum(1 for it in por_item if it.get("discriminacion") is not None and it["discriminacion"] < 0.2)
-            e_probdif = sum(1 for it in por_item if it.get("dificultad") is not None and (it["dificultad"] > 90 or it["dificultad"] < 25))
+            e_probdif = sum(1 for it in por_item if it.get("pct") is not None and (it["pct"] > 90 or it["pct"] < 25))
             e_distr = len(an.get("distractores") or [])
             e_crit = sum(1 for al in (an.get("alertas") or []) if al.get("severidad") == "critica")
             difs += e_dif
@@ -209,7 +209,7 @@ def departamento_calidad(db, departamento: str, facultad: str | None = None) -> 
             n_distractor += e_distr
             alertas_crit += e_crit
             for r in (an.get("por_ra") or []):
-                if r.get("items_evaluados"):
+                if r.get("logro_pct") is not None:
                     ra_cubiertos.add(r.get("code"))
             tz = an.get("trazabilidad") or {}
             n_scans_total += tz.get("n_scans") or 0
