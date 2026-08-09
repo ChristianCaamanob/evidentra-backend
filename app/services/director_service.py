@@ -311,3 +311,161 @@ def departamento_profundo(db, departamento: str, facultad: str | None = None) ->
                         "errores": "un distractor atrae MÁS que la correcta → confusión conceptual sistemática",
                         "nota": "Lectura agregada; no altera notas (G1)."},
     }
+
+
+# ═══════════════════════ FASE 2 · Sala de Carrera·Sede (trayectoria + alertas explicables) ═══════
+def _seudo(rut: str) -> str:
+    import hashlib
+    return "E-" + hashlib.sha1((rut or "").encode("utf-8")).hexdigest()[:6].upper()
+
+
+def carrera_sede(db, course_id, umbral_brecha: float = 60.0) -> dict:
+    """Trayectoria de una carrera/sede (aquí: la cohorte de un curso). Alertas tempranas EXPLICABLES
+    y SEUDONIMIZADAS (G2): cada alerta muestra su fundamento (RA bajo umbral, logro) y nivel escalonado.
+    NUNCA etiqueta a la persona; para abrir un caso hay que registrar acceso a dato personal (0A)."""
+    from app.models.course import Course
+    from app.models.student import Student
+    from app.services import ficha_service
+
+    c = db.get(Course, course_id)
+    if not c:
+        from app.core.errors import not_found
+        raise not_found("Curso no encontrado.")
+    estudiantes = db.query(Student).filter(Student.course_id == course_id).all()
+    sem = {"verde": 0, "amarillo": 0, "rojo": 0}
+    alertas = []
+    ra_ct: Counter = Counter()
+    logros = []
+    for st in estudiantes:
+        try:
+            b = ficha_service.brechas_estudiante(db, course_id, st.rut, umbral_brecha=umbral_brecha)
+        except Exception:  # noqa: BLE001
+            continue
+        evaluados = [r for r in b["por_ra"] if r.get("items_evaluados")]
+        if not evaluados:
+            continue
+        avg = sum(r["logro_pct"] for r in evaluados) / len(evaluados)
+        logros.append(avg)
+        color = "verde" if avg >= 70 else "amarillo" if avg >= 50 else "rojo"
+        sem[color] += 1
+        for br in b["brechas"]:
+            ra_ct[br["code"]] += 1
+        if color != "verde":
+            n_ev = sum(r["items_evaluados"] for r in evaluados)
+            nivel = "requiere intervención" if color == "rojo" else ("requiere revisión" if b["brechas"] else "requiere observación")
+            certeza = "alta" if n_ev >= 20 else ("media" if n_ev >= 8 else "baja")
+            alertas.append({
+                "sujeto": _seudo(st.rut), "logro_pct": round(avg, 1), "color": color, "nivel": nivel,
+                "certeza": certeza, "n_items": n_ev,
+                "fundamento": (("RA bajo umbral: " + ", ".join(x["code"] for x in b["brechas"][:4])) if b["brechas"]
+                               else "Logro global bajo sin brecha por RA marcada"),
+            })
+    alertas.sort(key=lambda a: ({"rojo": 0, "amarillo": 1}.get(a["color"], 2), a["logro_pct"]))
+    n_ev_total = len(logros)
+    return {
+        "curso": c.name, "curso_code": c.code, "curso_id": str(c.id),
+        "departamento": c.departamento or SIN_DEP, "facultad": c.facultad or SIN_FAC,
+        "resumen": {"n_estudiantes": len(estudiantes), "n_evaluados": n_ev_total,
+                    "cobertura_pct": round(n_ev_total / len(estudiantes) * 100) if estudiantes else 0,
+                    "logro_promedio": round(sum(logros) / len(logros), 1) if logros else None,
+                    "semaforo": sem, "en_riesgo": sem["amarillo"] + sem["rojo"]},
+        "alertas": alertas,
+        "top_brechas": [{"code": k, "n": v} for k, v in ra_ct.most_common(6)],
+        "procedencia": {"fuente": "Logro por RA por estudiante (evidencia validada), seudonimizado (G2)",
+                        "escalonado": "verde=informativa · amarillo=observación/revisión · rojo=intervención",
+                        "nota": "Alerta explicable con fundamento y certeza; abrir caso exige registrar acceso personal (0A)."},
+    }
+
+
+# ═══════════════════════ FASE 3 · Sala de Escuela Nacional (comparador ajustado) ══════════════════
+def escuela_comparador(db, facultad: str, umbral_brecha: float = 60.0) -> dict:
+    """Comparador multisede/multi-departamento AJUSTADO por contexto: no solo 'A vs B', sino con n,
+    RA que explica la diferencia y una señal de RELEVANCIA (magnitud + n suficiente), no solo diferencia."""
+    p = panorama(db, facultad=facultad, umbral_brecha=umbral_brecha)
+    fac = (p.get("facultades") or [{}])[0]
+    deps = fac.get("departamentos") or []
+    logros = [d["logro_promedio"] for d in deps if d.get("logro_promedio") is not None]
+    media = round(sum(logros) / len(logros), 1) if logros else None
+    filas = []
+    for d in deps:
+        lg = d.get("logro_promedio")
+        dif = (round(lg - media, 1) if (lg is not None and media is not None) else None)
+        n = d.get("n_evaluados") or 0
+        relevante = (dif is not None and abs(dif) >= 8 and n >= 10)
+        filas.append({
+            "departamento": d["departamento"], "logro_promedio": lg, "n_evaluados": n,
+            "n_cursos": d.get("n_cursos"), "diferencia_vs_media": dif,
+            "relevancia": ("relevante" if relevante else ("insuficiente" if n < 10 else "circunstancial")),
+            "ra_explica": [b["code"] for b in (d.get("top_brechas") or [])[:4]],
+        })
+    filas.sort(key=lambda x: (x["logro_promedio"] if x["logro_promedio"] is not None else 999))
+    return {
+        "facultad": facultad, "media_facultad": media, "n_departamentos": len(deps),
+        "comparacion": filas,
+        "procedencia": {"fuente": "Panorama por RA agregado por departamento (mismos criterios de evidencia)",
+                        "ajuste": "relevante = |dif| ≥ 8 pts Y n ≥ 10 evaluados (no solo diferencia numérica)",
+                        "limite": "La persistencia (circunstancial vs sostenida) requiere serie histórica; hoy es un corte.",
+                        "nota": "Cada sede puede adjuntar contexto/explicación local. No altera notas (G1)."},
+    }
+
+
+# ═══════════════════════ FASE 4 · Sala de Decanatura (portafolio + simulador) ═════════════════════
+def decanatura_portafolio(db, umbral_brecha: float = 60.0) -> dict:
+    """Portafolio estratégico de la Facultad: salud global + por facultad/depto (agregado)."""
+    p = panorama(db, umbral_brecha=umbral_brecha)
+    g = p.get("global") or {}
+    facs = [{"facultad": f["facultad"], "n_cursos": f["n_cursos"], "n_estudiantes": f["n_estudiantes"],
+             "n_evaluados": f["n_evaluados"], "logro_promedio": f["logro_promedio"],
+             "estudiantes_con_brecha": f["estudiantes_con_brecha"],
+             "top_brechas": [b["code"] for b in (f.get("top_brechas") or [])[:5]],
+             "n_departamentos": len(f.get("departamentos") or [])}
+            for f in (p.get("facultades") or [])]
+    return {"global": g, "facultades": facs,
+            "procedencia": {"fuente": "Panorama institucional agregado (G2)", "nota": "Estratégico; no altera notas (G1)."}}
+
+
+def decanatura_simular(db, escenario: dict) -> dict:
+    """Simulador de decisiones: ancla la simulación a la BASE REAL (población afectada, logro actual)
+    y estructura una simulación ARGUMENTADA y AUDITABLE (supuestos, costos, beneficios, riesgos,
+    variables a medir). No es una predicción infalible — el CEO lo dijo: simulación argumentada."""
+    from app.models.course import Course
+    from app.models.student import Student
+    tipo = (escenario.get("tipo") or "cambio").strip()
+    curso_id = escenario.get("curso_id")
+    base = {"poblacion_afectada": None, "logro_actual": None, "n_cursos": None}
+    ambito_txt = escenario.get("ambito") or ""
+    if curso_id:
+        c = db.get(Course, curso_id)
+        if c:
+            ambito_txt = c.name
+            base["poblacion_afectada"] = db.query(Student).filter(Student.course_id == c.id).count()
+            try:
+                cs = carrera_sede(db, c.id)
+                base["logro_actual"] = cs["resumen"]["logro_promedio"]
+            except Exception:  # noqa: BLE001
+                pass
+    else:
+        p = panorama(db)
+        g = p.get("global") or {}
+        base["poblacion_afectada"] = g.get("n_estudiantes")
+        base["logro_actual"] = g.get("logro_promedio")
+        base["n_cursos"] = g.get("n_cursos")
+    VARS = {
+        "prerrequisito": ["Tasa de aprobación del curso siguiente", "Retraso curricular promedio", "Reprobación del prerrequisito"],
+        "secciones": ["Estudiantes por sección", "Logro por RA", "Costo docente por estudiante"],
+        "simulacion": ["Logro en RA clínicos/prácticos", "Transferencia a práctica", "Satisfacción y seguridad"],
+        "remediacion": ["Logro del RA remediado", "Aprobación", "Sostenibilidad a 1 semestre"],
+        "evaluacion": ["Confiabilidad (KR-20/α)", "Discriminación media", "Alineación con RA"],
+        "cambio": ["Logro por RA afectado", "Aprobación/retención", "Costo e implementación"],
+    }
+    variables = VARS.get(tipo, VARS["cambio"])
+    return {
+        "tipo": tipo, "ambito": ambito_txt, "descripcion": escenario.get("descripcion") or "",
+        "base_real": base,
+        "supuestos": escenario.get("supuestos") or "",
+        "costo_estimado": escenario.get("costo") or "",
+        "poblacion_afectada": base["poblacion_afectada"],
+        "variables_a_medir": variables,
+        "advertencia": "Simulación ARGUMENTADA y auditable a partir de la base real; NO es una predicción infalible. "
+                       "Registra los supuestos y mide las variables para verificar el efecto (ciclo 0B).",
+    }

@@ -293,3 +293,54 @@ def departamento_profundo(departamento: str, facultad: str | None = None,
     if not gas.puede_ver(usuario, ms, "departamento", "Departamento: " + departamento):
         raise forbidden("No tienes acceso a este departamento.")
     return director_service.departamento_profundo(db, departamento, facultad)
+
+
+@router.get("/carrera/{course_id}")
+def carrera_sede(course_id: UUID, umbral: float = 60.0, db: Session = Depends(get_db),
+                 usuario: Teacher = Depends(req_direccion)):
+    """Sala de Carrera·Sede: trayectoria de la cohorte + alertas explicables seudonimizadas."""
+    ms = gas.membresias_activas(db, usuario)
+    if not gas.puede_ver(usuario, ms, "carrera", ""):
+        raise forbidden("No tienes acceso a esta carrera/sede.")
+    return director_service.carrera_sede(db, course_id, umbral_brecha=umbral)
+
+
+@router.get("/escuela/comparador")
+def escuela_comparador(facultad: str, db: Session = Depends(get_db),
+                       usuario: Teacher = Depends(req_direccion)):
+    """Sala de Escuela Nacional: comparador multisede/multi-depto ajustado por contexto."""
+    ms = gas.membresias_activas(db, usuario)
+    if not gas.puede_ver(usuario, ms, "escuela", facultad):
+        raise forbidden("No tienes acceso a esta escuela/facultad.")
+    return director_service.escuela_comparador(db, facultad)
+
+
+@router.get("/decanatura/portafolio")
+def decanatura_portafolio(db: Session = Depends(get_db), usuario: Teacher = Depends(req_direccion)):
+    """Sala de Decanatura: portafolio estratégico agregado de la Facultad."""
+    ms = gas.membresias_activas(db, usuario)
+    if not gas.puede_ver(usuario, ms, "decanatura", ""):
+        raise forbidden("No tienes acceso a la decanatura.")
+    return director_service.decanatura_portafolio(db)
+
+
+class EscenarioSim(BaseModel):
+    tipo: str = Field(default="cambio", max_length=40)
+    curso_id: UUID | None = None
+    ambito: str = Field(default="", max_length=160)
+    descripcion: str = Field(default="", max_length=1000)
+    supuestos: str = Field(default="", max_length=1000)
+    costo: str = Field(default="", max_length=200)
+
+
+@router.post("/decanatura/simular")
+def decanatura_simular(body: EscenarioSim, db: Session = Depends(get_db),
+                       usuario: Teacher = Depends(req_direccion)):
+    """Simulador de decisiones (Decanatura): simulación argumentada y auditable sobre la base real."""
+    ms = gas.membresias_activas(db, usuario)
+    if not gas.puede_ver(usuario, ms, "decanatura", ""):
+        raise forbidden("No tienes acceso a la decanatura.")
+    esc = body.model_dump()
+    if esc.get("curso_id"):
+        esc["curso_id"] = str(esc["curso_id"])
+    return director_service.decanatura_simular(db, esc)
