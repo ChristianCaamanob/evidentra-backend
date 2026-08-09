@@ -119,7 +119,7 @@ def decisiones_crear(body: DecisionCrear, db: Session = Depends(get_db),
                     titulo=body.titulo.strip(), problema=body.problema, evidencia=body.evidencia,
                     alternativas=body.alternativas, decision=body.decision, responsable=body.responsable,
                     plazo=body.plazo, indicador=body.indicador, estado="abierta", bitacora=[])
-    _dg_evento(d, getattr(usuario, "nombre", "") or str(usuario.id), "Decisión creada")
+    _dg_evento(d, getattr(usuario, "name", "") or str(usuario.id), "Decisión creada")
     db.add(d)
     db.commit()
     db.refresh(d)
@@ -148,7 +148,7 @@ def decisiones_actualizar(did: UUID, body: DecisionActualizar, db: Session = Dep
         if val is not None and val != getattr(d, campo):
             setattr(d, campo, val)
             cambios.append(campo)
-    actor = getattr(usuario, "nombre", "") or str(usuario.id)
+    actor = getattr(usuario, "name", "") or str(usuario.id)
     if body.evento:
         _dg_evento(d, actor, body.evento.strip())
     elif cambios:
@@ -272,3 +272,14 @@ def staff_listar(db: Session = Depends(get_db)):
         out.append({"id": str(t.id), "nombre": t.name, "email": t.email, "rol": t.rol,
                     "membresias": [gas.dto_membresia(m) for m in ms]})
     return {"n": len(out), "staff": out}
+
+
+@router.get("/departamento/calidad")
+def departamento_calidad(departamento: str, facultad: str | None = None,
+                         db: Session = Depends(get_db), usuario: Teacher = Depends(req_direccion)):
+    """Sala de Departamento · calidad de instrumentos agregada. RBAC por ámbito: exige poder VER
+    ese departamento (con descenso progresivo); sin membresías → acceso agregado legacy."""
+    ms = gas.membresias_activas(db, usuario)
+    if not gas.puede_ver(usuario, ms, "departamento", "Departamento: " + departamento):
+        raise forbidden("No tienes acceso a este departamento.")
+    return director_service.departamento_calidad(db, departamento, facultad)

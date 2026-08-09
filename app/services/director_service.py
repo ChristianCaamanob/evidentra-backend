@@ -155,3 +155,88 @@ def panorama_export_payload(db, facultad=None, departamento=None, umbral_brecha=
         "hojas": [{"nombre": "Panorama", "headers": headers, "rows": filas}],
     }
     return {"payload": doc, "panorama": p}
+
+
+def departamento_calidad(db, departamento: str, facultad: str | None = None) -> dict:
+    """SALA DE DEPARTAMENTO · Calidad de instrumentos agregada por el departamento.
+
+    Recorre las evaluaciones (con pauta validada + evidencia) de los cursos del departamento y
+    agrega su calidad psicométrica reutilizando ficha_service.analisis_evaluacion (dificultad,
+    discriminación punto-biserial, distractores, alertas). NO altera notas (G1); lectura agregada.
+    """
+    from app.models.course import Course
+    from app.models.assessment import Assessment
+    from app.services import ficha_service
+
+    cursos = [c for c in db.query(Course).all() if c.code not in COHORTES_OCULTAS]
+    if facultad:
+        cursos = [c for c in cursos if (c.facultad or SIN_FAC) == facultad]
+    cursos = [c for c in cursos if (c.departamento or SIN_DEP) == departamento]
+
+    difs: list[float] = []
+    discrs: list[float] = []
+    n_items = 0
+    n_prob_disc = 0        # ítems que discriminan poco/al revés (r < 0.2)
+    n_prob_dif = 0         # ítems con dificultad extrema (>90% o <25% de acierto)
+    n_distractor = 0       # distractores que atraen más que la correcta
+    alertas_crit = 0
+    ra_cubiertos: set = set()
+    evals: list[dict] = []
+    cursos_con = set()
+    n_scans_total = 0
+    for c in cursos:
+        asms = db.query(Assessment).filter(Assessment.course_id == c.id).all()
+        for a in asms:
+            try:
+                an = ficha_service.analisis_evaluacion(db, a.id)
+            except Exception:  # noqa: BLE001  (sin pauta válida / sin evidencia → no entra)
+                continue
+            por_item = an.get("por_item") or []
+            if not por_item:
+                continue
+            cursos_con.add(str(c.id))
+            e_dif = [it["dificultad"] for it in por_item if it.get("dificultad") is not None]
+            e_dis = [it["discriminacion"] for it in por_item if it.get("discriminacion") is not None]
+            e_prob = sum(1 for it in por_item if it.get("discriminacion") is not None and it["discriminacion"] < 0.2)
+            e_probdif = sum(1 for it in por_item if it.get("dificultad") is not None and (it["dificultad"] > 90 or it["dificultad"] < 25))
+            e_distr = len(an.get("distractores") or [])
+            e_crit = sum(1 for al in (an.get("alertas") or []) if al.get("severidad") == "critica")
+            difs += e_dif
+            discrs += e_dis
+            n_items += len(por_item)
+            n_prob_disc += e_prob
+            n_prob_dif += e_probdif
+            n_distractor += e_distr
+            alertas_crit += e_crit
+            for r in (an.get("por_ra") or []):
+                if r.get("items_evaluados"):
+                    ra_cubiertos.add(r.get("code"))
+            tz = an.get("trazabilidad") or {}
+            n_scans_total += tz.get("n_scans") or 0
+            evals.append({
+                "assessment_id": str(a.id), "curso": c.name, "curso_code": c.code, "curso_id": str(c.id),
+                "prueba": an.get("prueba") or a.name, "n_estudiantes": (an.get("kpis") or {}).get("n_estudiantes"),
+                "logro_pct": (an.get("kpis") or {}).get("logro_pct"),
+                "dificultad_media": round(sum(e_dif) / len(e_dif), 1) if e_dif else None,
+                "discriminacion_media": round(sum(e_dis) / len(e_dis), 2) if e_dis else None,
+                "n_items": len(por_item), "items_problematicos": e_prob + e_probdif,
+                "distractores_trampa": e_distr, "alertas_criticas": e_crit,
+                "origen": tz.get("origen"), "n_scans": tz.get("n_scans"),
+            })
+    evals.sort(key=lambda e: (e["items_problematicos"] * -1, (e["discriminacion_media"] if e["discriminacion_media"] is not None else 1)))
+    resumen = {
+        "departamento": departamento, "facultad": facultad,
+        "n_cursos": len(cursos), "n_cursos_con_evidencia": len(cursos_con),
+        "n_evaluaciones": len(evals), "n_items": n_items,
+        "dificultad_media": round(sum(difs) / len(difs), 1) if difs else None,
+        "discriminacion_media": round(sum(discrs) / len(discrs), 2) if discrs else None,
+        "items_problematicos": n_prob_disc + n_prob_dif,
+        "pct_problematicos": round((n_prob_disc + n_prob_dif) / n_items * 100, 1) if n_items else None,
+        "distractores_trampa": n_distractor, "alertas_criticas": alertas_crit,
+        "ra_cubiertos": len(ra_cubiertos),
+        "n_scans": n_scans_total,
+    }
+    return {"resumen": resumen, "evaluaciones": evals,
+            "procedencia": {"fuente": "Centro de Análisis (OMR/en vivo) por evaluación con pauta validada",
+                            "calculo": "dificultad = % de acierto; discriminación = punto-biserial ítem–total corregida",
+                            "n_scans": n_scans_total, "nota": "Lectura agregada; no altera notas (G1)."}}
