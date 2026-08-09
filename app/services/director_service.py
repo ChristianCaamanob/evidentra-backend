@@ -15,6 +15,26 @@ COHORTES_OCULTAS = {"DEMO-Q1", "DEMO-PSICO"}
 SIN_FAC = "(sin facultad)"
 SIN_DEP = "(sin departamento)"
 
+# ── Caché con TTL (rendimiento): las salas del Director recomputan brechas de TODOS los estudiantes;
+# un TTL corto evita recalcular en cada vista. `refrescar=True` (botón ↻) fuerza el recálculo. ──
+import time as _time
+_CACHE: dict = {}
+_TTL = 120.0   # segundos
+
+
+def _cache_get(key, refrescar=False):
+    if refrescar:
+        return None
+    e = _CACHE.get(key)
+    if e and (_time.time() - e[0]) < _TTL:
+        return e[1]
+    return None
+
+
+def _cache_put(key, val):
+    _CACHE[key] = (_time.time(), val)
+    return val
+
 
 def _agg(rows: list[dict]) -> dict:
     """Agrega una lista de resúmenes de curso: logro promedio PONDERADO por nº de evaluados,
@@ -41,7 +61,11 @@ def _agg(rows: list[dict]) -> dict:
 
 
 def panorama(db, facultad: str | None = None, departamento: str | None = None,
-             umbral_brecha: float = 60.0) -> dict:
+             umbral_brecha: float = 60.0, refrescar: bool = False) -> dict:
+    _k = ("pano", facultad or "", departamento or "", round(umbral_brecha, 1))
+    _c = _cache_get(_k, refrescar)
+    if _c is not None:
+        return _c
     from app.models.course import Course
     from app.models.student import Student
     from app.services import ficha_service
@@ -105,7 +129,7 @@ def panorama(db, facultad: str | None = None, departamento: str | None = None,
         todos = [r for rows in deps.values() for r in rows]
         facultades.append({"facultad": fname, **_agg(todos), "departamentos": dep_list})
 
-    return {
+    return _cache_put(_k, {
         "facultades": facultades,
         "global": _agg(resumen_cursos),
         "opciones": opciones,
@@ -114,7 +138,7 @@ def panorama(db, facultad: str | None = None, departamento: str | None = None,
         "gobernanza": "Agregado y seudonimizado (G2): logro por RA cruzado con la evidencia real, "
                       "deduplicado por estudiante (alternativas + desarrollo validado). Orienta "
                       "decisiones estratégicas; no altera notas (G1).",
-    }
+    })
 
 
 def panorama_export_payload(db, facultad=None, departamento=None, umbral_brecha=60.0) -> dict:
@@ -157,13 +181,17 @@ def panorama_export_payload(db, facultad=None, departamento=None, umbral_brecha=
     return {"payload": doc, "panorama": p}
 
 
-def departamento_calidad(db, departamento: str, facultad: str | None = None) -> dict:
+def departamento_calidad(db, departamento: str, facultad: str | None = None, refrescar: bool = False) -> dict:
     """SALA DE DEPARTAMENTO · Calidad de instrumentos agregada por el departamento.
 
     Recorre las evaluaciones (con pauta validada + evidencia) de los cursos del departamento y
     agrega su calidad psicométrica reutilizando ficha_service.analisis_evaluacion (dificultad,
     discriminación punto-biserial, distractores, alertas). NO altera notas (G1); lectura agregada.
     """
+    _k = ("depcal", departamento or "", facultad or "")
+    _c = _cache_get(_k, refrescar)
+    if _c is not None:
+        return _c
     from app.models.course import Course
     from app.models.assessment import Assessment
     from app.services import ficha_service
@@ -236,13 +264,13 @@ def departamento_calidad(db, departamento: str, facultad: str | None = None) -> 
         "ra_cubiertos": len(ra_cubiertos),
         "n_scans": n_scans_total,
     }
-    return {"resumen": resumen, "evaluaciones": evals,
+    return _cache_put(_k, {"resumen": resumen, "evaluaciones": evals,
             "procedencia": {"fuente": "Centro de Análisis (OMR/en vivo) por evaluación con pauta validada",
                             "calculo": "dificultad = % de acierto; discriminación = punto-biserial ítem–total corregida",
-                            "n_scans": n_scans_total, "nota": "Lectura agregada; no altera notas (G1)."}}
+                            "n_scans": n_scans_total, "nota": "Lectura agregada; no altera notas (G1)."}})
 
 
-def departamento_profundo(db, departamento: str, facultad: str | None = None) -> dict:
+def departamento_profundo(db, departamento: str, facultad: str | None = None, refrescar: bool = False) -> dict:
     """Sala de Departamento (profundizar): BANCO de preguntas con calidad + MAPA de errores conceptuales.
 
     · Banco: cada ítem del departamento etiquetado por calidad (gold / a revisar / dificultad extrema / ok),
@@ -250,6 +278,10 @@ def departamento_profundo(db, departamento: str, facultad: str | None = None) ->
     · Errores: ítems donde un distractor ATRAE MÁS que la correcta = confusión conceptual sistemática.
     NO altera notas (G1); lectura agregada.
     """
+    _k = ("depprof", departamento or "", facultad or "")
+    _c = _cache_get(_k, refrescar)
+    if _c is not None:
+        return _c
     from app.models.course import Course
     from app.models.assessment import Assessment
     from app.services import ficha_service
@@ -302,7 +334,7 @@ def departamento_profundo(db, departamento: str, facultad: str | None = None) ->
     orden = {"revisar": 0, "extremo": 1, "gold": 2, "ok": 3}
     banco.sort(key=lambda x: (orden.get(x["calidad"], 9), (x["discriminacion"] if x["discriminacion"] is not None else 1)))
     errores.sort(key=lambda e: ((e["trampa_pct"] or 0) - (e["correcta_pct"] or 0)) * -1)
-    return {
+    return _cache_put(_k, {
         "departamento": departamento,
         "banco": {"n_items": n_items, **cont, "items": banco},
         "errores": {"n": len(errores), "items": errores},
@@ -310,7 +342,7 @@ def departamento_profundo(db, departamento: str, facultad: str | None = None) ->
                         "banco": "calidad = discriminación (punto-biserial) + dificultad (% acierto)",
                         "errores": "un distractor atrae MÁS que la correcta → confusión conceptual sistemática",
                         "nota": "Lectura agregada; no altera notas (G1)."},
-    }
+    })
 
 
 # ═══════════════════════ FASE 2 · Sala de Carrera·Sede (trayectoria + alertas explicables) ═══════
@@ -319,10 +351,14 @@ def _seudo(rut: str) -> str:
     return "E-" + hashlib.sha1((rut or "").encode("utf-8")).hexdigest()[:6].upper()
 
 
-def carrera_sede(db, course_id, umbral_brecha: float = 60.0) -> dict:
+def carrera_sede(db, course_id, umbral_brecha: float = 60.0, refrescar: bool = False) -> dict:
     """Trayectoria de una carrera/sede (aquí: la cohorte de un curso). Alertas tempranas EXPLICABLES
     y SEUDONIMIZADAS (G2): cada alerta muestra su fundamento (RA bajo umbral, logro) y nivel escalonado.
     NUNCA etiqueta a la persona; para abrir un caso hay que registrar acceso a dato personal (0A)."""
+    _k = ("carr", str(course_id), round(umbral_brecha, 1))
+    _c = _cache_get(_k, refrescar)
+    if _c is not None:
+        return _c
     from app.models.course import Course
     from app.models.student import Student
     from app.services import ficha_service
@@ -362,7 +398,7 @@ def carrera_sede(db, course_id, umbral_brecha: float = 60.0) -> dict:
             })
     alertas.sort(key=lambda a: ({"rojo": 0, "amarillo": 1}.get(a["color"], 2), a["logro_pct"]))
     n_ev_total = len(logros)
-    return {
+    return _cache_put(_k, {
         "curso": c.name, "curso_code": c.code, "curso_id": str(c.id),
         "departamento": c.departamento or SIN_DEP, "facultad": c.facultad or SIN_FAC,
         "resumen": {"n_estudiantes": len(estudiantes), "n_evaluados": n_ev_total,
@@ -374,14 +410,14 @@ def carrera_sede(db, course_id, umbral_brecha: float = 60.0) -> dict:
         "procedencia": {"fuente": "Logro por RA por estudiante (evidencia validada), seudonimizado (G2)",
                         "escalonado": "verde=informativa · amarillo=observación/revisión · rojo=intervención",
                         "nota": "Alerta explicable con fundamento y certeza; abrir caso exige registrar acceso personal (0A)."},
-    }
+    })
 
 
 # ═══════════════════════ FASE 3 · Sala de Escuela Nacional (comparador ajustado) ══════════════════
-def escuela_comparador(db, facultad: str, umbral_brecha: float = 60.0) -> dict:
+def escuela_comparador(db, facultad: str, umbral_brecha: float = 60.0, refrescar: bool = False) -> dict:
     """Comparador multisede/multi-departamento AJUSTADO por contexto: no solo 'A vs B', sino con n,
     RA que explica la diferencia y una señal de RELEVANCIA (magnitud + n suficiente), no solo diferencia."""
-    p = panorama(db, facultad=facultad, umbral_brecha=umbral_brecha)
+    p = panorama(db, facultad=facultad, umbral_brecha=umbral_brecha, refrescar=refrescar)
     fac = (p.get("facultades") or [{}])[0]
     deps = fac.get("departamentos") or []
     logros = [d["logro_promedio"] for d in deps if d.get("logro_promedio") is not None]
@@ -410,9 +446,9 @@ def escuela_comparador(db, facultad: str, umbral_brecha: float = 60.0) -> dict:
 
 
 # ═══════════════════════ FASE 4 · Sala de Decanatura (portafolio + simulador) ═════════════════════
-def decanatura_portafolio(db, umbral_brecha: float = 60.0) -> dict:
+def decanatura_portafolio(db, umbral_brecha: float = 60.0, refrescar: bool = False) -> dict:
     """Portafolio estratégico de la Facultad: salud global + por facultad/depto (agregado)."""
-    p = panorama(db, umbral_brecha=umbral_brecha)
+    p = panorama(db, umbral_brecha=umbral_brecha, refrescar=refrescar)
     g = p.get("global") or {}
     facs = [{"facultad": f["facultad"], "n_cursos": f["n_cursos"], "n_estudiantes": f["n_estudiantes"],
              "n_evaluados": f["n_evaluados"], "logro_promedio": f["logro_promedio"],

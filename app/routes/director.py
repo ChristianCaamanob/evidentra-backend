@@ -19,9 +19,10 @@ req_direccion = requiere_rol(ROL_DIRECTOR, ROL_INVESTIGADOR)
 
 @router.get("/panorama", dependencies=[Depends(req_direccion)])
 def panorama(facultad: str | None = None, departamento: str | None = None,
-             umbral: float = 60.0, db: Session = Depends(get_db)):
-    """Logro por RA agregado por curso → departamento → facultad, con las brechas más frecuentes."""
-    return director_service.panorama(db, facultad, departamento, umbral_brecha=umbral)
+             umbral: float = 60.0, refrescar: bool = False, db: Session = Depends(get_db)):
+    """Logro por RA agregado por curso → departamento → facultad, con las brechas más frecuentes.
+    Cacheado (TTL); `refrescar=1` fuerza el recálculo (botón ↻)."""
+    return director_service.panorama(db, facultad, departamento, umbral_brecha=umbral, refrescar=refrescar)
 
 
 @router.post("/panorama/{formato}", dependencies=[Depends(req_direccion)])
@@ -275,53 +276,53 @@ def staff_listar(db: Session = Depends(get_db)):
 
 
 @router.get("/departamento/calidad")
-def departamento_calidad(departamento: str, facultad: str | None = None,
+def departamento_calidad(departamento: str, facultad: str | None = None, refrescar: bool = False,
                          db: Session = Depends(get_db), usuario: Teacher = Depends(req_direccion)):
     """Sala de Departamento · calidad de instrumentos agregada. RBAC por ámbito: exige poder VER
-    ese departamento (con descenso progresivo); sin membresías → acceso agregado legacy."""
+    ese departamento (con descenso progresivo); sin membresías → acceso agregado legacy. Cacheado (↻ refrescar)."""
     ms = gas.membresias_activas(db, usuario)
     if not gas.puede_ver(usuario, ms, "departamento", "Departamento: " + departamento):
         raise forbidden("No tienes acceso a este departamento.")
-    return director_service.departamento_calidad(db, departamento, facultad)
+    return director_service.departamento_calidad(db, departamento, facultad, refrescar=refrescar)
 
 
 @router.get("/departamento/profundo")
-def departamento_profundo(departamento: str, facultad: str | None = None,
+def departamento_profundo(departamento: str, facultad: str | None = None, refrescar: bool = False,
                           db: Session = Depends(get_db), usuario: Teacher = Depends(req_direccion)):
     """Sala de Departamento (profundizar): banco de preguntas con calidad + mapa de errores conceptuales."""
     ms = gas.membresias_activas(db, usuario)
     if not gas.puede_ver(usuario, ms, "departamento", "Departamento: " + departamento):
         raise forbidden("No tienes acceso a este departamento.")
-    return director_service.departamento_profundo(db, departamento, facultad)
+    return director_service.departamento_profundo(db, departamento, facultad, refrescar=refrescar)
 
 
 @router.get("/carrera/{course_id}")
-def carrera_sede(course_id: UUID, umbral: float = 60.0, db: Session = Depends(get_db),
+def carrera_sede(course_id: UUID, umbral: float = 60.0, refrescar: bool = False, db: Session = Depends(get_db),
                  usuario: Teacher = Depends(req_direccion)):
-    """Sala de Carrera·Sede: trayectoria de la cohorte + alertas explicables seudonimizadas."""
+    """Sala de Carrera·Sede: trayectoria de la cohorte + alertas explicables seudonimizadas. Cacheado (↻)."""
     ms = gas.membresias_activas(db, usuario)
     if not gas.puede_ver(usuario, ms, "carrera", ""):
         raise forbidden("No tienes acceso a esta carrera/sede.")
-    return director_service.carrera_sede(db, course_id, umbral_brecha=umbral)
+    return director_service.carrera_sede(db, course_id, umbral_brecha=umbral, refrescar=refrescar)
 
 
 @router.get("/escuela/comparador")
-def escuela_comparador(facultad: str, db: Session = Depends(get_db),
+def escuela_comparador(facultad: str, refrescar: bool = False, db: Session = Depends(get_db),
                        usuario: Teacher = Depends(req_direccion)):
-    """Sala de Escuela Nacional: comparador multisede/multi-depto ajustado por contexto."""
+    """Sala de Escuela Nacional: comparador multisede/multi-depto ajustado por contexto. Cacheado (↻)."""
     ms = gas.membresias_activas(db, usuario)
     if not gas.puede_ver(usuario, ms, "escuela", facultad):
         raise forbidden("No tienes acceso a esta escuela/facultad.")
-    return director_service.escuela_comparador(db, facultad)
+    return director_service.escuela_comparador(db, facultad, refrescar=refrescar)
 
 
 @router.get("/decanatura/portafolio")
-def decanatura_portafolio(db: Session = Depends(get_db), usuario: Teacher = Depends(req_direccion)):
-    """Sala de Decanatura: portafolio estratégico agregado de la Facultad."""
+def decanatura_portafolio(refrescar: bool = False, db: Session = Depends(get_db), usuario: Teacher = Depends(req_direccion)):
+    """Sala de Decanatura: portafolio estratégico agregado de la Facultad. Cacheado (↻)."""
     ms = gas.membresias_activas(db, usuario)
     if not gas.puede_ver(usuario, ms, "decanatura", ""):
         raise forbidden("No tienes acceso a la decanatura.")
-    return director_service.decanatura_portafolio(db)
+    return director_service.decanatura_portafolio(db, refrescar=refrescar)
 
 
 class EscenarioSim(BaseModel):
