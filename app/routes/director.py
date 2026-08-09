@@ -260,3 +260,15 @@ def acceso_personal(body: AccesoPersonalCrear, db: Session = Depends(get_db),
         from app.core.errors import unprocessable
         raise unprocessable(str(e))
     return {"id": str(log.id), "registrado": True, "ts": log.created_at.isoformat() if log.created_at else None}
+
+
+@router.get("/staff", dependencies=[Depends(req_creador_local)])
+def staff_listar(db: Session = Depends(get_db)):
+    """Lista de staff con sus membresías activas (solo creador) — para el gestor de ámbitos."""
+    ts = db.query(Teacher).order_by(Teacher.name).all()
+    out = []
+    for t in ts:
+        ms = gas.membresias_activas(db, t)
+        out.append({"id": str(t.id), "nombre": t.name, "email": t.email, "rol": t.rol,
+                    "membresias": [gas.dto_membresia(m) for m in ms]})
+    return {"n": len(out), "staff": out}
