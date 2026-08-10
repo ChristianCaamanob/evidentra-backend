@@ -90,6 +90,24 @@ EVENT_SCHEMA: dict[str, tuple[str, list[str]]] = {
     "haptics_available": ("producto", []),
     "reward_shown": ("aprendizaje", []),
     "reward_dismissed": ("aprendizaje", []),
+    # BIENESTAR · La Guarida de Runi (contrato de medición del handoff v2). Miden RECUPERACIÓN y
+    # RETORNO, no tiempo capturado. Props laxas (no se rechazan): se capturan, no se exige forma.
+    "break_prompted": ("bienestar", []),
+    "break_duration_selected": ("bienestar", []),
+    "break_option_viewed": ("bienestar", []),
+    "break_started": ("bienestar", []),
+    "break_completed": ("bienestar", []),
+    "break_extended": ("bienestar", []),
+    "break_ended_early": ("bienestar", []),
+    "return_to_study": ("bienestar", []),
+    "session_resumed": ("bienestar", []),
+    "day_finished": ("bienestar", []),
+    "microgame_hit": ("bienestar", []),
+    "microgame_completed": ("bienestar", []),
+    "soundscape_selected": ("bienestar", []),
+    "world_previewed": ("bienestar", []),
+    "doodle_saved": ("bienestar", []),
+    "social_signal_selected": ("bienestar", []),
 }
 
 _DEVICES = {"movil", "tablet", "desktop"}
