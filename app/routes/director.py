@@ -345,3 +345,150 @@ def decanatura_simular(body: EscenarioSim, db: Session = Depends(get_db),
     if esc.get("curso_id"):
         esc["curso_id"] = str(esc["curso_id"])
     return director_service.decanatura_simular(db, esc)
+
+
+# ───────────────────────── Alertas escalonadas (motor de escalamiento controlado)
+# Doctrina: las alertas NO ascienden solas. La clasificación automática es DETECCIÓN;
+# registrar/escalar/dar seguimiento/cerrar es siempre un acto humano justificado y auditable.
+from app.models.alerta_gov import AlertaGov, NIVELES_ALERTA
+
+
+class AlertaCrear(BaseModel):
+    nivel: Literal["departamento", "carrera", "escuela", "decanatura"] = "carrera"
+    ambito: str = Field(default="", max_length=160)
+    titulo: str = Field(min_length=2, max_length=300)
+    sujeto_ref: str = Field(default="", max_length=200)   # seudónimo o ref curso/RA — NUNCA nombre
+    origen: str = Field(default="manual", max_length=40)
+    fundamento: str = ""
+    certeza: Literal["baja", "media", "alta"] = "media"
+    nivel_alerta: Literal["informativa", "observacion", "revision", "intervencion", "critica"] = "informativa"
+
+
+class AlertaActualizar(BaseModel):
+    titulo: str | None = Field(default=None, max_length=300)
+    fundamento: str | None = None
+    certeza: Literal["baja", "media", "alta"] | None = None
+    nivel_alerta: Literal["informativa", "observacion", "revision", "intervencion", "critica"] | None = None
+    estado: Literal["abierta", "en_seguimiento", "resuelta", "descartada"] | None = None
+    responsable: str | None = Field(default=None, max_length=200)
+    decision_id: UUID | None = None
+    evento: str | None = Field(default=None, max_length=400)   # justificación / nota para la bitácora
+
+
+def _al_dto(a: AlertaGov) -> dict:
+    return {"id": str(a.id), "nivel": a.nivel, "ambito": a.ambito, "titulo": a.titulo,
+            "sujeto_ref": a.sujeto_ref, "origen": a.origen, "fundamento": a.fundamento,
+            "certeza": a.certeza, "nivel_alerta": a.nivel_alerta,
+            "nivel_idx": NIVELES_ALERTA.index(a.nivel_alerta) if a.nivel_alerta in NIVELES_ALERTA else 0,
+            "estado": a.estado, "responsable": a.responsable,
+            "decision_id": str(a.decision_id) if a.decision_id else None,
+            "bitacora": a.bitacora or [],
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+            "updated_at": a.updated_at.isoformat() if a.updated_at else None}
+
+
+def _al_evento(a: AlertaGov, actor: str, evento: str, de: str = "", ha: str = ""):
+    b = list(a.bitacora or [])
+    ev = {"ts": datetime.now(timezone.utc).isoformat(), "actor": actor, "evento": evento}
+    if de or ha:
+        ev["de"] = de
+        ev["a"] = ha
+    b.append(ev)
+    a.bitacora = b
+
+
+@router.get("/alertas")
+def alertas_listar(nivel: str | None = None, estado: str | None = None, nivel_alerta: str | None = None,
+                   db: Session = Depends(get_db), usuario: Teacher = Depends(req_direccion)):
+    """Lista de alertas escalonadas. RBAC por ámbito (puede_ver, con descenso progresivo)."""
+    q = db.query(AlertaGov)
+    if nivel:
+        q = q.filter(AlertaGov.nivel == nivel)
+    if estado:
+        q = q.filter(AlertaGov.estado == estado)
+    if nivel_alerta:
+        q = q.filter(AlertaGov.nivel_alerta == nivel_alerta)
+    items = q.order_by(AlertaGov.updated_at.desc()).all()
+    ms = gas.membresias_activas(db, usuario)
+    visibles = [a for a in items if gas.puede_ver(usuario, ms, a.nivel, a.ambito or "")]
+    return {"n": len(visibles), "alertas": [_al_dto(a) for a in visibles],
+            "escalera": list(NIVELES_ALERTA), "ambito_aplicado": bool(ms)}
+
+
+@router.post("/alertas", status_code=201)
+def alertas_crear(body: AlertaCrear, db: Session = Depends(get_db),
+                  usuario: Teacher = Depends(req_direccion)):
+    """Registra una alerta (acto humano). El nivel inicial se fija a mano; nada asciende solo."""
+    a = AlertaGov(autor_id=usuario.id, nivel=body.nivel, ambito=body.ambito.strip(),
+                  titulo=body.titulo.strip(), sujeto_ref=body.sujeto_ref.strip(), origen=body.origen,
+                  fundamento=body.fundamento, certeza=body.certeza, nivel_alerta=body.nivel_alerta,
+                  estado="abierta", bitacora=[])
+    _al_evento(a, getattr(usuario, "name", "") or str(usuario.id),
+               "Alerta registrada en nivel «%s»" % body.nivel_alerta)
+    db.add(a)
+    db.commit()
+    db.refresh(a)
+    return _al_dto(a)
+
+
+@router.get("/alertas/{aid}", dependencies=[Depends(req_direccion)])
+def alertas_obtener(aid: UUID, db: Session = Depends(get_db)):
+    a = db.get(AlertaGov, aid)
+    if not a:
+        raise not_found("Alerta no encontrada.")
+    return _al_dto(a)
+
+
+@router.patch("/alertas/{aid}")
+def alertas_actualizar(aid: UUID, body: AlertaActualizar, db: Session = Depends(get_db),
+                       usuario: Teacher = Depends(req_direccion)):
+    """Escala/desescala, cambia estado o asigna responsable. Escalar o desescalar EXIGE justificación
+    (`evento`) y queda en la bitácora append-only: la alerta nunca cambia de nivel sola."""
+    a = db.get(AlertaGov, aid)
+    if not a:
+        raise not_found("Alerta no encontrada.")
+    actor = getattr(usuario, "name", "") or str(usuario.id)
+    nivel_cambio = body.nivel_alerta is not None and body.nivel_alerta != a.nivel_alerta
+    # cambio de nivel = escalamiento controlado → exige justificación (nunca asciende solo)
+    if nivel_cambio:
+        if not (body.evento or "").strip():
+            from app.core.errors import unprocessable
+            raise unprocessable("Cambiar el nivel de una alerta exige una justificación (evento).")
+        de, ha = a.nivel_alerta, body.nivel_alerta
+        i_de = NIVELES_ALERTA.index(de) if de in NIVELES_ALERTA else 0
+        i_ha = NIVELES_ALERTA.index(ha) if ha in NIVELES_ALERTA else 0
+        verbo = "Escaló" if i_ha > i_de else ("Desescaló" if i_ha < i_de else "Ajustó")
+        a.nivel_alerta = ha
+        _al_evento(a, actor, "%s a «%s»: %s" % (verbo, ha, body.evento.strip()), de=de, ha=ha)
+    cambios = []
+    for campo in ("titulo", "fundamento", "certeza", "estado", "responsable"):
+        val = getattr(body, campo)
+        if val is not None and val != getattr(a, campo):
+            setattr(a, campo, val)
+            cambios.append(campo)
+    if body.decision_id is not None:
+        a.decision_id = body.decision_id
+        cambios.append("decisión vinculada")
+    # bitácora del resto: si hubo cambio de nivel ya quedó registrado (consumió el evento)
+    if not nivel_cambio:
+        if body.evento and body.evento.strip():
+            _al_evento(a, actor, body.evento.strip())
+        elif cambios:
+            _al_evento(a, actor, "Actualizó: " + ", ".join(cambios))
+    db.commit()
+    db.refresh(a)
+    return _al_dto(a)
+
+
+@router.delete("/alertas/{aid}", status_code=204)
+def alertas_borrar(aid: UUID, db: Session = Depends(get_db),
+                   usuario: Teacher = Depends(req_direccion)):
+    """Elimina una alerta ERRÓNEA (solo su autor o el creador)."""
+    a = db.get(AlertaGov, aid)
+    if not a:
+        raise not_found("Alerta no encontrada.")
+    if str(a.autor_id) != str(usuario.id) and usuario.rol != "creador":
+        raise forbidden("Solo el autor o el creador puede eliminar esta alerta.")
+    db.delete(a)
+    db.commit()
+    return None
