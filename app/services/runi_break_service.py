@@ -110,3 +110,103 @@ def active(db: Session, pseudo_id: str) -> dict:
          .filter(RuniBreak.pseudo_id == pid, RuniBreak.estado == "active")
          .order_by(RuniBreak.started_at.desc()).first())
     return {"active": _dto(b) if b else None}
+
+
+# ── Panel de RECUPERACIÓN Y RETORNO (staff, seudonimizado, agregado) ─────────────────────────────
+import math as _math
+
+
+def _wilson(k: int, n: int, z: float = 1.96):
+    """Intervalo de confianza de Wilson para una proporción (reportar efectos con IC, no punto solo)."""
+    if n <= 0:
+        return {"pct": None, "lo": None, "hi": None, "n": 0}
+    p = k / n
+    den = 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / den
+    half = (z * _math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / den
+    return {"pct": round(p * 100, 1), "lo": round(max(0.0, centre - half) * 100, 1),
+            "hi": round(min(1.0, centre + half) * 100, 1), "n": n}
+
+
+def panel(db: Session, course_id: str | None = None, days: int = 30) -> dict:
+    """Métricas de descanso RESTAURATIVO. Criterio: la pausa sirve si hay RETORNO EFECTIVO al estudio
+    (una acción académica dentro de 2 min de cerrar) + estabilidad del bloque siguiente. NO usa el
+    tiempo dentro de la Guarida como éxito. Todo agregado y seudonimizado; efectos con IC de Wilson."""
+    from app.models.analytics import AnalyticsEvent
+
+    days = max(1, min(int(days or 30), 180))
+    ventana_ini = _now() - timedelta(days=days)
+    q = db.query(RuniBreak).filter(RuniBreak.started_at >= ventana_ini)
+    if course_id:
+        q = q.filter(RuniBreak.course_id == str(course_id))
+    breaks = q.order_by(RuniBreak.started_at.desc()).limit(5000).all()
+
+    n = len(breaks)
+    estudiantes = len({b.pseudo_id for b in breaks})
+    por_duracion = {2: 0, 5: 0, 10: 0, 15: 0}
+    por_zona: dict = {}
+    por_desenlace = {"completed": 0, "ended_early": 0, "returned": 0, "finished_day": 0, "active": 0}
+    cerrados = []
+    sin_ext_rep = 0
+    adher_ratios = []
+    noche_n = 0
+    noche_finday = 0
+    for b in breaks:
+        pm = b.planned_minutes if b.planned_minutes in por_duracion else 5
+        por_duracion[pm] = por_duracion.get(pm, 0) + 1
+        por_zona[b.zone] = por_zona.get(b.zone, 0) + 1
+        por_desenlace[b.estado] = por_desenlace.get(b.estado, 0) + 1
+        if (b.extended_count or 0) < 2:
+            sin_ext_rep += 1
+        st = _aware(b.started_at)
+        if st and st.hour >= 21:   # noche (UTC aprox.): abandono nocturno saludable
+            noche_n += 1
+            if b.estado == "finished_day":
+                noche_finday += 1
+        if b.closed_at and b.estado in ("completed", "ended_early", "returned"):
+            cerrados.append(b)
+            if b.actual_seconds is not None and pm > 0:
+                adher_ratios.append(min(1.5, b.actual_seconds / (pm * 60.0)))
+
+    # Retorno EFECTIVO: ¿hay una acción académica (dominio aprendizaje) dentro de 2 min de cerrar la pausa?
+    retorno_k = 0
+    retorno_por_dur = {2: [0, 0], 5: [0, 0], 10: [0, 0], 15: [0, 0]}   # [k, n]
+    if cerrados:
+        pseudos = list({b.pseudo_id for b in cerrados})
+        evs = (db.query(AnalyticsEvent.pseudo_id, AnalyticsEvent.created_at)
+               .filter(AnalyticsEvent.domain == "aprendizaje",
+                       AnalyticsEvent.created_at >= ventana_ini,
+                       AnalyticsEvent.pseudo_id.in_(pseudos)).all())
+        by_p: dict = {}
+        for pid, ts in evs:
+            by_p.setdefault(pid, []).append(_aware(ts))
+        for v in by_p.values():
+            v.sort()
+        for b in cerrados:
+            ca = _aware(b.closed_at)
+            lst = by_p.get(b.pseudo_id, [])
+            hit = any(ca <= t <= ca + timedelta(seconds=120) for t in lst)
+            pm = b.planned_minutes if b.planned_minutes in retorno_por_dur else 5
+            retorno_por_dur[pm][1] += 1
+            if hit:
+                retorno_k += 1
+                retorno_por_dur[pm][0] += 1
+
+    n_cerr = len(cerrados)
+    return {
+        "ventana_dias": days, "course_id": course_id or None,
+        "n_pausas": n, "n_estudiantes": estudiantes,
+        "por_duracion": por_duracion, "por_zona": por_zona, "por_desenlace": por_desenlace,
+        "tasa_completadas": _wilson(por_desenlace.get("completed", 0), n) if n else _wilson(0, 0),
+        "sin_extension_repetitiva": _wilson(sin_ext_rep, n) if n else _wilson(0, 0),
+        "adherencia_media_pct": (round(sum(adher_ratios) / len(adher_ratios) * 100, 1) if adher_ratios else None),
+        "retorno_efectivo_2min": _wilson(retorno_k, n_cerr),
+        "retorno_por_duracion": {str(k): _wilson(v[0], v[1]) for k, v in retorno_por_dur.items() if v[1] > 0},
+        "noche": {"n": noche_n, "finalizaron_dia": noche_finday},
+        "criterio": "pausa_restaurativa = retorno_efectivo + estabilidad del siguiente bloque. "
+                    "El tiempo dentro de la Guarida NO es KPI. Efectos con IC de Wilson (95%).",
+        "pendiente_medicion": "Rendimiento/confianza del bloque siguiente exige enlazar con episodios de "
+                              "aprendizaje (EAV); la estratificación usa la duración de la pausa como proxy.",
+        "procedencia": {"fuente": "runi_breaks (tiempo de servidor) + eventos de aprendizaje (analytics), seudonimizado",
+                        "retorno_efectivo": "acción académica (dominio aprendizaje) dentro de 120 s de cerrar la pausa"},
+    }

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request
 from sqlalchemy.orm import Session
 from fastapi import Depends
 
-from app.api.deps import get_db
+from app.api.deps import get_db, req_lectura_datos
 from app.core.ratelimit import limit
 from app.services import runi_break_service as rb
 
@@ -32,3 +32,9 @@ def break_state(request: Request, break_id: str, payload: dict, db: Session = De
 @router.get("/break/active")
 def break_active(pseudo_id: str = "", db: Session = Depends(get_db)):
     return rb.active(db, pseudo_id)
+
+
+@router.get("/panel", dependencies=[Depends(req_lectura_datos)])
+def guarida_panel(course_id: str | None = None, days: int = 30, db: Session = Depends(get_db)):
+    """Panel de recuperación y retorno (staff, seudonimizado, agregado). Cierra el círculo del North Star."""
+    return rb.panel(db, course_id=course_id, days=days)
