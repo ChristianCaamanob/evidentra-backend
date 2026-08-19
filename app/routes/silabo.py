@@ -603,13 +603,20 @@ def pand_momento_feed(membresia_token: str = "", db: Session = Depends(get_db)):
     return ms.feed(db, ow, cid)
 
 
+@router.get("/alumno/pandilla/momento/{mid}/media")
+def pand_momento_media(mid: str, membresia_token: str = "", db: Session = Depends(get_db)):
+    from app.services import pand_momento_service as ms
+    ow, cid, nom = _membresia(membresia_token)
+    return ms.media(db, cid, mid)
+
+
 @router.delete("/alumno/pandilla/momento")
 @limit("30/minute")
 def pand_momento_del(request: Request, payload: dict = None, db: Session = Depends(get_db)):
     from app.services import pand_momento_service as ms
     p = payload or {}
     ow, cid, nom = _membresia(p.get("membresia_token") or p.get("ubicacion_token"))
-    return ms.eliminar(db, ow)
+    return ms.eliminar(db, ow, p.get("id") or p.get("momento_id"))
 
 
 @router.post("/alumno/pandilla/momento/{mid}/reportar")

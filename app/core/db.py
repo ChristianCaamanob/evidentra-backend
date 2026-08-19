@@ -682,6 +682,8 @@ def _migraciones_especiales(log) -> None:
         "ALTER TABLE pandilla_ubicaciones ALTER COLUMN matricula_id DROP NOT NULL",
         # Confianza auto-reportada (sílabo) puede no tener corrección (correct nulo) hasta la comprobación diferida.
         "ALTER TABLE learning_confidence_obs ALTER COLUMN correct DROP NOT NULL",
+        # Momentos de la Pandilla: de "uno por alumno" (upsert) a VARIOS (Historias 24 h). Suelta el único.
+        "ALTER TABLE pand_momentos DROP CONSTRAINT IF EXISTS pand_momentos_owner_key_key",
     ]
     for s in stmts:
         try:
