@@ -628,6 +628,23 @@ def pand_momento_reportar(request: Request, mid: str, payload: dict = None, db: 
     return ms.reportar(db, mid)
 
 
+# ── Chat de la Pandilla (v2.0 social · mensajes de grupo por curso, solo verificados) ──────────
+@router.post("/alumno/pandilla/chat")
+@limit("40/minute")
+def pand_chat_enviar(request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import pand_chat_service as cs
+    p = payload or {}
+    ow, cid, nom = _membresia(p.get("membresia_token") or p.get("ubicacion_token"))
+    return cs.enviar(db, ow, cid, nom, p.get("char"), p.get("texto"))
+
+
+@router.get("/alumno/pandilla/chat")
+def pand_chat_feed(membresia_token: str = "", db: Session = Depends(get_db)):
+    from app.services import pand_chat_service as cs
+    ow, cid, nom = _membresia(membresia_token)
+    return cs.mensajes(db, ow, cid)
+
+
 # ── Monitoreo docente por estudiante (v2.0, read-only) ─────────────────────────
 @router.get("/courses/{course_id}/monitoreo", dependencies=[Depends(req_profesor)])
 def curso_monitoreo(course_id: UUID, db: Session = Depends(get_db)):
