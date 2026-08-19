@@ -87,7 +87,7 @@ async def upload_nomina(course_id: UUID, file: UploadFile = File(...), db: Sessi
     if not result["students"]:
         muestra = "; ".join((e.get("error") or "") for e in (result.get("errors") or [])[:3])
         raise HTTPException(status_code=400, detail=(
-            "No se importó ningún estudiante: el Excel no tiene RUT válidos."
+            "No se importó ningún estudiante: el Excel no tiene RUT válidos ni números de matrícula."
             + (" Ejemplos: " + muestra if muestra else "")))
     # Reemplazar la nómina: eliminar la anterior e insertar la nueva.
     db.query(Student).filter(Student.course_id == course_id).delete()
@@ -95,7 +95,8 @@ async def upload_nomina(course_id: UUID, file: UploadFile = File(...), db: Sessi
     for s in result["students"]:
         db.add(Student(
             course_id=course_id,
-            rut=s["rut"],
+            rut=s["rut"],                       # RUT si lo hay; si no, la matrícula (identificador)
+            matricula=s.get("matricula"),
             apellido_paterno=s["apellido_paterno"],
             apellido_materno=s["apellido_materno"],
             nombres=s["nombres"],
@@ -105,13 +106,15 @@ async def upload_nomina(course_id: UUID, file: UploadFile = File(...), db: Sessi
         "imported": result["valid_count"],
         "errors": result["error_count"],
         "dv_advertencias": result.get("dv_advertencias", 0),
+        "sin_rut": result.get("sin_rut", 0),
         "error_details": result["errors"][:20],
     }
 
 @router.get("/{course_id}/students")
 def get_students(course_id: UUID, db: Session = Depends(get_db)):
     students = db.query(Student).filter(Student.course_id == course_id).all()
-    return [{"id": str(s.id), "rut": s.rut, "apellido_paterno": s.apellido_paterno,
+    return [{"id": str(s.id), "rut": s.rut, "matricula": s.matricula,
+             "apellido_paterno": s.apellido_paterno,
              "apellido_materno": s.apellido_materno, "nombres": s.nombres} for s in students]
 
 

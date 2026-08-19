@@ -22,29 +22,31 @@ def generate_nomina_template_bytes() -> bytes:
         c.alignment = Alignment(horizontal=align,vertical="center",indent=1)
         thin = Side(style="thin",color=LGRAY)
         c.border = Border(top=thin,bottom=thin,left=thin,right=thin)
-    ws.merge_cells("A1:E1")
+    ws.merge_cells("A1:F1")
     c=ws["A1"]; c.value="EVALYS — Plantilla de Nómina"
     c.font=Font(name="Arial",bold=True,size=13,color=WHITE)
     c.fill=PatternFill("solid",fgColor=NAVY)
     c.alignment=Alignment(horizontal="center",vertical="center")
     ws.row_dimensions[1].height=28
-    ws.merge_cells("A2:E2")
-    c=ws["A2"]; c.value="Complete RUT y NOMBRE. Guarde y suba el archivo a Evalys."
+    ws.merge_cells("A2:F2")
+    c=ws["A2"]; c.value="Complete RUT **o** MATRÍCULA (basta uno) y el NOMBRE. Guarde y suba el archivo a Evalys."
     c.font=Font(name="Arial",size=9,italic=True,color=MGRAY)
     c.fill=PatternFill("solid",fgColor=BGRAY)
     c.alignment=Alignment(horizontal="center",vertical="center")
-    ws.merge_cells("A3:E3")
-    c=ws["A3"]; c.value="⚠  RUT sin puntos, con guion y dígito verificador  —  Ejemplo: 12345678-9"
+    ws.merge_cells("A3:F3")
+    c=ws["A3"]; c.value="⚠  RUT sin puntos, con guion y dígito verificador (ej: 12345678-9). Si el alumno no tiene RUT, escriba su nº de matrícula."
     c.font=Font(name="Arial",size=9,bold=True,color="B45309")
     c.fill=PatternFill("solid",fgColor="FEF9EE")
     c.alignment=Alignment(horizontal="center",vertical="center")
-    cols=[("A","N°",6),("B","RUT *",20),("C","APELLIDO PATERNO *",24),("D","APELLIDO MATERNO *",24),("E","NOMBRES *",28)]
+    cols=[("A","N°",6),("B","RUT",20),("C","MATRÍCULA",18),("D","APELLIDO PATERNO *",24),("E","APELLIDO MATERNO *",24),("F","NOMBRES *",28)]
     for col_letter,label,width in cols:
         col_idx=ord(col_letter)-ord("A")+1
         hdr(4,col_idx,label,TEAL)
         ws.column_dimensions[col_letter].width=width
     ws.row_dimensions[4].height=24
-    samples=[(1,"12345678-9","González","Muñoz","Catalina Andrea"),(2,"98765432-1","Figueroa","Soto","Valentina Paz"),(3,"11223344-5","Muñoz","Reyes","Nicolás Andrés")]
+    samples=[(1,"12345678-9","","González","Muñoz","Catalina Andrea"),
+             (2,"98765432-1","","Figueroa","Soto","Valentina Paz"),
+             (3,"","A2026-1187","Pérez","Da Silva","João Andrés")]
     for i,row_data in enumerate(samples):
         r=5+i; bg=BGRAY if i%2==0 else WHITE
         for j,val in enumerate(row_data):
@@ -53,7 +55,7 @@ def generate_nomina_template_bytes() -> bytes:
     for i in range(3,100):
         r=5+i; bg=BGRAY if i%2==0 else WHITE
         data(r,1,i+1,bg=bg,align="center")
-        for j in range(2,6): data(r,j,bg=bg)
+        for j in range(2,7): data(r,j,bg=bg)
         ws.row_dimensions[r].height=18
     ws.freeze_panes="A5"
     buf=io.BytesIO(); wb.save(buf); return buf.getvalue()
