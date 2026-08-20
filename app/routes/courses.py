@@ -71,7 +71,17 @@ def update_course(course_id: UUID, payload: dict, db: Session = Depends(get_db))
 
 @router.delete("/{course_id}", dependencies=[Depends(req_profesor)])
 def delete_course(course_id: UUID, db: Session = Depends(get_db)):
-    return course_service.delete_course(db, course_id)
+    # Si algo queda colgando, responder un 409 legible (un 500 sin CORS el navegador lo muestra
+    # como "no se pudo conectar al servidor" y el docente no sabe qué pasó).
+    try:
+        return course_service.delete_course(db, course_id)
+    except HTTPException:
+        raise
+    except Exception as e:   # noqa: BLE001
+        db.rollback()
+        raise HTTPException(status_code=409, detail=(
+            "No se pudo eliminar el curso porque tiene datos asociados que no se pudieron "
+            "limpiar automáticamente. Detalle: " + str(e)[:160]))
 
 from fastapi import UploadFile, File
 from app.services.nomina_service import parse_nomina_excel
