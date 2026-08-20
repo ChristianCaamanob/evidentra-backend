@@ -149,7 +149,15 @@ def monitoreo_curso(db: Session, course_id) -> dict:
     from app.models.recordatorio import RecordatorioPersonal
     from app.models.reunion import Disponibilidad, Reserva
     from app.models.student_account import StudentAccount
+    # OJO con los dos tipos: SilaboAgente.course_id es String(64), pero StudentCourseFollow
+    # y EvaluacionAgenda lo tienen como UUID. Pasarles el texto reventaba dentro de
+    # SQLAlchemy ('str' object has no attribute 'hex') → 500 sin CORS → el panel mostraba
+    # "No se pudo cargar el monitoreo" sin decir por qué.
     cid = str(a.course_id)
+    try:
+        cid_uuid = _uuid(cid)
+    except Exception:  # noqa: BLE001  — agente huérfano o id no canónico: no rompe el panel
+        cid_uuid = None
 
     # Mapa de identidad: device_id → owner_key (+ nombre de cuenta).
     idmap = {d.device_id: d for d in db.query(DeviceIdentity).all()}
@@ -203,7 +211,9 @@ def monitoreo_curso(db: Session, course_id) -> dict:
                                "ts": m.created_at.isoformat() if m.created_at else None})
 
     # 2) Incluir también a quien sigue el curso aunque no haya consultado a Runi.
-    for f in db.query(StudentCourseFollow).filter(StudentCourseFollow.course_id == cid).all():
+    seguidores = (db.query(StudentCourseFollow).filter(StudentCourseFollow.course_id == cid_uuid).all()
+                  if cid_uuid else [])
+    for f in seguidores:
         if f.owner_key not in est:
             est[f.owner_key] = {"owner": f.owner_key, "nombre": None, "alias": None, "consultas": 0,
                                 "academicas": 0, "temas": {}, "vacios": 0, "escaladas": 0,
@@ -237,8 +247,8 @@ def monitoreo_curso(db: Session, course_id) -> dict:
                "identificados": sum(1 for s in salida if s["identificado"])}
     try:
         from app.models.evaluacion_agenda import EvaluacionAgenda
-        resumen["evaluaciones_cargadas"] = db.query(EvaluacionAgenda).filter(
-            EvaluacionAgenda.course_id == cid).count()
+        resumen["evaluaciones_cargadas"] = (db.query(EvaluacionAgenda).filter(
+            EvaluacionAgenda.course_id == cid_uuid).count() if cid_uuid else 0)
     except Exception:  # noqa: BLE001
         pass
     return {"ok": True, "estudiantes": salida, "resumen": resumen,
