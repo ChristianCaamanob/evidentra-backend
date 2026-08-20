@@ -18,6 +18,10 @@ class Course(UUIDMixin, TimestampMixin, Base):
     # Naturaleza del curso: 'teorico' (máx. 110) o 'laboratorio'/'practico' (máx. 33). Etiqueta
     # para la UI y el tope de nómina; no altera notas. Nullable → cursos previos sin tipo.
     tipo: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Identidad visual del curso (la elige el docente): color de acento y emoji de portada.
+    # Aditivas y nullable; puramente cosméticas (no alteran notas ni permisos).
+    color: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    emoji: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # Unidad organizativa para el agregado del Director (decisiones por Departamento/Facultad).
     # Nullable/aditivas; no alteran notas ni la vista del docente.
     departamento: Mapped[str | None] = mapped_column(String(160), nullable=True)

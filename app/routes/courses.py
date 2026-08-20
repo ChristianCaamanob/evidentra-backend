@@ -295,6 +295,13 @@ def list_courses(rol=Depends(_rol_opcional), db: Session = Depends(get_db)):
                   .group_by(Student.course_id).all())
     asm_counts = dict(db.query(Assessment.course_id, func.count(Assessment.id))
                       .group_by(Assessment.course_id).all())
+    # Señal para el tablero: cuántas evaluaciones ya tienen PAUTA VALIDADA (lo que habilita
+    # corregir/abrir sala). La diferencia con n_assessments es lo que le falta al docente.
+    from app.models.answer_key import AnswerKey
+    pautas_ok = dict(db.query(Assessment.course_id, func.count(func.distinct(Assessment.id)))
+                     .join(AnswerKey, AnswerKey.assessment_id == Assessment.id)
+                     .filter(AnswerKey.is_valid.is_(True))
+                     .group_by(Assessment.course_id).all())
     ve_investigacion = rol in (ROL_INVESTIGADOR, ROL_CREADOR)
     salida = []
     for c in db.query(Course).order_by(Course.created_at.desc()).all():
@@ -306,7 +313,10 @@ def list_courses(rol=Depends(_rol_opcional), db: Session = Depends(get_db)):
                        "passing_threshold": c.passing_threshold,
                        "tipo": c.tipo, "max_estudiantes": _max_estudiantes(c.tipo),
                        "n_students": int(counts.get(c.id, 0)),
-                       "n_assessments": int(asm_counts.get(c.id, 0))})
+                       "n_assessments": int(asm_counts.get(c.id, 0)),
+                       "n_pautas_ok": int(pautas_ok.get(c.id, 0)),
+                       "color": c.color, "emoji": c.emoji,
+                       "departamento": c.departamento, "facultad": c.facultad})
     return salida
 
 class CourseIn(BaseModel):

@@ -38,7 +38,7 @@ def activate_course(db: Session, course_id):
 
 def update_course(db: Session, course_id, payload: dict):
     course = get_course(db, course_id)
-    for field in ("name", "code", "status", "passing_threshold", "grading_scale"):
+    for field in ("name", "code", "status", "passing_threshold", "grading_scale", "color", "emoji"):
         if field in payload and payload[field] is not None:
             setattr(course, field, payload[field])
     # Tipo de curso: acepta '', None (limpiar) o uno de los válidos; ignora valores desconocidos.

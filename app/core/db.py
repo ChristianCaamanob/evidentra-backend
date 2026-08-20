@@ -530,6 +530,10 @@ def _seed_ficha_p3(db):
 # create_all, que crea tablas nuevas pero NO altera las existentes). Idempotente: solo
 # añade las que faltan. DDL válido en Postgres (prod) y SQLite (local/tests).
 _COLUMNAS_ADITIVAS = {
+    "courses": {
+        "color": "VARCHAR(20)",
+        "emoji": "VARCHAR(16)",
+    },
     "oral_exam_sesiones": {
         "vivo_token": "VARCHAR(40)",
     },
