@@ -689,6 +689,31 @@ def _migraciones_especiales(log) -> None:
         "ALTER TABLE learning_confidence_obs ALTER COLUMN correct DROP NOT NULL",
         # Momentos de la Pandilla: de "uno por alumno" (upsert) a VARIOS (Historias 24 h). Suelta el único.
         "ALTER TABLE pand_momentos DROP CONSTRAINT IF EXISTS pand_momentos_owner_key_key",
+        # Borrado de curso en CASCADA a nivel de esquema. Muchas tablas apuntan a courses/students/
+        # assessments sin ON DELETE CASCADE: al eliminar un curso, Postgres lanzaba ForeignKeyViolation
+        # (que el navegador mostraba como "no se pudo conectar al servidor"). Este bloque recrea CADA
+        # FK que apunte a esas tablas agregándole ON DELETE CASCADE — genérico, así cubre también las
+        # tablas que se agreguen en el futuro. Idempotente: solo toca las que aún no cascadean.
+        """
+        DO $$
+        DECLARE r RECORD;
+        BEGIN
+          FOR r IN
+            SELECT con.oid, con.conname, cl.relname AS tbl, pg_get_constraintdef(con.oid) AS def
+            FROM pg_constraint con
+            JOIN pg_class cl  ON cl.oid  = con.conrelid
+            JOIN pg_class ref ON ref.oid = con.confrelid
+            WHERE con.contype = 'f'
+              AND ref.relname IN ('courses','students','assessments','answer_keys','scans',
+                                  'asistencia_matriculas','asistencia_sesiones')
+              AND con.confdeltype <> 'c'
+          LOOP
+            EXECUTE format('ALTER TABLE %I DROP CONSTRAINT %I', r.tbl, r.conname);
+            EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I %s ON DELETE CASCADE',
+                           r.tbl, r.conname, r.def);
+          END LOOP;
+        END $$;
+        """,
     ]
     for s in stmts:
         try:
