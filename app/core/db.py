@@ -605,7 +605,7 @@ _COLUMNAS_ADITIVAS = {
         # "courses" más arriba del mismo dict, que Python descartaba en silencio: las
         # columnas nunca se creaban y GET /courses/ caía con 500 al leer c.color.
         "color": "VARCHAR(20)",
-        "emoji": "VARCHAR(16)",
+        "emoji": "VARCHAR(64)",
     },
     "scans": {
         "origen": "VARCHAR(20)",
@@ -690,6 +690,9 @@ def _migraciones_especiales(log) -> None:
         "ALTER TABLE learning_confidence_obs ALTER COLUMN correct DROP NOT NULL",
         # Momentos de la Pandilla: de "uno por alumno" (upsert) a VARIOS (Historias 24 h). Suelta el único.
         "ALTER TABLE pand_momentos DROP CONSTRAINT IF EXISTS pand_momentos_owner_key_key",
+        # El emoji del curso ya no es solo un carácter Unicode: puede ser un shortcode de nuestros
+        # packs (p. ej. ':obstetric-ultrasound:' = 22 chars), que no cabía en VARCHAR(16).
+        "ALTER TABLE courses ALTER COLUMN emoji TYPE VARCHAR(64)",
         # Borrado de curso en CASCADA a nivel de esquema. Muchas tablas apuntan a courses/students/
         # assessments sin ON DELETE CASCADE: al eliminar un curso, Postgres lanzaba ForeignKeyViolation
         # (que el navegador mostraba como "no se pudo conectar al servidor"). Este bloque recrea CADA
