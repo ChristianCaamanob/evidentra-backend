@@ -151,4 +151,10 @@ def test_fuera_de_ventana_rechaza(entorno):
     qr = c.get(f"/api/v1/asistencia/sesion/{ses['codigo']}/qr").json()
     r = c.post(f"/api/v1/asistencia/sesion/{ses['codigo']}/marcar",
                json={"matricula_id": mid, "token": qr["token"], "bucket": qr["bucket"]})
-    assert r.status_code == 409 and "ventana" in r.json()["detail"].lower()
+    # El rechazo debe DECIR cuál es la ventana y qué hora es. Antes bastaba con que dijera
+    # "fuera de la ventana horaria", pero el alumno no podía distinguir eso de un QR vencido
+    # y rescaneaba un código que nunca iba a servir.
+    assert r.status_code == 409
+    det = r.json()["detail"].lower()
+    assert "abierta de" in det and "utc" in det, det
+    assert "venció" not in det, "no debe confundirse con un QR viejo"
