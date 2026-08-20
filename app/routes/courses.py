@@ -293,6 +293,73 @@ def add_student(course_id: UUID, payload: StudentIn, db: Session = Depends(get_d
             "apellido_materno": student.apellido_materno, "nombres": student.nombres}
 
 
+def _evidencia_de(db: Session, student_id: str, course_id: UUID) -> dict:
+    """Cuánta evidencia quedaría huérfana al borrar a un estudiante.
+
+    Ninguna tabla declara FK a students.id (todas guardan el id como texto), así que
+    el DELETE nunca falla: el riesgo no es un error, es borrar en silencio a alguien
+    que ya tiene escaneos o informes corregidos. Por eso se cuenta y se avisa.
+    """
+    from app.models.scan import Scan
+    from app.models.assessment import Assessment
+    from app.models.desarrollo_reporte import DesarrolloRespuesta
+    from app.models.examen_oral import OralExamSesion
+
+    sid = str(student_id)
+    asm_ids = [a.id for a in db.query(Assessment.id).filter(Assessment.course_id == course_id).all()]
+    escaneos = 0
+    if asm_ids:
+        escaneos = db.query(Scan).filter(Scan.assessment_id.in_(asm_ids),
+                                         Scan.student_identifier == sid).count()
+    informes = db.query(DesarrolloRespuesta).filter(DesarrolloRespuesta.student_id == sid).count()
+    orales = db.query(OralExamSesion).filter(OralExamSesion.student_id == sid).count()
+    return {"escaneos": escaneos, "informes_desarrollo": informes, "examenes_orales": orales,
+            "total": escaneos + informes + orales}
+
+
+@router.delete("/{course_id}/students/{student_id}", dependencies=[Depends(req_profesor)])
+def delete_student(course_id: UUID, student_id: UUID, forzar: bool = False,
+                   db: Session = Depends(get_db)):
+    """Saca a UN estudiante de la nómina. Si ya tiene evidencia, exige ?forzar=true."""
+    from app.models.student import Student
+
+    st = db.query(Student).filter(Student.id == student_id,
+                                  Student.course_id == course_id).first()
+    if not st:
+        raise HTTPException(status_code=404, detail="Ese estudiante no está en este curso.")
+
+    ev = _evidencia_de(db, st.id, course_id)
+    nombre = " ".join(x for x in (st.nombres, st.apellido_paterno) if x).strip() or st.rut
+    if ev["total"] and not forzar:
+        raise HTTPException(status_code=409, detail={
+            "mensaje": f"{nombre} ya tiene evidencia registrada en este curso.",
+            "evidencia": ev,
+            "como_seguir": "Repite la eliminación con forzar=true si aun así quieres sacarlo de la nómina.",
+        })
+
+    db.delete(st)
+    db.commit()
+    return {"deleted": True, "id": str(student_id), "nombre": nombre, "evidencia_huerfana": ev}
+
+
+@router.delete("/{course_id}/students", dependencies=[Depends(req_profesor)])
+def delete_all_students(course_id: UUID, confirmar: str = "", db: Session = Depends(get_db)):
+    """Vacía la nómina completa. Irreversible, así que pide ?confirmar=SI explícito."""
+    from app.models.student import Student
+
+    course_service.get_course(db, course_id)   # 404 legible si el curso no existe
+    total = db.query(Student).filter(Student.course_id == course_id).count()
+    if confirmar.strip().upper() != "SI":
+        raise HTTPException(status_code=400, detail={
+            "mensaje": f"Esto borraría los {total} estudiantes de la nómina y no se puede deshacer.",
+            "como_seguir": "Repite la llamada con confirmar=SI.",
+            "n_students": total,
+        })
+    db.query(Student).filter(Student.course_id == course_id).delete(synchronize_session=False)
+    db.commit()
+    return {"deleted": True, "n_students": total}
+
+
 @router.get("/", response_model=list)
 def list_courses(rol=Depends(_rol_opcional), db: Session = Depends(get_db)):
     from sqlalchemy import func
