@@ -159,10 +159,9 @@ def marcar_con_passkey(db, codigo, bucket, credential, origin_header=None,
     from app.services import asistencia_service as asis
     s = asis._sesion(db, codigo)
     # el challenge debe ser el del bucket que firmó, aún vigente (ventana + tolerancia)
+    if not asis.ceremonia_vigente(bucket):
+        raise conflict("El código QR venció; vuelve a escanear el que está en pantalla.")
     challenge = asis._digest(s.secreto, str(s.id), int(bucket))
-    now_ok = asis._bucket_actual() - int(bucket) in (0, 1)
-    if not now_ok:
-        raise conflict("El código QR venció; vuelve a escanear.")
     rp_id, _rp_name, origin = _rp(origin_header)
 
     cred = credential if isinstance(credential, dict) else json.loads(credential)

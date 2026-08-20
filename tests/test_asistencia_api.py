@@ -78,7 +78,10 @@ def test_flujo_asistencia_qr_firmado(entorno):
 
     # 3) QR vigente (desafío firmado + bucket)
     qr = c.get(f"/api/v1/asistencia/sesion/{cod}/qr").json()
-    assert qr["token"] and qr["rota_cada"] == 4 and 0 <= qr["vence_en"] <= 4
+    # Derivado de la constante, no cableado: el ritmo de rotación se ajustó porque con 4 s
+    # la cámara del alumno no alcanzaba a enfocar el código antes de que cambiara.
+    from app.services.asistencia_service import BUCKET_SEG
+    assert qr["token"] and qr["rota_cada"] == BUCKET_SEG and 0 <= qr["vence_en"] <= BUCKET_SEG
 
     # 4) marca con el desafío correcto -> presente
     r = c.post(f"/api/v1/asistencia/sesion/{cod}/marcar",

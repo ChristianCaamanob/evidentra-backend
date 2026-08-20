@@ -26,8 +26,16 @@ from app.models.asistencia import (
     MARCA_PRESENTE, MARCA_REVISADO,
 )
 
-BUCKET_SEG = 4                     # el QR rota cada 4 s (rápido = anti-compartir, con margen para escanear+firmar)
-_TOLERANCIA_SEG = 12               # aceptar la marca hasta ~12 s tarde (latencia móvil + ceremonia passkey)
+# Presupuesto de tiempo del marcado. Rotaba cada 4 s con 12 s de tolerancia, pero eso no
+# alcanzaba ni para escanear: la cámara del alumno tiene que enganchar un QR que cambia
+# mientras enfoca, y después vienen la carga de la app, la red móvil y la ceremonia de
+# Face ID (tiempo HUMANO). El resultado era "escanea y no marca".
+BUCKET_SEG = 8                     # el QR rota cada 8 s: quieto el tiempo suficiente para enfocarlo
+_TOLERANCIA_SEG = 24               # margen para PEDIR el desafío (carga de la app + red)
+# Una vez pedido el desafío, la frescura del QR ya quedó demostrada: lo que falta es que la
+# persona apruebe con rostro/huella. Ese tramo necesita mucho más aire y no debilita nada,
+# porque el challenge solo se obtiene con un QR fresco y la aserción lo firma.
+_CEREMONIA_SEG = 90
 _ALFABETO = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
@@ -39,6 +47,21 @@ def _bucket_actual() -> int:
 def _digest(secreto: str, sesion_id: str, bucket: int) -> bytes:
     """HMAC-SHA256 (32 bytes) del bucket temporal. Es el desafío que firma la passkey."""
     return hmac.new(secreto.encode(), f"{sesion_id}:{bucket}".encode(), hashlib.sha256).digest()
+
+
+def ceremonia_vigente(bucket) -> bool:
+    """¿La marca llega dentro del tiempo que puede tomar aprobar con rostro/huella?
+
+    Se mide desde el bucket del QR que originó el desafío. Antes esto era un
+    `_bucket_actual() - bucket in (0, 1)` escrito a mano: 8 s para escanear, cargar la
+    app, hablar con el backend y completar Face ID. No alcanzaba nunca.
+    """
+    try:
+        b = int(bucket)
+    except (TypeError, ValueError):
+        return False
+    transcurrido = (_bucket_actual() - b) * BUCKET_SEG
+    return 0 <= transcurrido <= _CEREMONIA_SEG
 
 
 def _firmar(secreto: str, sesion_id: str, bucket: int) -> str:

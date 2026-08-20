@@ -123,9 +123,12 @@ def test_marcar_con_passkey_sobre_qr(db):
                                   ip="1.2.3.4", ua="test", verify_fn=_va)
     assert out2["duplicada"] is True
 
-    # QR vencido (bucket viejo) -> rechazo
+    # QR vencido (bucket viejo) -> rechazo. El corte se deriva de la ventana de ceremonia:
+    # dentro de ella la demora es legítima (Face ID es tiempo humano), pasada esa raya no.
+    from app.services.asistencia_service import BUCKET_SEG, _CEREMONIA_SEG
+    fuera = (_CEREMONIA_SEG // BUCKET_SEG) + 2
     with pytest.raises(Exception):
-        awa.marcar_con_passkey(db, s.codigo, qr["bucket"] - 10, {"id": cred_id_b64}, ORIGIN,
+        awa.marcar_con_passkey(db, s.codigo, qr["bucket"] - fuera, {"id": cred_id_b64}, ORIGIN,
                                verify_fn=_va)
 
 

@@ -1574,12 +1574,21 @@ def join_url(codigo: str, base: str | None = None) -> str:
 
 
 def qr_data_url(payload: str) -> str | None:
-    """PNG en base64 (data URL) para el QR de union. None si la libreria no esta."""
+    """PNG en base64 (data URL) para el QR de union. None si la libreria no esta.
+
+    Nivel de correccion L a proposito: estos QR se leen de una PANTALLA limpia, no de un
+    papel manchado, asi que la redundancia extra de M solo servia para subir de version y
+    apretar los modulos (con la URL de asistencia, v6 -> v5). Menos modulos = mas facil de
+    enfocar desde lejos, que es el caso de uso real (proyector en una sala).
+    """
     try:
         import base64
         import io
         import qrcode
-        img = qrcode.make(payload)
+        q = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=12, border=3)
+        q.add_data(payload)
+        q.make(fit=True)
+        img = q.make_image()
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
