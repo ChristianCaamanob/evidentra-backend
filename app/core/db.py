@@ -530,10 +530,6 @@ def _seed_ficha_p3(db):
 # create_all, que crea tablas nuevas pero NO altera las existentes). Idempotente: solo
 # añade las que faltan. DDL válido en Postgres (prod) y SQLite (local/tests).
 _COLUMNAS_ADITIVAS = {
-    "courses": {
-        "color": "VARCHAR(20)",
-        "emoji": "VARCHAR(16)",
-    },
     "oral_exam_sesiones": {
         "vivo_token": "VARCHAR(40)",
     },
@@ -605,6 +601,11 @@ _COLUMNAS_ADITIVAS = {
         "facultad": "VARCHAR(160)",
         "norma_terminologica": "VARCHAR(120)",
         "parametrizacion": "JSON",
+        # Identidad visual del curso en el tablero docente. Vivían en una SEGUNDA clave
+        # "courses" más arriba del mismo dict, que Python descartaba en silencio: las
+        # columnas nunca se creaban y GET /courses/ caía con 500 al leer c.color.
+        "color": "VARCHAR(20)",
+        "emoji": "VARCHAR(16)",
     },
     "scans": {
         "origen": "VARCHAR(20)",
