@@ -141,9 +141,9 @@ def opciones_login(db, codigo, token, bucket, origin_header=None) -> dict:
     from webauthn.helpers.structs import UserVerificationRequirement
 
     s = asis._sesion(db, codigo)
-    challenge = asis.desafio_vigente(s, token, bucket)
+    challenge, motivo = asis.desafio_vigente(s, token, bucket)
     if challenge is None:
-        raise conflict("El código QR venció o no es válido; escanea el que está en pantalla.")
+        raise conflict(motivo or "El desafío del QR no es válido; escanea el que está en pantalla.")
     rp_id, _rp_name, _origin = _rp(origin_header)
     opts = generate_authentication_options(
         rp_id=rp_id, challenge=challenge,

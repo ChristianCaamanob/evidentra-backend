@@ -75,13 +75,18 @@ def _firmar(secreto: str, sesion_id: str, bucket: int) -> str:
     return base64.urlsafe_b64encode(_digest(secreto, sesion_id, bucket)).decode().rstrip("=")[:22]
 
 
-def desafio_vigente(s, token, bucket) -> bytes | None:
-    """Si el desafío del QR (token+bucket) es válido y vigente, devuelve sus 32 bytes
-    (el challenge WebAuthn); si no, None. Une la aserción de la passkey a ESE QR fresco."""
-    ok, _motivo = verificar_desafio(s, token, bucket)
+def desafio_vigente(s, token, bucket) -> tuple[bytes | None, str]:
+    """(challenge de 32 bytes, motivo). Une la aserción de la passkey a ESE QR fresco.
+
+    Devuelve el MOTIVO además del resultado: antes se descartaba y quien llamaba levantaba
+    un "el QR venció o no es válido" que tapaba cuatro causas distintas —sesión cerrada,
+    fuera de la ventana horaria, QR viejo y firma que no calza—. El alumno veía siempre el
+    mismo texto y no había forma de saber cuál de las cuatro era.
+    """
+    ok, motivo = verificar_desafio(s, token, bucket)
     if not ok:
-        return None
-    return _digest(s.secreto, str(s.id), int(bucket))
+        return None, motivo
+    return _digest(s.secreto, str(s.id), int(bucket)), ""
 
 
 def _aware(dt) -> datetime:
@@ -240,8 +245,13 @@ def verificar_desafio(s: SesionAsistencia, token: str, bucket) -> tuple[bool, st
     if s.estado != SES_ABIERTA:
         return False, "La sesión de asistencia está cerrada."
     now = datetime.now(timezone.utc)
-    if not (_aware(s.inicio) <= now <= _aware(s.fin)):
-        return False, "Fuera de la ventana horaria de la asistencia."
+    ini, fin = _aware(s.inicio), _aware(s.fin)
+    if not (ini <= now <= fin):
+        # Decir CUÁL es la ventana y qué hora es: este rechazo se confundía con "el QR venció"
+        # y mandaba a rescanear un código que nunca iba a servir. En UTC y etiquetado, porque
+        # el servidor no conoce la zona horaria de quien marca.
+        return False, (f"La lista está abierta de {ini:%H:%M} a {fin:%H:%M} UTC y ahora son las "
+                       f"{now:%H:%M} UTC. Pídele al docente que abra la asistencia.")
     try:
         bucket = int(bucket)
     except (TypeError, ValueError):

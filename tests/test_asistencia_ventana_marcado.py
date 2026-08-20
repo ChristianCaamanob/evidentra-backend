@@ -56,3 +56,56 @@ def test_verificar_desafio_cubre_toda_la_tolerancia():
     """n_atras se deriva de la tolerancia: si cambia BUCKET_SEG debe seguir cuadrando."""
     n_atras = max(1, asis._TOLERANCIA_SEG // asis.BUCKET_SEG)
     assert n_atras * asis.BUCKET_SEG >= asis._TOLERANCIA_SEG - asis.BUCKET_SEG
+
+
+# ── El motivo del rechazo debe distinguir las cuatro causas ───────────────────────────
+# Todas devolvían "El código QR venció o no es válido", así que el alumno rescaneaba un
+# código que a veces no iba a servir nunca (p. ej. si la lista estaba cerrada).
+import types
+from datetime import datetime, timedelta, timezone
+
+
+def _sesion_falsa(abierta=True, desde=-1, hasta=+1):
+    ahora = datetime.now(timezone.utc)
+    return types.SimpleNamespace(
+        id="11111111-1111-1111-1111-111111111111", secreto="s3cr3t0",
+        estado=("abierta" if abierta else "cerrada"),
+        inicio=ahora + timedelta(hours=desde), fin=ahora + timedelta(hours=hasta))
+
+
+def _token_de(s, bucket):
+    return asis._firmar(s.secreto, str(s.id), bucket)
+
+
+def test_motivo_sesion_cerrada():
+    s = _sesion_falsa(abierta=False)
+    ok, motivo = asis.verificar_desafio(s, _token_de(s, asis._bucket_actual()), asis._bucket_actual())
+    assert not ok and "cerrada" in motivo.lower()
+
+
+def test_motivo_fuera_de_horario_dice_la_ventana():
+    s = _sesion_falsa(desde=-5, hasta=-3)          # la lista fue hace horas
+    ok, motivo = asis.verificar_desafio(s, _token_de(s, asis._bucket_actual()), asis._bucket_actual())
+    assert not ok
+    assert "abierta de" in motivo and "UTC" in motivo, motivo
+    assert "venció" not in motivo, "no debe confundirse con un QR viejo"
+
+
+def test_motivo_qr_viejo_dice_cuantos_segundos():
+    s = _sesion_falsa()
+    viejo = asis._bucket_actual() - (asis._TOLERANCIA_SEG // asis.BUCKET_SEG) - 5
+    ok, motivo = asis.verificar_desafio(s, _token_de(s, viejo), viejo)
+    assert not ok and " s (" in motivo and str(asis._TOLERANCIA_SEG) in motivo, motivo
+
+
+def test_motivo_firma_que_no_calza():
+    s = _sesion_falsa()
+    b = asis._bucket_actual()
+    ok, motivo = asis.verificar_desafio(s, "firma-inventada", b)
+    assert not ok and "no es válido" in motivo, motivo
+
+
+def test_desafio_vigente_propaga_el_motivo():
+    s = _sesion_falsa(abierta=False)
+    challenge, motivo = asis.desafio_vigente(s, _token_de(s, asis._bucket_actual()), asis._bucket_actual())
+    assert challenge is None and motivo, "el motivo no puede perderse por el camino"
