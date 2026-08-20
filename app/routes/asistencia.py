@@ -27,6 +27,19 @@ from app.models.asistencia import AsistenciaMatricula
 router = APIRouter(tags=["asistencia"])
 
 
+@router.get("/asistencia/config")
+def config_tiempos() -> dict:
+    """Presupuesto de tiempo del marcado, público y sin secretos.
+
+    Existe para poder comprobar DESDE FUERA qué ventana está corriendo de verdad en el
+    servidor: cuando el alumno reporta "el QR venció", lo primero que hay que descartar es
+    que el despliegue traiga otros números que los del código que uno está leyendo.
+    """
+    return {"rota_cada_seg": asis.BUCKET_SEG,
+            "tolerancia_desafio_seg": asis._TOLERANCIA_SEG,
+            "ceremonia_passkey_seg": asis._CEREMONIA_SEG}
+
+
 # ── gestión (P / I / D) ───────────────────────────────────────────────────────────────
 @router.post("/asistencia/{course_id}/nomina", dependencies=[Depends(req_lectura_datos)])
 async def importar_nomina(course_id: UUID, request: Request,

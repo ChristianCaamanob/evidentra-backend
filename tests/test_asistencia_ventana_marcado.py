@@ -12,10 +12,17 @@ import time
 from app.services import asistencia_service as asis
 
 
-def test_pedir_el_desafio_exige_qr_fresco():
-    """La tolerancia cubre la carga de la app, pero no un QR de hace un minuto."""
-    assert asis._TOLERANCIA_SEG >= 20, "muy poco margen para cargar la app en red móvil"
-    assert asis._TOLERANCIA_SEG <= 40, "un QR fotografiado no debería servir tanto rato"
+def test_pedir_el_desafio_cubre_la_carga_de_la_app():
+    """El presupuesto tiene que cubrir enfoque + Safari + ~930 KB + arranque en un teléfono.
+
+    Antes este test exigía además un techo de 40 s "para que un QR fotografiado no sirva
+    tanto rato". Ese techo se cayó a propósito: la doctrina del módulo ya asume que un QR
+    rotatorio NO frena la retransmisión (basta que un presente mande la foto), así que
+    apretarlo cobraba usabilidad sin comprar seguridad. Lo que ata la marca es la passkey
+    del dispositivo enrolado. El techo de verdad lo pone la ventana horaria de la sesión.
+    """
+    assert asis._TOLERANCIA_SEG >= 60, "no alcanza para cargar la app en red móvil"
+    assert asis._TOLERANCIA_SEG <= 300, "más que esto ya es un enlace reutilizable, no un QR"
 
 
 def test_la_ceremonia_biometrica_cabe_en_la_ventana():

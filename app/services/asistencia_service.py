@@ -31,11 +31,18 @@ from app.models.asistencia import (
 # mientras enfoca, y después vienen la carga de la app, la red móvil y la ceremonia de
 # Face ID (tiempo HUMANO). El resultado era "escanea y no marca".
 BUCKET_SEG = 8                     # el QR rota cada 8 s: quieto el tiempo suficiente para enfocarlo
-_TOLERANCIA_SEG = 24               # margen para PEDIR el desafío (carga de la app + red)
+# El reloj del QR corre desde que se PINTA, pero recién se comprueba cuando la app terminó de
+# cargar: entre medio están el enfoque de la cámara, abrir Safari, bajar ~930 KB y arrancar un
+# HTML de 3 MB en un teléfono. Eso son decenas de segundos que no controlamos, así que 24 s
+# seguían quedando cortos. Subir esto NO es lo que sostiene la seguridad: la doctrina del módulo
+# ya asume que un QR rotatorio no frena la retransmisión (un presente le manda la foto a un
+# ausente que aprueba con SU passkey). Lo que ata la marca es la passkey del dispositivo
+# enrolado + las anomalías que ve el docente; la presencia física fuerte queda para BLE nativo.
+_TOLERANCIA_SEG = 90               # margen para PEDIR el desafío (enfoque + carga de la app + red)
 # Una vez pedido el desafío, la frescura del QR ya quedó demostrada: lo que falta es que la
 # persona apruebe con rostro/huella. Ese tramo necesita mucho más aire y no debilita nada,
 # porque el challenge solo se obtiene con un QR fresco y la aserción lo firma.
-_CEREMONIA_SEG = 90
+_CEREMONIA_SEG = 180
 _ALFABETO = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
@@ -244,7 +251,13 @@ def verificar_desafio(s: SesionAsistencia, token: str, bucket) -> tuple[bool, st
     for cand in range(actual, actual - n_atras - 1, -1):
         if bucket == cand and hmac.compare_digest(str(token or ""), _firmar(s.secreto, str(s.id), cand)):
             return True, ""
-    return False, "El código QR venció; escanea el que está en pantalla."
+    # Decir CUÁNTOS segundos traía el desafío: sin ese dato, "el QR venció" no distingue entre
+    # un teléfono lento, un enlace reenviado y una firma que no calza. Con él se diagnostica.
+    edad = (actual - bucket) * BUCKET_SEG
+    if edad > 0:
+        return False, (f"El QR que escaneaste ya tenía {edad} s (se aceptan hasta {_TOLERANCIA_SEG} s). "
+                       "Escanea el que está en pantalla ahora.")
+    return False, "El desafío del QR no es válido; escanea el que está en pantalla."
 
 
 # ── marcado (núcleo; la aserción passkey se enchufa en AS3) ───────────────────────────
