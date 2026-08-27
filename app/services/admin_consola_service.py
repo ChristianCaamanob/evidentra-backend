@@ -20,6 +20,11 @@ from app.models.reunion import Disponibilidad, Reserva
 from app.models.silabo import MensajeSilabo, SilaboAgente
 
 
+def _iso(x):
+    """Instante en ISO para que el cliente lo pinte en la hora local de quien mira."""
+    return x.isoformat() if hasattr(x, "isoformat") else (str(x) if x else None)
+
+
 def _log(db: Session, admin_email: str, recurso: str, detalle: str = "") -> None:
     try:
         db.add(AccesoAdminLog(admin_email=admin_email or "?", recurso=recurso, detalle=(detalle or None)))
@@ -116,9 +121,6 @@ def sesiones(db: Session, admin_email: str) -> dict:
     from app.models.assessment import Assessment
     from app.models.silabo import SilaboAgente
 
-    def _iso(x):
-        return x.isoformat() if hasattr(x, "isoformat") else (str(x) if x else None)
-
     # ── 1. Salas de estudio (las abren los propios alumnos) ──
     agentes = {a.id: a for a in db.query(SilaboAgente).all()}
     n_msg = dict(db.query(SalaMensaje.sala_id, _func_count(db)).group_by(SalaMensaje.sala_id).all())
@@ -167,14 +169,71 @@ def sesiones(db: Session, admin_email: str) -> dict:
                        "curso": (c.name if c else None),
                        "integrantes": int(n_int.get(g.id, 0)), "creado_at": _iso(g.created_at)})
 
+    # ── 5. Grupos de la Pandilla (los arman los propios alumnos) ──
+    # Se construyeron después de este panel y se habían quedado fuera: el CEO veía los
+    # grupos del DOCENTE (nota grupal) pero no los que forman los estudiantes entre ellos.
+    from app.models.pand_grupo import PandGrupo, PandGrupoMiembro
+    pandilla = []
+    for g in db.query(PandGrupo).order_by(PandGrupo.created_at.desc()).all():
+        ms = db.query(PandGrupoMiembro).filter(PandGrupoMiembro.grupo_id == g.id).order_by(
+            PandGrupoMiembro.created_at.asc()).all()
+        pandilla.append({"codigo": g.codigo, "nombre": g.nombre, "curso": g.curso,
+                         "abierto": bool(g.abierto), "n_miembros": len(ms),
+                         "integrantes": [(m.nombre or "Sin nombre") for m in ms],
+                         "creado_at": _iso(g.created_at)})
+
     total = len(estudio) + len(vivo) + len(asistencia)
     _log(db, admin_email, "sesiones",
-         f"estudio={len(estudio)} vivo={len(vivo)} asistencia={len(asistencia)} grupos={len(grupos)}")
+         f"estudio={len(estudio)} vivo={len(vivo)} asistencia={len(asistencia)} "
+         f"grupos={len(grupos)} pandilla={len(pandilla)}")
     return {"ok": True,
             "resumen": {"abiertas": total, "salas_estudio": len(estudio), "en_vivo": len(vivo),
-                        "asistencia": len(asistencia), "grupos_trabajo": len(grupos)},
+                        "asistencia": len(asistencia), "grupos_trabajo": len(grupos),
+                        "grupos_pandilla": len(pandilla)},
             "salas_estudio": estudio, "en_vivo": vivo,
-            "asistencia": asistencia, "grupos_trabajo": grupos}
+            "asistencia": asistencia, "grupos_trabajo": grupos, "grupos_pandilla": pandilla}
+
+
+def chats(db: Session, admin_email: str, limite: int = 300) -> dict:
+    """Conversaciones de la Pandilla: las del curso y las de cada grupo.
+
+    Decisión del CEO: «profesor solo tiene acceso a chat [de Runi]; administrador, acceso
+    completo de todo registro». El ámbito vive en la columna `curso`: el id del curso para
+    la conversación general, y 'g:<codigo>' para la de un grupo.
+
+    Como toda la consola, esto es SOLO LECTURA y deja asiento en la bitácora.
+    """
+    from app.models.pand_chat import PandChat
+    from app.models.pand_grupo import PandGrupo
+
+    filas = (db.query(PandChat).order_by(PandChat.created_at.desc())
+             .limit(max(1, min(int(limite or 300), 1000))).all())
+    nombres = {g.codigo: g.nombre for g in db.query(PandGrupo).all()}
+
+    ambitos = {}
+    for m in reversed(filas):                       # cronológico dentro de cada conversación
+        clave = m.curso or "—"
+        if clave not in ambitos:
+            es_grupo = clave.startswith("g:")
+            cod = clave[2:] if es_grupo else None
+            ambitos[clave] = {
+                "ambito": clave,
+                "tipo": "grupo" if es_grupo else "curso",
+                "titulo": (nombres.get(cod) or ("Grupo " + cod)) if es_grupo else "Conversación del curso",
+                "codigo": cod,
+                "mensajes": [],
+            }
+        ambitos[clave]["mensajes"].append({
+            "nombre": m.nombre or "Estudiante", "char": m.char, "texto": m.texto,
+            "created_at": _iso(m.created_at)})
+
+    convs = sorted(ambitos.values(), key=lambda c: len(c["mensajes"]), reverse=True)
+    _log(db, admin_email, "chats",
+         f"conversaciones={len(convs)} mensajes={sum(len(c['mensajes']) for c in convs)}")
+    return {"ok": True, "conversaciones": convs,
+            "resumen": {"n_conversaciones": len(convs),
+                        "n_grupos": sum(1 for c in convs if c["tipo"] == "grupo"),
+                        "n_mensajes": sum(len(c["mensajes"]) for c in convs)}}
 
 
 def _func_count(db):

@@ -131,3 +131,62 @@ def test_la_lectura_queda_en_la_bitacora(ent):
     despues = c.get(f"{API}/admin/consola/accesos").json().get("accesos", [])
     assert len(despues) > antes, "mirar sesiones debe dejar asiento (protege al CEO)"
     assert any(a.get("recurso") == "sesiones" for a in despues), despues[:3]
+
+
+# ── Los grupos de la Pandilla y sus chats también son "registro" ──────────────────────
+# Se construyeron DESPUÉS de este panel y se habían quedado fuera: el CEO veía los grupos
+# del docente (nota grupal) pero no los que forman los estudiantes entre ellos, ni sus
+# conversaciones. Regla del CEO: «administrador, acceso completo de todo registro».
+
+def _alumno_con_grupo(c, eng):
+    """Deja formado un grupo de dos alumnos con un mensaje dentro."""
+    import uuid as _u
+    from app.models.student import Student
+    cid = _curso(eng, "Obstetricia", "OBS-PG")
+    with Session(eng) as s:
+        for rut, nom in [("11111111-1", "Ana"), ("22222222-2", "Luis")]:
+            s.add(Student(course_id=_u.UUID(cid), rut=rut, nombres=nom, apellido_paterno="Pérez"))
+        s.commit()
+    c.post(f"{API}/courses/{cid}/silabo", json={"contexto": "x" * 200, "activo": True, "config": {}})
+    cod = c.get(f"{API}/courses/{cid}/silabo").json()["agente"]["codigo"]
+    tok = lambda rut: c.post(f"{API}/silabo/{cod}/identificar", json={"valor": rut}).json()["ubicacion_token"]
+    t1, t2 = tok("11111111-1"), tok("22222222-2")
+    g = c.post(f"{API}/silabo/{cod}/pandilla/grupo", json={"token": t1, "nombre": "Las Matronas"}).json()
+    c.post(f"{API}/silabo/{cod}/pandilla/grupo/{g['codigo']}/unirse", json={"token": t2})
+    c.post(f"{API}/silabo/{cod}/pandilla/grupo/{g['codigo']}/chat",
+           json={"token": t1, "texto": "Nos juntamos a las 6"})
+    return cod, g["codigo"]
+
+
+def test_el_admin_ve_los_grupos_que_arman_los_alumnos(ent):
+    c, eng = ent["c"], ent["eng"]
+    _cod, gcod = _alumno_con_grupo(c, eng)
+    d = c.get(f"{API}/admin/consola/sesiones").json()
+    assert d["resumen"]["grupos_pandilla"] == 1, d["resumen"]
+    g = d["grupos_pandilla"][0]
+    assert g["codigo"] == gcod
+    assert sorted(g["integrantes"]) == ["Ana Pérez", "Luis Pérez"]
+
+
+def test_el_admin_lee_el_chat_del_grupo(ent):
+    c, eng = ent["c"], ent["eng"]
+    _cod, gcod = _alumno_con_grupo(c, eng)
+    d = c.get(f"{API}/admin/consola/chats").json()
+    assert d["resumen"]["n_grupos"] == 1, d["resumen"]
+    conv = [x for x in d["conversaciones"] if x["codigo"] == gcod][0]
+    assert conv["tipo"] == "grupo" and conv["titulo"] == "Las Matronas"
+    assert conv["mensajes"][0]["texto"] == "Nos juntamos a las 6"
+    assert conv["mensajes"][0]["nombre"] == "Ana Pérez"
+
+
+def test_solo_el_ceo_lee_los_chats(ent):
+    app.dependency_overrides[usuario_actual] = lambda: _PROFE
+    r = ent["c"].get(f"{API}/admin/consola/chats")
+    assert r.status_code == 403, "un profesor no debe leer las conversaciones de la Pandilla"
+
+
+def test_leer_los_chats_deja_asiento_en_la_bitacora(ent):
+    c = ent["c"]
+    c.get(f"{API}/admin/consola/chats")
+    accesos = c.get(f"{API}/admin/consola/accesos").json().get("accesos", [])
+    assert any(a.get("recurso") == "chats" for a in accesos), accesos[:3]

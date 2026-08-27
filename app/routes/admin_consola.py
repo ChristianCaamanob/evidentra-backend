@@ -28,6 +28,12 @@ def admin_sesiones(db: Session = Depends(get_db), admin: Teacher = Depends(req_c
     return acs.sesiones(db, getattr(admin, "email", "") or "")
 
 
+@router.get("/chats")
+def admin_chats(limite: int = 300, db: Session = Depends(get_db), admin: Teacher = Depends(req_creador)):
+    """Conversaciones de la Pandilla: la del curso y la de cada grupo. Solo lectura."""
+    return acs.chats(db, getattr(admin, "email", "") or "", limite=limite)
+
+
 @router.get("/reuniones")
 def admin_reuniones(db: Session = Depends(get_db), admin: Teacher = Depends(req_creador)):
     return acs.reuniones(db, getattr(admin, "email", "") or "")
