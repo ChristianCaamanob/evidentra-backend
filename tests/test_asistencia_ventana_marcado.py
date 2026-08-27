@@ -87,7 +87,7 @@ def test_motivo_fuera_de_horario_dice_la_ventana():
     s = _sesion_falsa(desde=-5, hasta=-3)          # la lista fue hace horas
     ok, motivo = asis.verificar_desafio(s, _token_de(s, asis._bucket_actual()), asis._bucket_actual())
     assert not ok
-    assert "abierta de" in motivo and "UTC" in motivo, motivo
+    assert "Abre de" in motivo and "UTC" in motivo, motivo
     assert "venció" not in motivo, "no debe confundirse con un QR viejo"
 
 
@@ -109,3 +109,45 @@ def test_desafio_vigente_propaga_el_motivo():
     s = _sesion_falsa(abierta=False)
     challenge, motivo = asis.desafio_vigente(s, _token_de(s, asis._bucket_actual()), asis._bucket_actual())
     assert challenge is None and motivo, "el motivo no puede perderse por el camino"
+
+
+# ── Gracia en la ventana horaria ──────────────────────────────────────────────────────
+# El alumno escaneó en el minuto exacto en que empezaba la clase y el sistema le dijo, sin
+# sentido, que "la lista abre a las 03:14 y ahora son las 03:14". Fallaba por SEGUNDOS.
+
+def test_marcar_justo_al_empezar_la_clase_funciona():
+    s = _sesion_falsa()
+    s.inicio = datetime.now(timezone.utc) + timedelta(seconds=20)   # empieza en 20 s
+    s.fin = s.inicio + timedelta(hours=2)
+    b = asis._bucket_actual()
+    ok, motivo = asis.verificar_desafio(s, _token_de(s, b), b)
+    assert ok, f"rechazó a quien llega puntual: {motivo}"
+
+
+def test_marcar_apenas_termina_la_clase_funciona():
+    s = _sesion_falsa()
+    s.fin = datetime.now(timezone.utc) - timedelta(seconds=30)      # terminó hace 30 s
+    s.inicio = s.fin - timedelta(hours=2)
+    b = asis._bucket_actual()
+    ok, _ = asis.verificar_desafio(s, _token_de(s, b), b)
+    assert ok, "30 s de latencia no deberían costarle la asistencia a nadie"
+
+
+def test_la_gracia_no_abre_la_lista_de_ayer():
+    s = _sesion_falsa(desde=-5, hasta=-3)                            # terminó hace 3 horas
+    b = asis._bucket_actual()
+    ok, motivo = asis.verificar_desafio(s, _token_de(s, b), b)
+    assert not ok and "ya terminó" in motivo, motivo
+
+
+def test_el_rechazo_viaja_con_los_instantes_para_mostrarlos_en_hora_local():
+    """El servidor no conoce la zona del alumno: manda ISO y la app los pinta en su hora."""
+    s = _sesion_falsa(desde=-5, hasta=-3)
+    b = asis._bucket_actual()
+    _ok, motivo = asis.verificar_desafio(s, _token_de(s, b), b)
+    partes = motivo.split("|VENTANA|")
+    assert len(partes) == 2, f"falta el bloque de instantes: {motivo}"
+    isos = partes[1].split("|")
+    assert len(isos) == 3, f"deben venir inicio, fin y ahora: {isos}"
+    for iso in isos:
+        datetime.fromisoformat(iso)      # deben ser parseables

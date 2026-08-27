@@ -17,7 +17,7 @@ import hmac
 import secrets
 import time
 import uuid as _uuidmod
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.core.errors import conflict, not_found
 from app.models.asistencia import (
@@ -43,6 +43,10 @@ _TOLERANCIA_SEG = 90               # margen para PEDIR el desafío (enfoque + ca
 # persona apruebe con rostro/huella. Ese tramo necesita mucho más aire y no debilita nada,
 # porque el challenge solo se obtiene con un QR fresco y la aserción lo firma.
 _CEREMONIA_SEG = 180
+# Gracia a ambos lados de la VENTANA HORARIA de la sesión. Los alumnos escanean justo cuando
+# empieza la clase, y los relojes del teléfono, del navegador del docente y del servidor no
+# coinciden al segundo: sin este margen, marcar en el minuto exacto de inicio fallaba.
+_GRACIA_VENTANA_SEG = 300
 _ALFABETO = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
@@ -246,12 +250,21 @@ def verificar_desafio(s: SesionAsistencia, token: str, bucket) -> tuple[bool, st
         return False, "La sesión de asistencia está cerrada."
     now = datetime.now(timezone.utc)
     ini, fin = _aware(s.inicio), _aware(s.fin)
-    if not (ini <= now <= fin):
+    # Margen de gracia en los DOS bordes. Sin él, el alumno que escanea en el minuto exacto en
+    # que empieza la clase quedaba fuera por SEGUNDOS —y el mensaje le decía, absurdamente, que
+    # la lista abre a la misma hora que ya es—. Los relojes del teléfono, del navegador del
+    # docente y del servidor no coinciden al segundo, y una lista de clase no es una frontera
+    # de seguridad a esa granularidad: quien la cierra de verdad es el docente.
+    gracia = timedelta(seconds=_GRACIA_VENTANA_SEG)
+    if not (ini - gracia <= now <= fin + gracia):
         # Decir CUÁL es la ventana y qué hora es: este rechazo se confundía con "el QR venció"
-        # y mandaba a rescanear un código que nunca iba a servir. En UTC y etiquetado, porque
-        # el servidor no conoce la zona horaria de quien marca.
-        return False, (f"La lista está abierta de {ini:%H:%M} a {fin:%H:%M} UTC y ahora son las "
-                       f"{now:%H:%M} UTC. Pídele al docente que abra la asistencia.")
+        # y mandaba a rescanear un código que nunca iba a servir. Se entregan además los
+        # instantes en ISO para que la app los muestre en la hora LOCAL del alumno (mostrarle
+        # UTC no le sirve para nada).
+        cuando = "todavía no empieza" if now < ini else "ya terminó"
+        return False, (f"La lista de asistencia {cuando}. Abre de {ini:%H:%M} a {fin:%H:%M} UTC "
+                       f"(ahora son las {now:%H:%M} UTC). Pídele al docente que abra la lista."
+                       f"|VENTANA|{ini.isoformat()}|{fin.isoformat()}|{now.isoformat()}")
     try:
         bucket = int(bucket)
     except (TypeError, ValueError):
