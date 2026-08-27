@@ -692,8 +692,17 @@ def identificar_por_rut(db: Session, codigo: str, valor: str) -> dict:
     except Exception:  # noqa: BLE001
         return {"ok": False}
 
+    def _cuerpo(x):
+        """RUT sin su dígito verificador. Mucha gente lo escribe sin el DV, y rechazarlo por
+        eso mandaba a un alumno que SÍ está en la nómina a pedirle al docente que lo agregue."""
+        x = str(x or "")
+        return x[:-1] if len(x) >= 8 else x
+
     def _match_rut(campo):
-        return len(nr) >= 7 and _norm_rut(campo) == nr
+        cn = _norm_rut(campo)
+        if len(nr) < 7 or not cn:
+            return False
+        return cn == nr or _cuerpo(cn) == nr or cn == _cuerpo(nr)
 
     def _match_id(campo):
         return len(nid) >= 4 and bool(campo) and _norm_id(campo) == nid
@@ -715,7 +724,14 @@ def identificar_por_rut(db: Session, codigo: str, valor: str) -> dict:
     for m in db.query(AsistenciaMatricula).filter(AsistenciaMatricula.course_id == cid).all():
         if _match_rut(m.rut) or _match_id(m.identificador):
             return _resp(_nombre_amable(m.nombre), _norm_rut(m.rut) or None, m.identificador)
-    return {"ok": False}
+    # Distinguir "no calzas" de "este curso aún no tiene nómina": con la nómina vacía, el
+    # mensaje culpaba al alumno de un dato mal escrito y lo mandaba a hablar con su docente
+    # por la razón equivocada.
+    n_acad = db.query(Student).filter(Student.course_id == cid).count()
+    n_asis = db.query(AsistenciaMatricula).filter(AsistenciaMatricula.course_id == cid).count()
+    if not n_acad and not n_asis:
+        return {"ok": False, "sin_nomina": True, "n_nomina": 0}
+    return {"ok": False, "sin_nomina": False, "n_nomina": n_acad + n_asis}
 
 
 def _intentos_equivalentes(db: Session, a: SilaboAgente, pregunta: str, device_id: str | None) -> int:

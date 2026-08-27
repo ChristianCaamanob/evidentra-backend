@@ -195,7 +195,18 @@ def extraer(imagenes: list | None, texto: str = "", debug: bool = False) -> dict
         else:
             crudo = ce._llamar_anthropic(_SYSTEM, _USER + "\n\nHORARIO (texto):\n" + texto[:8000], max_tokens=8000)
     except Exception as e:  # noqa: BLE001
-        raise unprocessable(f"No pude leer el horario ahora: {e}")
+        # No volcar el error del proveedor en la pantalla del alumno: llegó a mostrarse
+        # «Error code: 401 … API key is invalid», que no le dice nada y expone la tripa.
+        # Se distingue "el servicio está caído" de "tu foto no se entiende", que es lo
+        # único sobre lo que el estudiante puede hacer algo.
+        import logging
+        logging.getLogger("evalys").error("horario: falló la lectura con IA: %s", e)
+        msg = str(e)
+        if "authentication_error" in msg or "401" in msg or "api key" in msg.lower():
+            raise unprocessable("El lector de horarios no está disponible ahora mismo. "
+                                "No es tu foto: avísale a tu docente y vuelve a intentar más tarde.")
+        raise unprocessable("No pude leer el horario esta vez. Prueba con una foto más "
+                            "nítida y derecha, o pégalo como texto.")
 
     data = _json(crudo)
     brutos = data.get("bloques") if isinstance(data, dict) else None

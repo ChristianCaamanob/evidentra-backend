@@ -22,6 +22,31 @@ def healthcheck():
     return {"status": "ok", "service": "evidentra-backend-mvp", "db": engine.dialect.name}
 
 
+@api_router.get("/health/ia", tags=["health"])
+def healthcheck_ia():
+    """¿Está viva la clave de IA? Sin ella, Runi no responde NADA.
+
+    Existe porque una clave inválida se manifestaba como funciones sueltas que fallaban
+    (el escáner de horario devolvía un 401 crudo en pantalla) en vez de como lo que era:
+    los 17 servicios de IA caídos a la vez. Nunca devuelve la clave ni parte de ella.
+    """
+    import os
+    clave = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
+    if not clave:
+        return {"ok": False, "estado": "sin_clave",
+                "detalle": "ANTHROPIC_API_KEY no está definida en el entorno del servidor."}
+    try:
+        import anthropic
+        anthropic.Anthropic().models.list(limit=1)      # llamada mínima: valida credencial
+        return {"ok": True, "estado": "ok"}
+    except Exception as e:                               # noqa: BLE001
+        msg = str(e)
+        invalida = "authentication_error" in msg or "invalid" in msg.lower() or "401" in msg
+        return {"ok": False, "estado": "clave_invalida" if invalida else "error",
+                "detalle": ("La clave existe pero el proveedor la rechaza; hay que rotarla."
+                            if invalida else msg[:200])}
+
+
 @api_router.get("/bootstrap", response_model=BootstrapOut, tags=["health"])
 def bootstrap_ids():
     db = SessionLocal()
