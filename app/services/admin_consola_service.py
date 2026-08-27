@@ -42,16 +42,29 @@ def resumen(db: Session, admin_email: str) -> dict:
     return {"ok": True, "resumen": {"notas": n_notas, "momentos": n_moment, "accesos_registrados": n_accesos}}
 
 
-def social(db: Session, admin_email: str, con_imagen: bool = False) -> dict:
-    """Todas las Notas y Momentos de la plataforma (contenido). Registra el acceso."""
+_MAX_SOCIAL = 300      # techo del listado; sin él la consola crece sin límite con el uso
+
+
+def social(db: Session, admin_email: str, con_imagen: bool = False, limite: int = 0) -> dict:
+    """Todas las Notas y Momentos de la plataforma (contenido). Registra el acceso.
+
+    Las imágenes NO viajan en el listado: se entrega la URL de cada una y el navegador las
+    pide cuando toca pintarlas. Devolver el base64 de todos los momentos en un solo JSON
+    hacía crecer la respuesta a decenas de megas y el navegador cortaba con un
+    "Failed to fetch" que no decía nada. `con_imagen` se mantiene para quien lo llame de
+    forma explícita, pero ya no es como carga la consola.
+    """
+    tope = max(1, min(int(limite or _MAX_SOCIAL), 1000))
     notas = [{"id": str(r.id), "owner_key": r.owner_key, "curso": r.curso, "char": r.char,
               "nombre": r.nombre, "texto": r.texto,
               "created_at": r.created_at.isoformat() if r.created_at else None}
-             for r in db.query(PandNota).order_by(PandNota.created_at.desc()).all()]
+             for r in db.query(PandNota).order_by(PandNota.created_at.desc()).limit(tope).all()]
     momentos = []
-    for r in db.query(PandMomento).order_by(PandMomento.created_at.desc()).all():
+    for r in db.query(PandMomento).order_by(PandMomento.created_at.desc()).limit(tope).all():
         d = {"id": str(r.id), "owner_key": r.owner_key, "curso": r.curso, "char": r.char,
              "nombre": r.nombre, "caption": r.caption, "reportes": r.reportes, "oculto": bool(r.oculto),
+             "tiene_imagen": bool(r.imagen),
+             "imagen_url": (f"/api/v1/admin/consola/momento/{r.id}/imagen" if r.imagen else None),
              "created_at": r.created_at.isoformat() if r.created_at else None}
         if con_imagen:
             d["imagen"] = r.imagen
@@ -239,3 +252,20 @@ def chats(db: Session, admin_email: str, limite: int = 300) -> dict:
 def _func_count(db):
     from sqlalchemy import func
     return func.count()
+
+
+def imagen_momento(db: Session, admin_email: str, momento_id):
+    """(bytes, mime) de UNA foto. Se sirve suelta para que el listado no cargue megas."""
+    import base64
+    import re as _re
+    from app.models.pand_momento import PandMomento
+    r = db.query(PandMomento).filter(PandMomento.id == momento_id).first()
+    if not r or not r.imagen:
+        return None
+    m = _re.match(r"^data:([^;]+);base64,(.*)$", str(r.imagen), _re.S)
+    mime = m.group(1) if m else "image/jpeg"
+    crudo = m.group(2) if m else str(r.imagen)
+    try:
+        return base64.b64decode(crudo, validate=False), mime
+    except Exception:  # noqa: BLE001
+        return None

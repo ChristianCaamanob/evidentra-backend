@@ -3,6 +3,8 @@ Consola del Administrador (CEO) — rutas de supervisión, SOLO el rol 'creador'
 Solo lectura ("fantasma"): no altera la interacción de nadie. Cada lectura de contenido se registra.
 """
 from fastapi import APIRouter, Depends
+from uuid import UUID
+
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, req_creador
@@ -32,6 +34,19 @@ def admin_sesiones(db: Session = Depends(get_db), admin: Teacher = Depends(req_c
 def admin_chats(limite: int = 300, db: Session = Depends(get_db), admin: Teacher = Depends(req_creador)):
     """Conversaciones de la Pandilla: la del curso y la de cada grupo. Solo lectura."""
     return acs.chats(db, getattr(admin, "email", "") or "", limite=limite)
+
+
+@router.get("/momento/{momento_id}/imagen")
+def admin_momento_imagen(momento_id: UUID, db: Session = Depends(get_db),
+                         admin: Teacher = Depends(req_creador)):
+    """Sirve UNA foto. El listado entrega solo la URL: así la consola no baja megas de golpe."""
+    from fastapi import Response
+    r = acs.imagen_momento(db, getattr(admin, "email", "") or "", momento_id)
+    if not r:
+        from app.core.errors import not_found
+        raise not_found("Ese momento no tiene imagen.")
+    data, mime = r
+    return Response(content=data, media_type=mime)
 
 
 @router.get("/reuniones")
