@@ -134,3 +134,51 @@ def cerrar(db: Session, codigo: str, owner_key: str, abierto: bool) -> dict:
     g.abierto = bool(abierto)
     db.commit()
     return _dict(db, g, owner_key)
+
+# ── Lo que se puede HACER dentro del grupo ────────────────────────────────────────────
+# El grupo era solo una lista de integrantes: nada de la plataforma colgaba de él. Estas
+# funciones son el enganche para que el equipo tenga vida propia (chat, sala, meta).
+
+def es_miembro(db: Session, codigo: str, owner_key: str) -> PandGrupo:
+    """Devuelve el grupo si quien pregunta pertenece a él; si no, corta.
+
+    Es la guarda de TODO lo de adentro: tener el código (o el QR) alcanza para PEDIR
+    entrar, no para leer lo que el grupo conversa.
+    """
+    g = _grupo(db, codigo)
+    m = db.query(PandGrupoMiembro).filter(
+        PandGrupoMiembro.grupo_id == g.id, PandGrupoMiembro.owner_key == owner_key).first()
+    if not m:
+        raise conflict("No perteneces a ese grupo.")
+    return g
+
+
+def scope_chat(codigo: str) -> str:
+    """Clave de conversación del grupo, distinta de la del curso.
+
+    El chat guarda su ámbito en una sola columna (`curso`): el del curso usa el id del
+    curso y el del grupo usa 'g:<codigo>'. Así el mismo motor —y la misma poda de 7
+    días— sirve para los dos sin duplicar tablas ni consultas.
+    """
+    return "g:" + str(codigo or "").strip().upper()
+
+
+def listar_del_curso(db: Session, curso: str) -> dict:
+    """Los grupos de un curso, para que el DOCENTE vea cómo se organizó su clase.
+
+    Solo la composición (quién con quién), nunca lo que conversan dentro.
+    """
+    filas = db.query(PandGrupo).filter(PandGrupo.curso == curso).order_by(
+        PandGrupo.created_at.desc()).all()
+    grupos = []
+    for g in filas:
+        ms = db.query(PandGrupoMiembro).filter(PandGrupoMiembro.grupo_id == g.id).order_by(
+            PandGrupoMiembro.created_at.asc()).all()
+        grupos.append({"codigo": g.codigo, "nombre": g.nombre, "abierto": bool(g.abierto),
+                       "creado_at": g.created_at.isoformat() if g.created_at else None,
+                       "n_miembros": len(ms),
+                       "integrantes": [(m.nombre or "Sin nombre") for m in ms]})
+    en_grupo = {m.owner_key for g in filas for m in
+                db.query(PandGrupoMiembro).filter(PandGrupoMiembro.grupo_id == g.id).all()}
+    return {"ok": True, "grupos": grupos,
+            "resumen": {"n_grupos": len(grupos), "n_estudiantes_en_grupo": len(en_grupo)}}

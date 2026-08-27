@@ -55,6 +55,7 @@ class GoalContribution(Base):
     goal_id: Mapped[str] = mapped_column(String(40), index=True)
     pseudo_id: Mapped[str] = mapped_column(String(80), index=True)
     aporte: Mapped[int] = mapped_column(Integer, default=0)
+    nombre: Mapped[str | None] = mapped_column(String(80), nullable=True)   # quién aportó (un grupo de amigos no lee pseudo_ids)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

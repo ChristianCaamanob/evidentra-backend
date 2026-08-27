@@ -267,6 +267,89 @@ def pandilla_mis_grupos(codigo: str, payload: dict, db: Session = Depends(get_db
     return pg.mis_grupos(db, codigo, ow)
 
 
+# ── Vida DENTRO del grupo: chat propio, sala de estudio y meta compartida ─────────────
+# Todas exigen ser MIEMBRO: tener el código alcanza para pedir entrar, no para leer lo que
+# el equipo conversa.
+@router.post("/silabo/{codigo}/pandilla/grupo/{grupo}/chat")
+@limit("40/minute")
+def pandilla_grupo_chat_enviar(codigo: str, grupo: str, request: Request, payload: dict,
+                               db: Session = Depends(get_db)):
+    from app.services import pand_grupo_service as pg
+    from app.services import pand_chat_service as cs
+    payload = payload or {}
+    ow, nombre = _pg_ident(payload.get("token"), codigo)
+    pg.es_miembro(db, grupo, ow)
+    return cs.enviar(db, ow, pg.scope_chat(grupo), nombre, payload.get("char"),
+                     payload.get("texto"))
+
+
+@router.post("/silabo/{codigo}/pandilla/grupo/{grupo}/chat/feed")
+def pandilla_grupo_chat_feed(codigo: str, grupo: str, payload: dict,
+                             db: Session = Depends(get_db)):
+    from app.services import pand_grupo_service as pg
+    from app.services import pand_chat_service as cs
+    payload = payload or {}
+    ow, _n = _pg_ident(payload.get("token"), codigo)
+    pg.es_miembro(db, grupo, ow)
+    return cs.mensajes(db, ow, pg.scope_chat(grupo))
+
+
+@router.post("/silabo/{codigo}/pandilla/grupo/{grupo}/sala")
+@limit("12/minute")
+def pandilla_grupo_sala(codigo: str, grupo: str, request: Request, payload: dict,
+                        db: Session = Depends(get_db)):
+    """Abre una sala de estudio del grupo y deja su código en el chat del equipo.
+
+    Antes había que crear la sala aparte y pasarse OTRO código por fuera; ahora el aviso
+    queda donde el grupo ya conversa.
+    """
+    from app.services import pand_grupo_service as pg
+    from app.services import sala_estudio_service as salas
+    from app.services import pand_chat_service as cs
+    payload = payload or {}
+    ow, nombre = _pg_ident(payload.get("token"), codigo)
+    g = pg.es_miembro(db, grupo, ow)
+    sala = salas.crear_sala(db, codigo, f"Sala de {g.nombre}", nombre,
+                            payload.get("device_id"), payload.get("char"))
+    cod_sala = sala.get("codigo") if isinstance(sala, dict) else getattr(sala, "codigo", None)
+    if cod_sala:
+        try:
+            cs.enviar(db, ow, pg.scope_chat(grupo), nombre, payload.get("char"),
+                      f"Abrí una sala de estudio del grupo. Código: {cod_sala}")
+        except Exception:  # noqa: BLE001  — el aviso es un extra, no debe tumbar la sala
+            pass
+    return {"ok": True, "sala": sala}
+
+
+@router.post("/silabo/{codigo}/pandilla/grupo/{grupo}/meta")
+def pandilla_grupo_meta(codigo: str, grupo: str, payload: dict, db: Session = Depends(get_db)):
+    """Meta compartida del equipo (crear con `titulo`, o consultar sin él)."""
+    from app.services import pand_grupo_service as pg
+    from app.services import pand_grupo_meta_service as pm
+    payload = payload or {}
+    ow, nombre = _pg_ident(payload.get("token"), codigo)
+    pg.es_miembro(db, grupo, ow)
+    if payload.get("titulo"):
+        return pm.crear(db, grupo, ow, payload.get("titulo"), payload.get("meta_n") or 0)
+    if payload.get("aporte") is not None:
+        return pm.aportar(db, grupo, ow, nombre, payload.get("aporte"))
+    return pm.ver(db, grupo, ow)
+
+
+@router.get("/courses/{course_id}/pandilla/grupos", dependencies=[Depends(req_profesor)])
+def curso_pandilla_grupos(course_id: UUID, db: Session = Depends(get_db)):
+    """Cómo se organizó la clase: qué grupos se formaron y quién está en cada uno.
+
+    Solo la composición; lo que el equipo conversa dentro NO se expone al docente.
+    """
+    from app.services import pand_grupo_service as pg
+    a = sil.agente_de_curso(db, course_id)
+    if not a:
+        return {"ok": True, "grupos": [], "resumen": {"n_grupos": 0, "n_estudiantes_en_grupo": 0},
+                "sin_agente": True}
+    return pg.listar_del_curso(db, a.codigo)
+
+
 @router.post("/silabo/{codigo}/pandilla/ubicacion")
 @limit("40/minute")
 def pandilla_ubicacion_compartir(codigo: str, request: Request, payload: dict, db: Session = Depends(get_db)):

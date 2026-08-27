@@ -540,6 +540,11 @@ _COLUMNAS_ADITIVAS = {
     "students": {
         "matricula": "VARCHAR(80)",
     },
+    # El aporte a una meta guardaba solo el pseudo_id: en un grupo de amigos hay que
+    # poder ver QUIÉN aportó, no un identificador.
+    "pandilla_goal_contribution": {
+        "nombre": "VARCHAR(80)",
+    },
     "pandilla_ubicaciones": {
         "owner_key": "VARCHAR(80)",
     },

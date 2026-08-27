@@ -154,3 +154,105 @@ def test_solo_el_creador_cierra_el_grupo(ent):
     r = c.post(f"{API}/silabo/{cod}/pandilla/grupo/{g['codigo']}/unirse",
                json={"token": tok("33333333-3")})
     assert r.status_code == 409, "el grupo cerrado siguió aceptando gente"
+
+
+# ── Vida DENTRO del grupo: chat propio, sala y meta compartida ────────────────────────
+# El grupo era solo una lista de integrantes: nada colgaba de él. El CEO lo preguntó
+# directo («¿qué permite hacer dentro del grupo?») y la respuesta honesta era: nada.
+
+def _grupo_con_dos(ent):
+    c, cod, tok = ent["c"], ent["cod"], ent["token"]
+    t1, t2 = tok("11111111-1"), tok("22222222-2")
+    g = c.post(f"{API}/silabo/{cod}/pandilla/grupo",
+               json={"token": t1, "nombre": "Las Matronas"}).json()
+    c.post(f"{API}/silabo/{cod}/pandilla/grupo/{g['codigo']}/unirse", json={"token": t2})
+    return g["codigo"], t1, t2
+
+
+def test_el_chat_del_grupo_es_solo_del_grupo(ent):
+    c, cod = ent["c"], ent["cod"]
+    gcod, t1, t2 = _grupo_con_dos(ent)
+    r = c.post(f"{API}/silabo/{cod}/pandilla/grupo/{gcod}/chat",
+               json={"token": t1, "texto": "¿Nos juntamos a las 6?"})
+    assert r.status_code == 200, r.text
+    feed = c.post(f"{API}/silabo/{cod}/pandilla/grupo/{gcod}/chat/feed",
+                  json={"token": t2}).json()
+    msgs = feed["mensajes"]
+    assert len(msgs) == 1 and msgs[0]["texto"] == "¿Nos juntamos a las 6?"
+    assert msgs[0]["mio"] is False, "para el segundo alumno el mensaje es ajeno"
+    assert msgs[0]["nombre"] == "Ana Pérez"
+
+
+def test_quien_no_es_del_grupo_no_lee_el_chat(ent):
+    """Tener el código alcanza para PEDIR entrar, no para leer lo que el equipo conversa."""
+    c, cod, tok = ent["c"], ent["cod"], ent["token"]
+    gcod, t1, _t2 = _grupo_con_dos(ent)
+    c.post(f"{API}/silabo/{cod}/pandilla/grupo/{gcod}/chat", json={"token": t1, "texto": "secreto"})
+    ajeno = tok("33333333-3")                      # está en el curso, pero no en el grupo
+    r = c.post(f"{API}/silabo/{cod}/pandilla/grupo/{gcod}/chat/feed", json={"token": ajeno})
+    assert r.status_code == 409, f"leyó el chat sin ser miembro: {r.text[:150]}"
+    r = c.post(f"{API}/silabo/{cod}/pandilla/grupo/{gcod}/chat",
+               json={"token": ajeno, "texto": "hola"})
+    assert r.status_code == 409, "escribió en un grupo ajeno"
+
+
+def test_el_chat_del_grupo_no_se_mezcla_con_el_del_curso(ent):
+    c, cod = ent["c"], ent["cod"]
+    gcod, t1, _ = _grupo_con_dos(ent)
+    c.post(f"{API}/silabo/{cod}/pandilla/grupo/{gcod}/chat", json={"token": t1, "texto": "del grupo"})
+    # el chat del curso vive en otro ámbito
+    curso_feed = c.get(f"{API}/alumno/pandilla/chat", params={"membresia_token": t1}).json()
+    textos = [m["texto"] for m in curso_feed.get("mensajes", [])]
+    assert "del grupo" not in textos, "el mensaje privado del grupo se filtró al curso entero"
+
+
+def test_abrir_sala_de_estudio_avisa_en_el_chat_del_grupo(ent):
+    c, cod = ent["c"], ent["cod"]
+    gcod, t1, t2 = _grupo_con_dos(ent)
+    r = c.post(f"{API}/silabo/{cod}/pandilla/grupo/{gcod}/sala",
+               json={"token": t1, "device_id": "dev-ana"})
+    assert r.status_code == 200, r.text
+    sala = r.json()["sala"]
+    assert sala.get("codigo"), sala
+    feed = c.post(f"{API}/silabo/{cod}/pandilla/grupo/{gcod}/chat/feed",
+                  json={"token": t2}).json()["mensajes"]
+    assert any(sala["codigo"] in m["texto"] for m in feed), \
+        "el código de la sala no llegó al chat: habría que pasarlo por fuera"
+
+
+def test_meta_compartida_crear_y_aportar(ent):
+    c, cod = ent["c"], ent["cod"]
+    gcod, t1, t2 = _grupo_con_dos(ent)
+    vacia = c.post(f"{API}/silabo/{cod}/pandilla/grupo/{gcod}/meta", json={"token": t1}).json()
+    assert vacia["meta"] is None
+
+    m = c.post(f"{API}/silabo/{cod}/pandilla/grupo/{gcod}/meta",
+               json={"token": t1, "titulo": "Repasar parto normal"}).json()
+    assert m["meta"]["titulo"] == "Repasar parto normal"
+
+    d = c.post(f"{API}/silabo/{cod}/pandilla/grupo/{gcod}/meta",
+               json={"token": t2, "aporte": 2}).json()
+    assert d["meta"]["progreso"] == 2
+    ap = d["meta"]["aportes"][0]
+    assert ap["nombre"] == "Luis Pérez", "el grupo debe ver QUIÉN aportó, no un pseudo_id"
+    assert ap["soy_yo"] is True and ap["cantidad"] == 2
+
+    # volver a aportar SUMA al propio (hay un aporte por persona y meta)
+    d = c.post(f"{API}/silabo/{cod}/pandilla/grupo/{gcod}/meta",
+               json={"token": t2, "aporte": 3}).json()
+    assert len(d["meta"]["aportes"]) == 1 and d["meta"]["progreso"] == 5
+    assert d["meta"]["completado"] is True, "llegó a la meta por defecto (5)"
+
+
+def test_el_docente_ve_como_se_organizo_su_clase(ent):
+    c, cod, cid = ent["c"], ent["cod"], ent["cid"]
+    gcod, _t1, _t2 = _grupo_con_dos(ent)
+    r = c.get(f"{API}/courses/{cid}/pandilla/grupos")
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["resumen"]["n_grupos"] == 1
+    assert d["resumen"]["n_estudiantes_en_grupo"] == 2
+    g = d["grupos"][0]
+    assert g["codigo"] == gcod and sorted(g["integrantes"]) == ["Ana Pérez", "Luis Pérez"]
+    # y NUNCA lo que conversan dentro
+    assert "mensajes" not in g and "chat" not in str(d).lower()
