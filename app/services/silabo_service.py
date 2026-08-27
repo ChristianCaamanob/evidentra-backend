@@ -773,6 +773,20 @@ _META_ESTUDIO_RE = re.compile(
     r"\b(estudiar|estudio|repasar|repaso|prepararme|preparar|memorizar|mnemot|"
     r"plan de estudio|estrategi|t[eé]cnica|priorizar|organizar (mi|el) (tiempo|estudio)|"
     r"por d[oó]nde (empiezo|parto|comienzo)|c[oó]mo me organiz)", re.I)
+def _es_falla_de_servicio(e) -> bool:
+    """¿El fallo fue del MOTOR (clave, red, cuota) y no de la pregunta?
+
+    Distinguirlo importa: si el servicio está caído, decirle al estudiante que reformule
+    lo manda a repetir para siempre una pregunta que estaba bien, y registrar el intento
+    como 'fuera_corpus' le miente al docente sobre qué no cubre su sílabo.
+    """
+    m = str(e or "").lower()
+    señales = ("authentication_error", "api key", "401", "403", "unauthorized",
+               "rate_limit", "429", "overloaded", "529", "connection", "timeout",
+               "temporarily unavailable", "service unavailable", "503")
+    return any(x in m for x in señales)
+
+
 def _es_meta_estudio(pregunta: str) -> bool:
     return bool(_META_ESTUDIO_RE.search(pregunta or ""))
 _FALLBACK_ESTUDIO = (
@@ -883,8 +897,15 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, m
             return ("conceptual", _FALLBACK_ESTUDIO, "contenido", "baja", False, None, "estrategia de estudio", "general",
                     _evidencia(recomendacion="Divide por unidades, prioriza por ponderación y repasa con autoevaluación.",
                                fuente="general", certeza_sug="preliminar"))
-        return ("fuera_corpus", "Tu consulta necesita a tu docente; se la llevé y verás aquí su respuesta.",
-                "otro", "media", True, None, None, "ninguna", _evidencia(necesita=True, fuente="ninguna"))
+        # Sin clave configurada el motor no existe: no es que la consulta exceda el sílabo.
+        # Marcarla 'fuera_corpus' y escalarla llenaba la bandeja del docente de preguntas que
+        # Runi nunca llegó a intentar, y le mentía sobre qué no cubre su material.
+        return ("servicio_caido",
+                "Ahora mismo no puedo responder: mi conexión con el motor de respuestas está "
+                "caída. No es tu pregunta — vuelve a intentarlo en un rato.",
+                "otro", "baja", False, None, None, "ninguna",
+                _evidencia(decision="Servicio de IA no configurado.", fuente="ninguna",
+                           certeza_sug="insuficiente"))
     # Modo pedagógico (config del docente): guiado | mixto | directo | cerrado.
     modo = str((a.config or {}).get("modo_pedagogico") or "directo").lower()
     if modo not in ("guiado", "mixto", "directo", "cerrado"):
@@ -1047,6 +1068,17 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, m
                 cat, urg, necesita, cita, tema, fuente, ev)
     except Exception as e:  # noqa: BLE001
         logger.warning("silabo _clasificar_y_responder falló: %s", str(e)[:150])
+        # Si el MOTOR está caído (clave rechazada, red, cuota), no es que la pregunta no se
+        # pueda responder: es que no hay con qué responderla. Marcarlo 'fuera_corpus' era
+        # doblemente dañino — le decía al estudiante que reformulara una pregunta perfecta, y
+        # le ensuciaba al docente el mapa de vacíos con temas que Runi nunca llegó a intentar.
+        if _es_falla_de_servicio(e):
+            return ("servicio_caido",
+                    "Ahora mismo no puedo responder: mi conexión con el motor de respuestas está "
+                    "caída. No es tu pregunta — vuelve a intentarlo en un rato.",
+                    "otro", "baja", False, None, None, "ninguna",
+                    _evidencia(decision="Servicio de IA no disponible.", fuente="ninguna",
+                               certeza_sug="insuficiente"))
         # Fallback INTELIGENTE: meta-estudio se responde igual (nunca se escala por un fallo del modelo);
         # solo lo genuinamente no resoluble cae al docente.
         if _es_meta_estudio(pregunta):
