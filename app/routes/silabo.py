@@ -186,6 +186,87 @@ def pandilla_passkey_verificar(codigo: str, request: Request, payload: dict, db:
                                     request.headers.get("origin"))
 
 
+# ── Grupos de la Pandilla (los forman los propios alumnos, se entra escaneando un QR) ──
+def _pg_ident(token: str, codigo_curso: str):
+    """Quién eres y de qué curso, a partir del token que ya emite la Pandilla al identificarte.
+
+    No se acepta un owner_key por el cuerpo: eso dejaría entrar a cualquiera diciendo ser otro.
+    """
+    from app.services import pandilla_service as pand
+    ow, _cid, nombre = pand._tok_ok(token)
+    return ow, nombre
+
+
+@router.post("/silabo/{codigo}/pandilla/grupo")
+@limit("20/minute")
+def pandilla_grupo_crear(codigo: str, request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import pand_grupo_service as pg
+    payload = payload or {}
+    ow, nombre = _pg_ident(payload.get("token"), codigo)
+    g = pg.crear(db, codigo, ow, nombre, nombre=payload.get("nombre", ""),
+                 char=payload.get("char"), emoji=payload.get("emoji"))
+    return _pg_con_qr(g, request)
+
+
+def _pg_con_qr(g: dict, request: Request) -> dict:
+    """Añade el enlace de unión y su QR: el compañero solo tiene que apuntar la cámara."""
+    from app.services import en_vivo_service as ev
+    base = (settings.public_app_url or request.headers.get("origin") or "").rstrip("/")
+    ruta = f"/app.html?grupo={g['codigo']}"
+    g["join_url"] = (base + ruta) if base else ruta
+    g["qr"] = ev.qr_data_url(g["join_url"] if base else g["codigo"])
+    return g
+
+
+@router.post("/silabo/{codigo}/pandilla/grupo/{grupo}/unirse")
+@limit("30/minute")
+def pandilla_grupo_unirse(codigo: str, grupo: str, request: Request, payload: dict,
+                          db: Session = Depends(get_db)):
+    from app.services import pand_grupo_service as pg
+    payload = payload or {}
+    ow, nombre = _pg_ident(payload.get("token"), codigo)
+    g = pg.unirse(db, grupo, ow, nombre, curso=codigo, char=payload.get("char"))
+    return _pg_con_qr(g, request)
+
+
+@router.get("/silabo/{codigo}/pandilla/grupo/{grupo}")
+def pandilla_grupo_ver(codigo: str, grupo: str, request: Request, token: str = "",
+                       db: Session = Depends(get_db)):
+    from app.services import pand_grupo_service as pg
+    ow = None
+    if token:
+        try:
+            ow, _n = _pg_ident(token, codigo)
+        except Exception:  # noqa: BLE001  — mirar el grupo sin identificarse es válido
+            ow = None
+    return _pg_con_qr(pg.ver(db, grupo, ow), request)
+
+
+@router.post("/silabo/{codigo}/pandilla/grupo/{grupo}/salir")
+def pandilla_grupo_salir(codigo: str, grupo: str, payload: dict, db: Session = Depends(get_db)):
+    from app.services import pand_grupo_service as pg
+    payload = payload or {}
+    ow, _n = _pg_ident(payload.get("token"), codigo)
+    return pg.salir(db, grupo, ow)
+
+
+@router.post("/silabo/{codigo}/pandilla/grupo/{grupo}/abierto")
+def pandilla_grupo_abierto(codigo: str, grupo: str, request: Request, payload: dict,
+                           db: Session = Depends(get_db)):
+    from app.services import pand_grupo_service as pg
+    payload = payload or {}
+    ow, _n = _pg_ident(payload.get("token"), codigo)
+    return _pg_con_qr(pg.cerrar(db, grupo, ow, bool(payload.get("abierto", True))), request)
+
+
+@router.post("/silabo/{codigo}/pandilla/mis-grupos")
+def pandilla_mis_grupos(codigo: str, payload: dict, db: Session = Depends(get_db)):
+    from app.services import pand_grupo_service as pg
+    payload = payload or {}
+    ow, _n = _pg_ident((payload or {}).get("token"), codigo)
+    return pg.mis_grupos(db, codigo, ow)
+
+
 @router.post("/silabo/{codigo}/pandilla/ubicacion")
 @limit("40/minute")
 def pandilla_ubicacion_compartir(codigo: str, request: Request, payload: dict, db: Session = Depends(get_db)):
