@@ -545,6 +545,14 @@ _COLUMNAS_ADITIVAS = {
     "pandilla_goal_contribution": {
         "nombre": "VARCHAR(80)",
     },
+    # Un aviso suele venir con algo que mirar: enlace o archivo pequeño.
+    "anuncios_curso": {
+        "url": "TEXT",
+        "archivo_nombre": "VARCHAR(200)",
+        "archivo_mime": "VARCHAR(100)",
+        "archivo_datos": "TEXT",
+        "tamano": "INTEGER",
+    },
     "pandilla_ubicaciones": {
         "owner_key": "VARCHAR(80)",
     },

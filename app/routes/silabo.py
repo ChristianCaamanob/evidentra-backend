@@ -52,6 +52,19 @@ def guardar_agente(course_id: UUID, request: Request, payload: dict, db: Session
     return {**sil._agente_dict(a), "join_url": enlace, "qr": _qr(enlace if base else a.codigo)}
 
 
+@router.post("/courses/{course_id}/silabo/ocr", dependencies=[Depends(req_profesor)])
+@limit("10/minute")
+def silabo_ocr(course_id: UUID, request: Request, payload: dict, db: Session = Depends(get_db)):
+    """Transcribe un sílabo ESCANEADO (páginas ya rasterizadas en el cliente) a texto.
+
+    Un PDF de imagen no tiene texto que extraer: el extractor del navegador devuelve vacío
+    y el docente se queda sin poder cargar su programa.
+    """
+    from app.services import silabo_ocr_service as ocr
+    payload = payload or {}
+    return ocr.transcribir(payload.get("imagenes"))
+
+
 @router.get("/courses/{course_id}/silabo", dependencies=[Depends(req_profesor)])
 def ver_agente(course_id: UUID, request: Request, solo_pendientes: bool = False,
                db: Session = Depends(get_db)):
@@ -705,6 +718,21 @@ def anuncio_crear(request: Request, course_id: UUID, payload: dict,
 def anuncio_listar_docente(course_id: UUID, db: Session = Depends(get_db)):
     from app.services import anuncio_service as ans
     return ans.listar_por_course(db, course_id)
+
+
+@router.get("/anuncios/{anuncio_id}/archivo")
+def anuncio_archivo(anuncio_id: UUID, db: Session = Depends(get_db)):
+    """Sirve el adjunto de un aviso. Público como el aviso mismo: el alumno lo abre desde
+    su bandeja sin cuenta, igual que el material del curso."""
+    from fastapi import Response
+    from app.services import anuncio_service as ans
+    r = ans.archivo(db, anuncio_id)
+    if not r:
+        from app.core.errors import not_found
+        raise not_found("Ese aviso no tiene archivo adjunto.")
+    data, mime, nombre = r
+    return Response(content=data, media_type=mime,
+                    headers={"Content-Disposition": f'inline; filename="{nombre}"'})
 
 
 @router.get("/silabo/{codigo}/anuncios")
