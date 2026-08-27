@@ -333,8 +333,13 @@ def estado_sesion(db, codigo) -> dict:
     filas = []
     for m in nomina:
         mk = marcas.get(m.id)
+        # `presente` NO puede ser "existe una marca": el override del docente por AUSENTE
+        # también crea una fila (con estado='ausente'), así que marcar a alguien ausente lo
+        # dejaba presente en el panel, en el contador y en el informe exportado.
+        from app.models.asistencia import MARCA_AUSENTE
+        presente = bool(mk) and mk.estado != MARCA_AUSENTE
         filas.append({"matricula_id": str(m.id), "nombre": m.nombre, "seccion": m.seccion,
-                      "presente": bool(mk), "estado": (mk.estado if mk else None),
+                      "presente": presente, "estado": (mk.estado if mk else None),
                       "anomalias": (mk.anomalias if mk else None),
                       "hora": (mk.marcada_at.isoformat() if mk and mk.marcada_at else None)})
     presentes = sum(1 for f in filas if f["presente"])
