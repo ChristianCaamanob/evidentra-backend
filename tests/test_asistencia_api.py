@@ -156,5 +156,7 @@ def test_fuera_de_ventana_rechaza(entorno):
     # y rescaneaba un código que nunca iba a servir.
     assert r.status_code == 409
     det = r.json()["detail"].lower()
-    assert "abierta de" in det and "utc" in det, det
+    assert "abre de" in det and "utc" in det, det
     assert "venció" not in det, "no debe confundirse con un QR viejo"
+    # y viaja el bloque ISO con el que la app pinta la ventana en la hora LOCAL del alumno
+    assert "|ventana|" in det, det
