@@ -22,6 +22,12 @@ def admin_social(con_imagen: bool = False, db: Session = Depends(get_db), admin:
     return acs.social(db, getattr(admin, "email", "") or "", con_imagen=con_imagen)
 
 
+@router.get("/sesiones")
+def admin_sesiones(db: Session = Depends(get_db), admin: Teacher = Depends(req_creador)):
+    """Qué sesiones de grupo están abiertas AHORA en toda la plataforma (los 4 tipos)."""
+    return acs.sesiones(db, getattr(admin, "email", "") or "")
+
+
 @router.get("/reuniones")
 def admin_reuniones(db: Session = Depends(get_db), admin: Teacher = Depends(req_creador)):
     return acs.reuniones(db, getattr(admin, "email", "") or "")

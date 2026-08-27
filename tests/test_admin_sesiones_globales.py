@@ -1,0 +1,133 @@
+"""El CEO debe poder ver QUÉ sesiones de grupo están abiertas en toda la plataforma.
+
+Antes del piloto no existía: cada tipo se listaba solo por su código o por su evaluación, y
+las salas de estudio que abren los propios alumnos no las listaba NADIE — existían y eran
+invisibles para cualquier rol. Solo lectura, coherente con el modo fantasma de la consola.
+"""
+from __future__ import annotations
+
+import importlib
+import pkgutil
+import uuid
+from datetime import datetime, timedelta, timezone
+
+import app.models as _M
+for _m in pkgutil.iter_modules(_M.__path__):
+    importlib.import_module("app.models." + _m.name)
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.main import app
+from app.api.deps import get_db, usuario_actual
+from app.models.base import Base
+from app.models.course import Course
+from app.models.asistencia import SesionAsistencia
+
+API = "/api/v1"
+_CEO = type("U", (), {"rol": "creador", "id": "ceo-1", "email": "ceo@evalys.cl"})()
+_PROFE = type("U", (), {"rol": "profesor", "id": "p-1", "email": "profe@evalys.cl"})()
+
+
+@pytest.fixture()
+def ent():
+    eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(eng)
+    TS = sessionmaker(bind=eng)
+
+    def _db():
+        d = TS()
+        try:
+            yield d
+        finally:
+            d.close()
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[usuario_actual] = lambda: _CEO
+    yield {"c": TestClient(app), "eng": eng}
+    app.dependency_overrides.clear()
+
+
+def _curso(eng, nombre="Obstetricia", code="OBS-1"):
+    with Session(eng) as s:
+        c = Course(name=nombre, code=code, grading_scale="chile_1_7", passing_threshold=60.0)
+        s.add(c); s.commit(); s.refresh(c)
+        return str(c.id)
+
+
+def test_sin_nada_abierto_responde_vacio_pero_bien_formado(ent):
+    r = ent["c"].get(f"{API}/admin/consola/sesiones")
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["ok"] and d["resumen"]["abiertas"] == 0
+    for k in ("salas_estudio", "en_vivo", "asistencia", "grupos_trabajo"):
+        assert d[k] == [], f"{k} debía venir vacío"
+
+
+def test_ve_la_sala_de_estudio_que_abre_un_alumno(ent):
+    c, eng = ent["c"], ent["eng"]
+    cid = _curso(eng)
+    c.post(f"{API}/courses/{cid}/silabo", json={"contexto": "x" * 120, "activo": True, "config": {}})
+    cod_sil = c.get(f"{API}/courses/{cid}/silabo").json()["agente"]["codigo"]
+
+    sala = c.post(f"{API}/salas", json={"silabo": cod_sil, "titulo": "Repaso de parto",
+                                        "alias": "Ana", "device_id": "dev-ana"})
+    assert sala.status_code in (200, 201), sala.text
+    cod_sala = sala.json()["codigo"]
+
+    d = c.get(f"{API}/admin/consola/sesiones").json()
+    assert d["resumen"]["salas_estudio"] == 1
+    una = d["salas_estudio"][0]
+    assert una["codigo"] == cod_sala
+    assert una["curso"] == "Obstetricia", "debe decir de qué curso es"
+    assert una["abierta_por"] == "Ana", "debe decir quién la abrió"
+
+
+def test_ve_la_sesion_de_asistencia_abierta_con_presentes(ent):
+    c, eng = ent["c"], ent["eng"]
+    cid = _curso(eng, "Fisiología", "FIS-1")
+    ahora = datetime.now(timezone.utc)
+    with Session(eng) as s:
+        ses = SesionAsistencia(course_id=uuid.UUID(cid), abierta_por="p-1", titulo="Clase 1",
+                               fecha=ahora.date().isoformat(), inicio=ahora - timedelta(minutes=5),
+                               fin=ahora + timedelta(hours=2), estado="abierta",
+                               codigo="ABC123", secreto="s3cr3t0")
+        s.add(ses); s.commit()
+
+    d = c.get(f"{API}/admin/consola/sesiones").json()
+    assert d["resumen"]["asistencia"] == 1
+    a = d["asistencia"][0]
+    assert a["codigo"] == "ABC123" and a["curso"] == "Fisiología"
+    assert a["presentes"] == 0, "aún nadie marcó"
+
+
+def test_una_sesion_cerrada_ya_no_aparece(ent):
+    c, eng = ent["c"], ent["eng"]
+    cid = _curso(eng, "Anatomía", "ANA-1")
+    ahora = datetime.now(timezone.utc)
+    with Session(eng) as s:
+        s.add(SesionAsistencia(course_id=uuid.UUID(cid), abierta_por="p-1", titulo="Ayer",
+                               fecha=ahora.date().isoformat(), inicio=ahora - timedelta(hours=3),
+                               fin=ahora - timedelta(hours=1), estado="cerrada",
+                               codigo="XYZ999", secreto="s"))
+        s.commit()
+    d = c.get(f"{API}/admin/consola/sesiones").json()
+    assert d["asistencia"] == [], "el panel es de sesiones ABIERTAS"
+
+
+def test_solo_el_ceo_entra(ent):
+    app.dependency_overrides[usuario_actual] = lambda: _PROFE
+    r = ent["c"].get(f"{API}/admin/consola/sesiones")
+    assert r.status_code == 403, f"un profesor no debe ver la consola: HTTP {r.status_code}"
+
+
+def test_la_lectura_queda_en_la_bitacora(ent):
+    c = ent["c"]
+    antes = len(c.get(f"{API}/admin/consola/accesos").json().get("accesos", []))
+    c.get(f"{API}/admin/consola/sesiones")
+    despues = c.get(f"{API}/admin/consola/accesos").json().get("accesos", [])
+    assert len(despues) > antes, "mirar sesiones debe dejar asiento (protege al CEO)"
+    assert any(a.get("recurso") == "sesiones" for a in despues), despues[:3]
