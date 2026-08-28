@@ -237,7 +237,7 @@ def sesiones(db: Session, admin_email: str) -> dict:
             "fallos": fallos}
 
 
-def chats(db: Session, admin_email: str, limite: int = 300) -> dict:
+def chats(db: Session, admin_email: str, limite: int = 300, grupo: str | None = None) -> dict:
     """Conversaciones de la Pandilla: las del curso y las de cada grupo.
 
     Decisión del CEO: «profesor solo tiene acceso a chat [de Runi]; administrador, acceso
@@ -251,8 +251,12 @@ def chats(db: Session, admin_email: str, limite: int = 300) -> dict:
     from app.models.course import Course
     from app.models.silabo import SilaboAgente
 
-    filas = (db.query(PandChat).order_by(PandChat.created_at.desc())
-             .limit(max(1, min(int(limite or 300), 1000))).all())
+    # Con `grupo` se pide UNA conversación (para abrirla desde el panel de sesiones): así no
+    # hay que traer las de toda la plataforma para leer la de un equipo.
+    q = db.query(PandChat)
+    if grupo:
+        q = q.filter(PandChat.curso == "g:" + str(grupo).strip().upper())
+    filas = q.order_by(PandChat.created_at.desc()).limit(max(1, min(int(limite or 300), 1000))).all()
 
     # Para poder DISTINGUIR una conversación de otra hacen falta los nombres reales. Antes
     # toda conversación de curso se titulaba igual ("Conversación del curso"), así que con
@@ -297,7 +301,8 @@ def chats(db: Session, admin_email: str, limite: int = 300) -> dict:
     convs = sorted(ambitos.values(),
                    key=lambda c: (0 if c["tipo"] == "grupo" else 1, -len(c["mensajes"])))
     _log(db, admin_email, "chats",
-         f"conversaciones={len(convs)} mensajes={sum(len(c['mensajes']) for c in convs)}")
+         (f"grupo={grupo} " if grupo else "")
+         + f"conversaciones={len(convs)} mensajes={sum(len(c['mensajes']) for c in convs)}")
     return {"ok": True, "conversaciones": convs,
             "resumen": {"n_conversaciones": len(convs),
                         "n_grupos": sum(1 for c in convs if c["tipo"] == "grupo"),

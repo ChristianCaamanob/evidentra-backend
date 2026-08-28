@@ -31,9 +31,13 @@ def admin_sesiones(db: Session = Depends(get_db), admin: Teacher = Depends(req_c
 
 
 @router.get("/chats")
-def admin_chats(limite: int = 300, db: Session = Depends(get_db), admin: Teacher = Depends(req_creador)):
-    """Conversaciones de la Pandilla: la del curso y la de cada grupo. Solo lectura."""
-    return acs.chats(db, getattr(admin, "email", "") or "", limite=limite)
+def admin_chats(limite: int = 300, grupo: str = "", db: Session = Depends(get_db),
+                admin: Teacher = Depends(req_creador)):
+    """Conversaciones de la Pandilla: la del curso y la de cada grupo. Solo lectura.
+
+    Con `grupo` devuelve solo la de ese equipo, para abrirla desde el panel de sesiones.
+    """
+    return acs.chats(db, getattr(admin, "email", "") or "", limite=limite, grupo=(grupo or None))
 
 
 @router.get("/momento/{momento_id}/imagen")

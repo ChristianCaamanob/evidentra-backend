@@ -257,3 +257,21 @@ def test_cada_conversacion_se_distingue_de_las_demas(ent):
     g = d["conversaciones"][0]
     assert g["curso"] == "Obstetricia", "el grupo debe decir de qué curso es"
     assert g["n_integrantes"] == 2
+
+
+def test_se_puede_pedir_el_chat_de_UN_grupo(ent):
+    """Para abrirlo desde el panel sin traer las conversaciones de toda la plataforma."""
+    c, eng = ent["c"], ent["eng"]
+    _cod, gcod = _alumno_con_grupo(c, eng)
+    d = c.get(f"{API}/admin/consola/chats", params={"grupo": gcod}).json()
+    assert len(d["conversaciones"]) == 1, d["resumen"]
+    conv = d["conversaciones"][0]
+    assert conv["codigo"] == gcod and conv["tipo"] == "grupo"
+    assert conv["mensajes"][0]["texto"] == "Nos juntamos a las 6"
+
+
+def test_pedir_un_grupo_sin_mensajes_no_falla(ent):
+    c, eng = ent["c"], ent["eng"]
+    _alumno_con_grupo(c, eng)
+    d = c.get(f"{API}/admin/consola/chats", params={"grupo": "NOEXISTE"}).json()
+    assert d["ok"] and d["conversaciones"] == []
