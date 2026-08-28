@@ -247,11 +247,21 @@ def chats(db: Session, admin_email: str, limite: int = 300) -> dict:
     Como toda la consola, esto es SOLO LECTURA y deja asiento en la bitácora.
     """
     from app.models.pand_chat import PandChat
-    from app.models.pand_grupo import PandGrupo
+    from app.models.pand_grupo import PandGrupo, PandGrupoMiembro
+    from app.models.course import Course
+    from app.models.silabo import SilaboAgente
 
     filas = (db.query(PandChat).order_by(PandChat.created_at.desc())
              .limit(max(1, min(int(limite or 300), 1000))).all())
-    nombres = {g.codigo: g.nombre for g in db.query(PandGrupo).all()}
+
+    # Para poder DISTINGUIR una conversación de otra hacen falta los nombres reales. Antes
+    # toda conversación de curso se titulaba igual ("Conversación del curso"), así que con
+    # varios cursos se veían como una lista plana e indistinguible.
+    cursos = {str(i): n for i, n in db.query(Course.id, Course.name).all()}
+    grupos = {g.codigo: g for g in db.query(PandGrupo).all()}
+    # El grupo guarda el código del sílabo; el sílabo sabe a qué curso pertenece.
+    curso_de_silabo = {a.codigo: cursos.get(str(a.course_id), a.nombre_curso)
+                       for a in db.query(SilaboAgente).all()}
 
     ambitos = {}
     for m in reversed(filas):                       # cronológico dentro de cada conversación
@@ -259,10 +269,22 @@ def chats(db: Session, admin_email: str, limite: int = 300) -> dict:
         if clave not in ambitos:
             es_grupo = clave.startswith("g:")
             cod = clave[2:] if es_grupo else None
+            if es_grupo:
+                g = grupos.get(cod)
+                titulo = (g.nombre if g else None) or ("Grupo " + cod)
+                curso_nom = curso_de_silabo.get(g.curso) if g else None
+                integrantes = g and db.query(PandGrupoMiembro).filter(
+                    PandGrupoMiembro.grupo_id == g.id).count() or 0
+            else:
+                titulo = cursos.get(clave) or "Curso"
+                curso_nom = titulo
+                integrantes = 0
             ambitos[clave] = {
                 "ambito": clave,
                 "tipo": "grupo" if es_grupo else "curso",
-                "titulo": (nombres.get(cod) or ("Grupo " + cod)) if es_grupo else "Conversación del curso",
+                "titulo": titulo,
+                "curso": curso_nom,
+                "n_integrantes": integrantes,
                 "codigo": cod,
                 "mensajes": [],
             }
@@ -270,7 +292,10 @@ def chats(db: Session, admin_email: str, limite: int = 300) -> dict:
             "nombre": m.nombre or "Estudiante", "char": m.char, "texto": m.texto,
             "created_at": _iso(m.created_at)})
 
-    convs = sorted(ambitos.values(), key=lambda c: len(c["mensajes"]), reverse=True)
+    # Los grupos primero: son lo que el CEO viene a mirar, y las conversaciones de curso
+    # (una por curso) quedan debajo.
+    convs = sorted(ambitos.values(),
+                   key=lambda c: (0 if c["tipo"] == "grupo" else 1, -len(c["mensajes"])))
     _log(db, admin_email, "chats",
          f"conversaciones={len(convs)} mensajes={sum(len(c['mensajes']) for c in convs)}")
     return {"ok": True, "conversaciones": convs,

@@ -227,3 +227,33 @@ def test_un_bloque_roto_no_tumba_el_panel(ent, monkeypatch):
     # y lo demás sigue respondiendo
     assert "salas_estudio" in d and "asistencia" in d
     assert real is acs.sesiones
+
+
+def test_cada_conversacion_se_distingue_de_las_demas(ent):
+    """Todas las de curso se titulaban igual: con varios cursos era una lista plana.
+
+    El CEO lo dijo así: «se ven chats, pero no se agrupan por grupo».
+    """
+    c, eng = ent["c"], ent["eng"]
+    _cod, gcod = _alumno_con_grupo(c, eng)          # deja un grupo con un mensaje
+
+    # y una conversación del CURSO, en el ámbito del curso (no del grupo)
+    import uuid as _u
+    from app.models.pand_chat import PandChat
+    cid = [x for x in c.get(f"{API}/courses/").json() if x["code"] == "OBS-PG"][0]["id"]
+    with Session(eng) as s:
+        s.add(PandChat(curso=cid, owner_key="rut:111111111", nombre="Ana Pérez",
+                       texto="hola a todo el curso"))
+        s.commit()
+
+    d = c.get(f"{API}/admin/consola/chats").json()
+    titulos = [x["titulo"] for x in d["conversaciones"]]
+    assert len(set(titulos)) == len(titulos), f"hay conversaciones indistinguibles: {titulos}"
+    assert "Obstetricia" in titulos, f"la del curso debe llevar su nombre: {titulos}"
+    assert "Las Matronas" in titulos, titulos
+
+    # el grupo va primero: es lo que se viene a mirar
+    assert d["conversaciones"][0]["tipo"] == "grupo", [x["tipo"] for x in d["conversaciones"]]
+    g = d["conversaciones"][0]
+    assert g["curso"] == "Obstetricia", "el grupo debe decir de qué curso es"
+    assert g["n_integrantes"] == 2
