@@ -323,7 +323,8 @@ def pandilla_grupo_sala(codigo: str, grupo: str, request: Request, payload: dict
     ow, nombre = _pg_ident(payload.get("token"), codigo)
     g = pg.es_miembro(db, grupo, ow)
     sala = salas.crear_sala(db, codigo, f"Sala de {g.nombre}", nombre,
-                            payload.get("device_id"), payload.get("char"))
+                            payload.get("device_id"), payload.get("char"),
+                            grupo_codigo=g.codigo)      # queda atada al grupo: solo sus integrantes
     cod_sala = sala.get("codigo") if isinstance(sala, dict) else getattr(sala, "codigo", None)
     if cod_sala:
         try:

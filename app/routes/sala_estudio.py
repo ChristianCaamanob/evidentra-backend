@@ -25,18 +25,21 @@ def crear(payload: dict, db: Session = Depends(get_db)):
 @router.post("/{codigo}/unirse")
 def unirse(codigo: str, payload: dict, db: Session = Depends(get_db)):
     payload = payload or {}
-    return salas.unirse(db, codigo, payload.get("alias"), payload.get("device_id"), payload.get("char"))
+    return salas.unirse(db, codigo, payload.get("alias"), payload.get("device_id"), payload.get("char"),
+                        token=payload.get("token"))
 
 
 @router.post("/{codigo}/postear")
 def postear(codigo: str, payload: dict, db: Session = Depends(get_db)):
     payload = payload or {}
-    return salas.postear(db, codigo, payload.get("alias"), payload.get("device_id"), payload.get("texto", ""), payload.get("char"))
+    return salas.postear(db, codigo, payload.get("alias"), payload.get("device_id"), payload.get("texto", ""),
+                         payload.get("char"), token=payload.get("token"))
 
 
 @router.get("/{codigo}")
-def estado(codigo: str, device_id: str = "", alias: str = "", db: Session = Depends(get_db)):
-    return salas.estado(db, codigo, device_id or None, alias or None)
+def estado(codigo: str, device_id: str = "", alias: str = "", token: str = "",
+           db: Session = Depends(get_db)):
+    return salas.estado(db, codigo, device_id or None, alias or None, token=token or None)
 
 
 @router.post("/{codigo}/cerrar")

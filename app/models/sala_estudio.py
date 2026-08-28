@@ -25,6 +25,9 @@ class SalaEstudio(UUIDMixin, TimestampMixin, Base):
     creador_alias: Mapped[str | None] = mapped_column(String(80), nullable=True)
     creador_device: Mapped[str | None] = mapped_column(String(64), nullable=True)   # owner-check: solo el creador cierra (salas legadas sin esto → abiertas a cerrar)
     activa: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
+    # Si la abrió un GRUPO de la Pandilla, solo sus integrantes entran: el código circula
+    # (queda en el chat del equipo) y sin esto bastaba tenerlo para colarse.
+    grupo_codigo: Mapped[str | None] = mapped_column(String(10), index=True, nullable=True)
     # {device_id: {alias, puntos, aportes, ultimo_ts}} — presencia + puntaje individual (nombre de trato, sin PII)
     participantes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # {puntos_grupo, temas:[...], hitos:[...]} — progreso conjunto

@@ -52,11 +52,13 @@ def _codigo(db: Session) -> str:
     return "".join(secrets.choice(_ALFA) for _ in range(8))
 
 
-def crear_sala(db: Session, codigo_silabo: str, titulo: str, alias: str | None, device_id: str | None, char: str | None = None) -> dict:
+def crear_sala(db: Session, codigo_silabo: str, titulo: str, alias: str | None, device_id: str | None,
+               char: str | None = None, grupo_codigo: str | None = None) -> dict:
     a = sil.agente_por_codigo(db, codigo_silabo)             # el curso al que pertenece la sala
     s = SalaEstudio(agente_id=a.id, codigo=_codigo(db),
                     titulo=(titulo or "Sala de estudio").strip()[:160] or "Sala de estudio",
                     creador_alias=(alias or None), creador_device=(device_id or None), activa=True,
+                    grupo_codigo=(str(grupo_codigo).strip().upper() if grupo_codigo else None),
                     participantes={}, meta={"puntos_grupo": 0, "temas": [], "hitos": []})
     db.add(s); db.flush()
     _tocar(s, device_id, alias, char)
@@ -67,8 +69,31 @@ def crear_sala(db: Session, codigo_silabo: str, titulo: str, alias: str | None, 
     return _sala_dict(s, a)
 
 
-def unirse(db: Session, codigo: str, alias: str | None, device_id: str | None, char: str | None = None) -> dict:
+def _exigir_miembro_si_es_de_grupo(db: Session, s, token: str | None) -> None:
+    """Una sala abierta por un grupo es PRIVADA del grupo.
+
+    Las salas normales siguen siendo abiertas (basta el código, que es su gracia). Pero la
+    del grupo se anuncia en el chat del equipo, y un código circula: sin esta comprobación,
+    cualquiera del curso que lo viera entraba a la sala de otras.
+    """
+    if not getattr(s, "grupo_codigo", None):
+        return
+    from app.core.errors import conflict
+    from app.services import pandilla_service as pand
+    from app.services import pand_grupo_service as pg
+    if not token:
+        raise conflict("Esta sala es de un grupo: entra desde tu grupo en la Pandilla.")
+    try:
+        ow, _cid, _n = pand._tok_ok(token)
+    except Exception:  # noqa: BLE001
+        raise conflict("Esta sala es de un grupo: vuelve a identificarte y entra desde tu grupo.")
+    pg.es_miembro(db, s.grupo_codigo, ow)      # lanza si no pertenece
+
+
+def unirse(db: Session, codigo: str, alias: str | None, device_id: str | None, char: str | None = None,
+           token: str | None = None) -> dict:
     s = _por_codigo(db, codigo)
+    _exigir_miembro_si_es_de_grupo(db, s, token)
     if not s.activa:
         raise conflict("Esta sala de estudio ya se cerró.")
     nuevo = not (s.participantes or {}).get(str(device_id or ""))
@@ -79,8 +104,10 @@ def unirse(db: Session, codigo: str, alias: str | None, device_id: str | None, c
     return _sala_dict(s, sil_agente(db, s), incluir_mensajes=True)
 
 
-def postear(db: Session, codigo: str, alias: str | None, device_id: str | None, texto: str, char: str | None = None) -> dict:
+def postear(db: Session, codigo: str, alias: str | None, device_id: str | None, texto: str,
+            char: str | None = None, token: str | None = None) -> dict:
     s = _por_codigo(db, codigo)
+    _exigir_miembro_si_es_de_grupo(db, s, token)
     if not s.activa:
         raise conflict("Esta sala de estudio ya se cerró.")
     texto = (texto or "").strip()
@@ -115,8 +142,10 @@ def postear(db: Session, codigo: str, alias: str | None, device_id: str | None, 
     return _sala_dict(s, a, incluir_mensajes=True)
 
 
-def estado(db: Session, codigo: str, device_id: str | None = None, alias: str | None = None) -> dict:
+def estado(db: Session, codigo: str, device_id: str | None = None, alias: str | None = None,
+           token: str | None = None) -> dict:
     s = _por_codigo(db, codigo)
+    _exigir_miembro_si_es_de_grupo(db, s, token)   # mirar también es entrar
     if device_id:
         _tocar(s, device_id, alias); flag_modified(s, "participantes"); db.commit(); db.refresh(s)
     return _sala_dict(s, sil_agente(db, s), incluir_mensajes=True)

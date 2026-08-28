@@ -534,6 +534,9 @@ _COLUMNAS_ADITIVAS = {
     "oral_exam_sesiones": {
         "vivo_token": "VARCHAR(40)",
     },
+    "salas_estudio": {
+        "grupo_codigo": "VARCHAR(10)",
+    },
     "sala_mensajes": {
         "char": "VARCHAR(24)",
     },
