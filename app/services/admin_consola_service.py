@@ -10,6 +10,9 @@ o retener diálogos indefinidamente es un módulo aparte (captura de datos nuevo
 from __future__ import annotations
 
 import datetime as _dt
+import logging
+
+_LOG_CONSOLA = logging.getLogger("evalys")
 
 from sqlalchemy.orm import Session
 
@@ -134,11 +137,29 @@ def sesiones(db: Session, admin_email: str) -> dict:
     from app.models.assessment import Assessment
     from app.models.silabo import SilaboAgente
 
+    # Cada bloque va aislado. Antes, si UNA tabla fallaba (p. ej. una columna que el modelo
+    # declara y el esquema desplegado no tiene), reventaba el panel entero con un 500 que
+    # pierde las cabeceras CORS: el CEO solo veía "Failed to fetch" y se quedaba sin
+    # supervisión durante el piloto. Ahora el resto sigue vivo y el fallo se REPORTA.
+    fallos = []
+
+    def _bloque(nombre, fn, por_defecto):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001
+            db.rollback()       # una consulta rota deja la sesión inutilizable para las siguientes
+            _LOG_CONSOLA.error("consola/sesiones · bloque %s falló: %s", nombre, e)
+            fallos.append({"bloque": nombre, "error": str(e)[:300]})
+            return por_defecto
+
     # ── 1. Salas de estudio (las abren los propios alumnos) ──
-    agentes = {a.id: a for a in db.query(SilaboAgente).all()}
-    n_msg = dict(db.query(SalaMensaje.sala_id, _func_count(db)).group_by(SalaMensaje.sala_id).all())
+    agentes = _bloque("agentes", lambda: {a.id: a for a in db.query(SilaboAgente).all()}, {})
+    n_msg = _bloque("mensajes_sala",
+                    lambda: dict(db.query(SalaMensaje.sala_id, _func_count(db))
+                                 .group_by(SalaMensaje.sala_id).all()), {})
     estudio = []
-    for s in db.query(SalaEstudio).filter(SalaEstudio.activa.is_(True)).all():
+    for s in _bloque("salas_estudio",
+                     lambda: db.query(SalaEstudio).filter(SalaEstudio.activa.is_(True)).all(), []):
         ag = agentes.get(s.agente_id)
         estudio.append({"codigo": s.codigo, "titulo": s.titulo,
                         "curso": (ag.nombre_curso if ag else None),
@@ -147,16 +168,22 @@ def sesiones(db: Session, admin_email: str) -> dict:
                         "mensajes": int(n_msg.get(s.id, 0))})
 
     # ── 2. Salas en vivo (las abre el docente sobre una evaluación) ──
-    asms = {str(a.id): a for a in db.query(Assessment).all()}
-    cursos = {c.id: c for c in db.query(Course).all()}
+    # Se piden solo las columnas necesarias: así una columna nueva del modelo que aún no
+    # exista en el esquema desplegado no tumba la consulta entera.
+    asms = _bloque("evaluaciones",
+                   lambda: {str(i): (n, cid) for i, n, cid in
+                            db.query(Assessment.id, Assessment.name, Assessment.course_id).all()}, {})
+    cursos = _bloque("cursos",
+                     lambda: {i: n for i, n in db.query(Course.id, Course.name).all()}, {})
     n_part = dict(db.query(ParticipanteVivo.sesion_id, _func_count(db))
                   .group_by(ParticipanteVivo.sesion_id).all())
     vivo = []
-    for s in db.query(SesionEnVivo).filter(SesionEnVivo.estado != "cerrada").all():
+    for s in _bloque("salas_en_vivo",
+                     lambda: db.query(SesionEnVivo).filter(SesionEnVivo.estado != "cerrada").all(), []):
         a = asms.get(str(s.assessment_id))
-        c = cursos.get(a.course_id) if a else None
+        c = cursos.get(a[1]) if a else None
         vivo.append({"codigo": s.codigo, "estado": s.estado,
-                     "evaluacion": (a.name if a else None), "curso": (c.name if c else None),
+                     "evaluacion": (a[0] if a else None), "curso": c,
                      "pregunta": s.pregunta_actual, "de": s.n_preguntas,
                      "participantes": int(n_part.get(s.id, 0)), "abierta_at": _iso(s.created_at)})
 
@@ -164,10 +191,11 @@ def sesiones(db: Session, admin_email: str) -> dict:
     n_marcas = dict(db.query(MarcaAsistencia.sesion_id, _func_count(db))
                     .group_by(MarcaAsistencia.sesion_id).all())
     asistencia = []
-    for s in db.query(SesionAsistencia).filter(SesionAsistencia.estado == "abierta").all():
+    for s in _bloque("asistencia",
+                     lambda: db.query(SesionAsistencia).filter(SesionAsistencia.estado == "abierta").all(), []):
         c = cursos.get(s.course_id)
         asistencia.append({"codigo": s.codigo, "titulo": s.titulo,
-                           "curso": (c.name if c else None), "fecha": s.fecha,
+                           "curso": c, "fecha": s.fecha,
                            "inicio": _iso(s.inicio), "fin": _iso(s.fin),
                            "presentes": int(n_marcas.get(s.id, 0))})
 
@@ -175,11 +203,11 @@ def sesiones(db: Session, admin_email: str) -> dict:
     n_int = dict(db.query(GrupoIntegrante.grupo_id, _func_count(db))
                  .group_by(GrupoIntegrante.grupo_id).all())
     grupos = []
-    for g in db.query(Grupo).all():
+    for g in _bloque("grupos_trabajo", lambda: db.query(Grupo).all(), []):
         a = asms.get(str(g.assessment_id))
-        c = cursos.get(a.course_id) if a else None
-        grupos.append({"nombre": g.nombre, "evaluacion": (a.name if a else None),
-                       "curso": (c.name if c else None),
+        c = cursos.get(a[1]) if a else None
+        grupos.append({"nombre": g.nombre, "evaluacion": (a[0] if a else None),
+                       "curso": c,
                        "integrantes": int(n_int.get(g.id, 0)), "creado_at": _iso(g.created_at)})
 
     # ── 5. Grupos de la Pandilla (los arman los propios alumnos) ──
@@ -187,7 +215,8 @@ def sesiones(db: Session, admin_email: str) -> dict:
     # grupos del DOCENTE (nota grupal) pero no los que forman los estudiantes entre ellos.
     from app.models.pand_grupo import PandGrupo, PandGrupoMiembro
     pandilla = []
-    for g in db.query(PandGrupo).order_by(PandGrupo.created_at.desc()).all():
+    for g in _bloque("grupos_pandilla",
+                     lambda: db.query(PandGrupo).order_by(PandGrupo.created_at.desc()).all(), []):
         ms = db.query(PandGrupoMiembro).filter(PandGrupoMiembro.grupo_id == g.id).order_by(
             PandGrupoMiembro.created_at.asc()).all()
         pandilla.append({"codigo": g.codigo, "nombre": g.nombre, "curso": g.curso,
@@ -204,7 +233,8 @@ def sesiones(db: Session, admin_email: str) -> dict:
                         "asistencia": len(asistencia), "grupos_trabajo": len(grupos),
                         "grupos_pandilla": len(pandilla)},
             "salas_estudio": estudio, "en_vivo": vivo,
-            "asistencia": asistencia, "grupos_trabajo": grupos, "grupos_pandilla": pandilla}
+            "asistencia": asistencia, "grupos_trabajo": grupos, "grupos_pandilla": pandilla,
+            "fallos": fallos}
 
 
 def chats(db: Session, admin_email: str, limite: int = 300) -> dict:

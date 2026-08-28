@@ -190,3 +190,40 @@ def test_leer_los_chats_deja_asiento_en_la_bitacora(ent):
     c.get(f"{API}/admin/consola/chats")
     accesos = c.get(f"{API}/admin/consola/accesos").json().get("accesos", [])
     assert any(a.get("recurso") == "chats" for a in accesos), accesos[:3]
+
+
+def test_un_bloque_roto_no_tumba_el_panel(ent, monkeypatch):
+    """Si UNA tabla falla, el CEO no puede quedarse sin supervisión entera.
+
+    Pasó de verdad durante el piloto: /sesiones devolvía 500, y un 500 pierde las cabeceras
+    CORS, así que el navegador solo mostraba "Failed to fetch" —sin código ni causa— y la
+    consola quedaba inservible justo cuando se la necesitaba.
+    """
+    from app.services import admin_consola_service as acs
+    from app.models.grupo import Grupo
+
+    real = acs.sesiones
+
+    class _QueryRota:
+        def __getattr__(self, _n):
+            raise RuntimeError("column assessments.bandas_moviles does not exist")
+
+    orig_query = None
+
+    def _query_falla(self, *a, **k):
+        if a and a[0] is Grupo:
+            raise RuntimeError("column grupos.algo does not exist")
+        return orig_query(self, *a, **k)
+
+    from sqlalchemy.orm import Session as _S
+    orig_query = _S.query
+    monkeypatch.setattr(_S, "query", _query_falla)
+
+    r = ent["c"].get(f"{API}/admin/consola/sesiones")
+    assert r.status_code == 200, "un bloque roto tumbó el panel entero"
+    d = r.json()
+    assert d["ok"] is True
+    assert any(f["bloque"] == "grupos_trabajo" for f in d.get("fallos", [])), d.get("fallos")
+    # y lo demás sigue respondiendo
+    assert "salas_estudio" in d and "asistencia" in d
+    assert real is acs.sesiones
