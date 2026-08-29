@@ -237,6 +237,10 @@ def estado(db: Session, pseudo_id: str) -> dict:
                 ya[mid] = rec
                 desbloqueada = True
                 nuevos.append(mid)
+                # La medalla es el logro; el cofre y los Lumis son el reconocimiento. Van DESPUÉS
+                # del recibo y nunca pueden tumbarlo (ver recompensa_service).
+                from app.services import recompensa_service as _rw
+                _rw.al_desbloquear_medalla(db, pseudo_id, mid, m["slug"])
             except Exception:  # noqa: BLE001
                 db.rollback()
                 desbloqueada = mid in ya

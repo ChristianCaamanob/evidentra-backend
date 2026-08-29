@@ -1,0 +1,492 @@
+{
+ "version": "1.0.0",
+ "source": "Runi_Reward_System-v1 (manifest.json + spec/REWARD_CATALOG.md + spec/accessory-anchors.json)",
+ "asset_base": "/runi-rewards/",
+ "nota_obligatoria": "Las recompensas no modifican notas ni evaluaciones.",
+ "chests": [
+  {
+   "id": "cofre-expedicion",
+   "name": "Cofre de expedición",
+   "rarity": "common",
+   "asset128": "assets/chests/png-128/cofre-expedicion.png",
+   "asset512": "assets/chests/png-512/cofre-expedicion.png"
+  },
+  {
+   "id": "cofre-glaciar",
+   "name": "Cofre Glaciar",
+   "rarity": "rare",
+   "asset128": "assets/chests/png-128/cofre-glaciar.png",
+   "asset512": "assets/chests/png-512/cofre-glaciar.png"
+  },
+  {
+   "id": "cofre-aurora",
+   "name": "Cofre Aurora",
+   "rarity": "epic",
+   "asset128": "assets/chests/png-128/cofre-aurora.png",
+   "asset512": "assets/chests/png-512/cofre-aurora.png"
+  },
+  {
+   "id": "cofre-legendario",
+   "name": "Cofre Legendario",
+   "rarity": "legendary",
+   "asset128": "assets/chests/png-128/cofre-legendario.png",
+   "asset512": "assets/chests/png-512/cofre-legendario.png"
+  }
+ ],
+ "currency": {
+  "id": "lumin",
+  "name": "Lumis",
+  "asset128": "assets/currency/png-128/lumin.png",
+  "asset512": "assets/currency/png-512/lumin.png",
+  "stack128": "assets/currency/png-128/lumin-stack.png",
+  "stack512": "assets/currency/png-512/lumin-stack.png"
+ },
+ "audio": {
+  "chest": "audio/chest-open.mp3",
+  "major": "audio/reward-major.mp3",
+  "minor": "audio/reward-minor.mp3",
+  "summit": "audio/summit-fanfare.mp3"
+ },
+ "items": [
+  {
+   "id": "01-campamento-base",
+   "category": "medals",
+   "name": "Campamento Base",
+   "rarity": "common",
+   "asset128": "assets/medals/png-128/01-campamento-base.png",
+   "asset512": "assets/medals/png-512/01-campamento-base.png"
+  },
+  {
+   "id": "02-sendero-constancia",
+   "category": "medals",
+   "name": "Sendero de Constancia",
+   "rarity": "rare",
+   "asset128": "assets/medals/png-128/02-sendero-constancia.png",
+   "asset512": "assets/medals/png-512/02-sendero-constancia.png"
+  },
+  {
+   "id": "03-bosque-conocimiento",
+   "category": "medals",
+   "name": "Bosque del Conocimiento",
+   "rarity": "rare",
+   "asset128": "assets/medals/png-128/03-bosque-conocimiento.png",
+   "asset512": "assets/medals/png-512/03-bosque-conocimiento.png"
+  },
+  {
+   "id": "04-puente-desafios",
+   "category": "medals",
+   "name": "Puente de los Desafíos",
+   "rarity": "epic",
+   "asset128": "assets/medals/png-128/04-puente-desafios.png",
+   "asset512": "assets/medals/png-512/04-puente-desafios.png"
+  },
+  {
+   "id": "05-pandilla",
+   "category": "medals",
+   "name": "Campamento de la Pandilla",
+   "rarity": "epic",
+   "asset128": "assets/medals/png-128/05-pandilla.png",
+   "asset512": "assets/medals/png-512/05-pandilla.png"
+  },
+  {
+   "id": "06-glaciar-dominio",
+   "category": "medals",
+   "name": "Glaciar del Dominio",
+   "rarity": "epic",
+   "asset128": "assets/medals/png-128/06-glaciar-dominio.png",
+   "asset512": "assets/medals/png-512/06-glaciar-dominio.png"
+  },
+  {
+   "id": "07-ultimo-ascenso",
+   "category": "medals",
+   "name": "Último Ascenso",
+   "rarity": "legendary",
+   "asset128": "assets/medals/png-128/07-ultimo-ascenso.png",
+   "asset512": "assets/medals/png-512/07-ultimo-ascenso.png"
+  },
+  {
+   "id": "08-la-cumbre",
+   "category": "medals",
+   "name": "La Cumbre",
+   "rarity": "legendary",
+   "asset128": "assets/medals/png-128/08-la-cumbre.png",
+   "asset512": "assets/medals/png-512/08-la-cumbre.png"
+  },
+  {
+   "id": "bandana-expedicion",
+   "category": "accessories",
+   "name": "Bandana de expedición",
+   "rarity": "common",
+   "asset128": "assets/accessories/png-128/bandana-expedicion.png",
+   "asset512": "assets/accessories/png-512/bandana-expedicion.png",
+   "price": 150,
+   "slot": "neck",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.59,
+    "scale": 0.62,
+    "rotation": 0
+   }
+  },
+  {
+   "id": "corona-laurel",
+   "category": "accessories",
+   "name": "Corona de laurel",
+   "rarity": "epic",
+   "asset128": "assets/accessories/png-128/corona-laurel.png",
+   "asset512": "assets/accessories/png-512/corona-laurel.png",
+   "price": 480,
+   "slot": "head",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.19,
+    "scale": 0.55,
+    "rotation": 0
+   }
+  },
+  {
+   "id": "pin-universitario",
+   "category": "accessories",
+   "name": "Pin universitario",
+   "rarity": "common",
+   "asset128": "assets/accessories/png-128/pin-universitario.png",
+   "asset512": "assets/accessories/png-512/pin-universitario.png",
+   "price": 120,
+   "slot": "chest",
+   "anchor": {
+    "x": 0.64,
+    "y": 0.65,
+    "scale": 0.22,
+    "rotation": -5
+   }
+  },
+  {
+   "id": "audifonos-violeta",
+   "category": "accessories",
+   "name": "Audífonos violeta",
+   "rarity": "rare",
+   "asset128": "assets/accessories/png-128/audifonos-violeta.png",
+   "asset512": "assets/accessories/png-512/audifonos-violeta.png",
+   "price": 260,
+   "slot": "head",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.34,
+    "scale": 0.68,
+    "rotation": 0
+   }
+  },
+  {
+   "id": "bufanda-estelar",
+   "category": "accessories",
+   "name": "Bufanda estelar",
+   "rarity": "rare",
+   "asset128": "assets/accessories/png-128/bufanda-estelar.png",
+   "asset512": "assets/accessories/png-512/bufanda-estelar.png",
+   "price": 280,
+   "slot": "neck",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.61,
+    "scale": 0.67,
+    "rotation": 0
+   }
+  },
+  {
+   "id": "lentes-iridiscentes",
+   "category": "accessories",
+   "name": "Lentes iridiscentes",
+   "rarity": "epic",
+   "asset128": "assets/accessories/png-128/lentes-iridiscentes.png",
+   "asset512": "assets/accessories/png-512/lentes-iridiscentes.png",
+   "price": 430,
+   "slot": "eyes",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.41,
+    "scale": 0.58,
+    "rotation": 0
+   }
+  },
+  {
+   "id": "mochila-exploradora",
+   "category": "accessories",
+   "name": "Mochila exploradora",
+   "rarity": "common",
+   "asset128": "assets/accessories/png-128/mochila-exploradora.png",
+   "asset512": "assets/accessories/png-512/mochila-exploradora.png",
+   "price": 170,
+   "slot": "back",
+   "anchor": {
+    "x": 0.67,
+    "y": 0.58,
+    "scale": 0.7,
+    "rotation": 4
+   }
+  },
+  {
+   "id": "capa-aurora",
+   "category": "accessories",
+   "name": "Capa Aurora",
+   "rarity": "epic",
+   "asset128": "assets/accessories/png-128/capa-aurora.png",
+   "asset512": "assets/accessories/png-512/capa-aurora.png",
+   "price": 550,
+   "slot": "shoulders",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.62,
+    "scale": 0.8,
+    "rotation": 0
+   }
+  },
+  {
+   "id": "antiparras-escalada",
+   "category": "accessories",
+   "name": "Antiparras de escalada",
+   "rarity": "rare",
+   "asset128": "assets/accessories/png-128/antiparras-escalada.png",
+   "asset512": "assets/accessories/png-512/antiparras-escalada.png",
+   "price": 240,
+   "slot": "eyes",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.4,
+    "scale": 0.61,
+    "rotation": 0
+   }
+  },
+  {
+   "id": "pulsera-amistad",
+   "category": "accessories",
+   "name": "Pulsera de amistad",
+   "rarity": "common",
+   "asset128": "assets/accessories/png-128/pulsera-amistad.png",
+   "asset512": "assets/accessories/png-512/pulsera-amistad.png",
+   "price": 140,
+   "slot": "front_paw",
+   "anchor": {
+    "x": 0.31,
+    "y": 0.76,
+    "scale": 0.24,
+    "rotation": -12
+   }
+  },
+  {
+   "id": "corona-flora-chilena",
+   "category": "accessories",
+   "name": "Corona de flora chilena",
+   "rarity": "epic",
+   "asset128": "assets/accessories/png-128/corona-flora-chilena.png",
+   "asset512": "assets/accessories/png-512/corona-flora-chilena.png",
+   "price": 520,
+   "slot": "head",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.18,
+    "scale": 0.62,
+    "rotation": 0
+   }
+  },
+  {
+   "id": "estetoscopio-teal",
+   "category": "accessories",
+   "name": "Estetoscopio teal",
+   "rarity": "rare",
+   "asset128": "assets/accessories/png-128/estetoscopio-teal.png",
+   "asset512": "assets/accessories/png-512/estetoscopio-teal.png",
+   "price": 300,
+   "slot": "chest",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.67,
+    "scale": 0.58,
+    "rotation": 0
+   }
+  },
+  {
+   "id": "marco-sendero",
+   "category": "frames",
+   "name": "Marco Sendero",
+   "rarity": "common",
+   "asset128": "assets/frames/png-128/marco-sendero.png",
+   "asset512": "assets/frames/png-512/marco-sendero.png",
+   "price": 350,
+   "slot": "frame"
+  },
+  {
+   "id": "marco-glaciar",
+   "category": "frames",
+   "name": "Marco Glaciar",
+   "rarity": "rare",
+   "asset128": "assets/frames/png-128/marco-glaciar.png",
+   "asset512": "assets/frames/png-512/marco-glaciar.png",
+   "price": 470,
+   "slot": "frame"
+  },
+  {
+   "id": "marco-cumbre",
+   "category": "frames",
+   "name": "Marco Cumbre",
+   "rarity": "legendary",
+   "asset128": "assets/frames/png-128/marco-cumbre.png",
+   "asset512": "assets/frames/png-512/marco-cumbre.png",
+   "price": 700,
+   "slot": "frame"
+  },
+  {
+   "id": "marco-aurora",
+   "category": "frames",
+   "name": "Marco Aurora",
+   "rarity": "epic",
+   "asset128": "assets/frames/png-128/marco-aurora.png",
+   "asset512": "assets/frames/png-512/marco-aurora.png",
+   "price": 600,
+   "slot": "frame"
+  },
+  {
+   "id": "marco-maestria",
+   "category": "frames",
+   "name": "Marco Maestría",
+   "rarity": "epic",
+   "asset128": "assets/frames/png-128/marco-maestria.png",
+   "asset512": "assets/frames/png-512/marco-maestria.png",
+   "price": 620,
+   "slot": "frame"
+  },
+  {
+   "id": "marco-pandilla",
+   "category": "frames",
+   "name": "Marco Pandilla",
+   "rarity": "rare",
+   "asset128": "assets/frames/png-128/marco-pandilla.png",
+   "asset512": "assets/frames/png-512/marco-pandilla.png",
+   "price": 500,
+   "slot": "frame"
+  },
+  {
+   "id": "trofeo-bronce",
+   "category": "trophies",
+   "name": "Trofeo de bronce",
+   "rarity": "rare",
+   "asset128": "assets/trophies/png-128/trofeo-bronce.png",
+   "asset512": "assets/trophies/png-512/trofeo-bronce.png"
+  },
+  {
+   "id": "trofeo-plata",
+   "category": "trophies",
+   "name": "Trofeo de plata",
+   "rarity": "epic",
+   "asset128": "assets/trophies/png-128/trofeo-plata.png",
+   "asset512": "assets/trophies/png-512/trofeo-plata.png"
+  },
+  {
+   "id": "trofeo-oro",
+   "category": "trophies",
+   "name": "Trofeo de oro",
+   "rarity": "legendary",
+   "asset128": "assets/trophies/png-128/trofeo-oro.png",
+   "asset512": "assets/trophies/png-512/trofeo-oro.png"
+  },
+  {
+   "id": "exploradora",
+   "category": "titles",
+   "name": "Exploradora",
+   "rarity": "common",
+   "asset128": "assets/titles/png-128/exploradora.png",
+   "asset512": "assets/titles/png-512/exploradora.png",
+   "price": 300,
+   "slot": "title"
+  },
+  {
+   "id": "mente-de-hielo",
+   "category": "titles",
+   "name": "Mente de Hielo",
+   "rarity": "rare",
+   "asset128": "assets/titles/png-128/mente-de-hielo.png",
+   "asset512": "assets/titles/png-512/mente-de-hielo.png",
+   "price": 420,
+   "slot": "title"
+  },
+  {
+   "id": "conquistadora-cumbre",
+   "category": "titles",
+   "name": "Conquistadora de la Cumbre",
+   "rarity": "legendary",
+   "asset128": "assets/titles/png-128/conquistadora-cumbre.png",
+   "asset512": "assets/titles/png-512/conquistadora-cumbre.png",
+   "price": 650,
+   "slot": "title"
+  },
+  {
+   "id": "aurora-imparable",
+   "category": "titles",
+   "name": "Aurora Imparable",
+   "rarity": "epic",
+   "asset128": "assets/titles/png-128/aurora-imparable.png",
+   "asset512": "assets/titles/png-512/aurora-imparable.png",
+   "price": 560,
+   "slot": "title"
+  },
+  {
+   "id": "maestria",
+   "category": "titles",
+   "name": "Maestría",
+   "rarity": "epic",
+   "asset128": "assets/titles/png-128/maestria.png",
+   "asset512": "assets/titles/png-512/maestria.png",
+   "price": 580,
+   "slot": "title"
+  },
+  {
+   "id": "corazon-pandilla",
+   "category": "titles",
+   "name": "Corazón de la Pandilla",
+   "rarity": "rare",
+   "asset128": "assets/titles/png-128/corazon-pandilla.png",
+   "asset512": "assets/titles/png-512/corazon-pandilla.png",
+   "price": 450,
+   "slot": "title"
+  },
+  {
+   "id": "aura-aurora",
+   "category": "auras",
+   "name": "Aura Aurora",
+   "rarity": "epic",
+   "asset128": "assets/auras/png-128/aura-aurora.png",
+   "asset512": "assets/auras/png-512/aura-aurora.png",
+   "price": 750,
+   "slot": "aura"
+  },
+  {
+   "id": "aura-cumbre",
+   "category": "auras",
+   "name": "Aura Cumbre",
+   "rarity": "legendary",
+   "asset128": "assets/auras/png-128/aura-cumbre.png",
+   "asset512": "assets/auras/png-512/aura-cumbre.png",
+   "price": 1000,
+   "slot": "aura"
+  },
+  {
+   "id": "aura-maestria",
+   "category": "auras",
+   "name": "Aura Maestría",
+   "rarity": "epic",
+   "asset128": "assets/auras/png-128/aura-maestria.png",
+   "asset512": "assets/auras/png-512/aura-maestria.png",
+   "price": 820,
+   "slot": "aura"
+  },
+  {
+   "id": "aura-pandilla",
+   "category": "auras",
+   "name": "Aura Pandilla",
+   "rarity": "rare",
+   "asset128": "assets/auras/png-128/aura-pandilla.png",
+   "asset512": "assets/auras/png-512/aura-pandilla.png",
+   "price": 700,
+   "slot": "aura"
+  }
+ ]
+}

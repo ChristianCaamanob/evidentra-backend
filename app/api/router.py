@@ -124,6 +124,9 @@ from app.routes.ia_eval import router as ia_eval_router
 api_router.include_router(ia_eval_router)
 from app.routes.logros import router as logros_router
 api_router.include_router(logros_router)
+
+from app.routes.recompensas import router as recompensas_router
+api_router.include_router(recompensas_router)
 from app.routes.terminologia import router as terminologia_router
 api_router.include_router(terminologia_router)
 from app.routes.pandilla_logros import router as pandilla_logros_router
