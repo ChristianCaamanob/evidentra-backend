@@ -202,3 +202,20 @@ def test_se_puede_abrir_al_curso_editando_la_lista_blanca(ent):
     c.patch(f"{API}/encuestas/{e['id']}", json={"solo_ruts": []})
     d = c.post(f"{API}/silabo/{cod}/encuestas", json={"token": tok("22222222-2")}).json()
     assert len(d["encuestas"]) == 1 and d["encuestas"][0]["piloto"] is False
+
+
+def test_sin_identidad_se_avisa_que_hay_algo_esperando_sin_revelarlo(ent):
+    """El estudiante veía una pantalla vacía creyendo que no había nada que responder."""
+    _crear(ent, solo_ruts=[_CEO_RUT])
+    d = ent["c"].post(f"{API}/silabo/{ent['cod']}/encuestas", json={}).json()
+    assert d["encuestas"] == [], "no puede filtrarse el contenido"
+    assert d["requieren_identidad"] == 1, "pero sí hay que avisar que existe"
+    # y ni la pregunta ni las opciones aparecen por ningún lado
+    assert "Solemne" not in str(d) and "cómoda" not in str(d)
+
+
+def test_identificado_no_queda_nada_esperando(ent):
+    _crear(ent, solo_ruts=[_CEO_RUT])
+    d = ent["c"].post(f"{API}/silabo/{ent['cod']}/encuestas",
+                      json={"token": ent["tok"](_CEO_RUT)}).json()
+    assert len(d["encuestas"]) == 1 and d["requieren_identidad"] == 0

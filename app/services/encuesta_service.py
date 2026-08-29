@@ -80,12 +80,22 @@ def crear(db: Session, silabo: str, pregunta: str, opciones: list, autor: str = 
 
 
 def listar_para(db: Session, silabo: str, owner_key: str | None) -> dict:
-    """Las encuestas que ESA persona puede ver, la más nueva primero."""
+    """Las encuestas que ESA persona puede ver, la más nueva primero.
+
+    Si quien pregunta NO se ha identificado, además se informa CUÁNTAS encuestas hay
+    esperando identidad — solo el número, nunca la pregunta ni las opciones. Sin ese dato
+    la app no tenía forma de invitar a identificarse y el estudiante veía una pantalla
+    vacía creyendo que no había nada.
+    """
     filas = (db.query(Encuesta)
              .filter(Encuesta.silabo == str(silabo or "").strip().upper())
              .order_by(Encuesta.created_at.desc()).all())
     visibles = [e for e in filas if puede_verla(e, owner_key or "")]
-    return {"ok": True, "encuestas": [_dict(db, e, owner_key) for e in visibles]}
+    esperando = 0
+    if not owner_key:
+        esperando = sum(1 for e in filas if e.abierta and e not in visibles)
+    return {"ok": True, "encuestas": [_dict(db, e, owner_key) for e in visibles],
+            "requieren_identidad": esperando}
 
 
 def listar_del_docente(db: Session, silabo: str) -> dict:
