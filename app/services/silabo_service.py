@@ -600,7 +600,7 @@ def preguntar(db: Session, codigo: str, pregunta: str, alias: str | None = None,
             except Exception:  # noqa: BLE001
                 vinculo = None
             tipo, respuesta, categoria, urgencia, necesita, cita, tema, fuente, evidencia = \
-                _clasificar_y_responder(a, pregunta, intentos, material=material, imagenes=imagenes,
+                _clasificar_y_responder(a, pregunta, intentos, material=material, imagenes=imagenes, db=db,
                                         historial=historial, vinculo=vinculo)
 
     # ── Motor de ética: consecuencia 0–5 + Puerta 3 (verificación de SALIDA sobre la respuesta ya generada).
@@ -883,8 +883,42 @@ def _bloque_vinculo(vinculo: dict | None) -> str:
             "contradigas el material del profesor. El vínculo cambia el estilo, jamás la verdad.\n")
 
 
+def _bloque_agenda(db, a) -> str:
+    """Las evaluaciones que el docente cargó en la agenda, como texto para el contexto.
+
+    Son parámetros del curso escritos por él: fecha, tipo y ponderación. Runi puede
+    responderlos con la misma autoridad que si estuvieran en el sílabo, porque vienen de
+    la misma mano.
+    """
+    if db is None:
+        return ""
+    try:
+        from app.models.evaluacion_agenda import EvaluacionAgenda
+        import uuid as _u
+        cid = _u.UUID(str(a.course_id))
+        filas = (db.query(EvaluacionAgenda).filter(EvaluacionAgenda.course_id == cid)
+                 .order_by(EvaluacionAgenda.fecha.asc()).all())
+    except Exception:  # noqa: BLE001
+        return ""
+    if not filas:
+        return ""
+    lineas = []
+    for e in filas:
+        partes = [e.titulo or "Evaluación", e.fecha or ""]
+        if e.hora:
+            partes.append(e.hora)
+        if e.tipo:
+            partes.append(str(e.tipo))
+        if e.ponderacion:
+            partes.append("ponderación " + str(e.ponderacion))
+        lineas.append("- " + " · ".join([x for x in partes if x]))
+    return ("EVALUACIONES DEL CURSO (cargadas por el docente en la agenda; son oficiales):\n"
+            + "\n".join(lineas) + "\n\n")
+
+
 def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, material: str | None = None,
-                            imagenes: list | None = None, historial: str | None = None, vinculo: dict | None = None):
+                            imagenes: list | None = None, historial: str | None = None,
+                            vinculo: dict | None = None, db=None):
     """Runi, copiloto de APRENDIZAJE. DOS ámbitos: (1) APRENDIZAJE en general → LIBRE, usa el conocimiento
     de la IA como apoyo estratégico para cerrar brechas, anclado al programa y sin contradecir al profesor;
     (2) PARÁMETROS de la asignatura (fechas/ponderaciones/reglas/alcance/ventana) → ESTRICTO: solo el corpus,
@@ -995,6 +1029,10 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, m
         )
         system += _bloque_vinculo(vinculo)   # v4-F2 · adapta el tono/iniciativa de Runi al vínculo elegido
         ctx = (a.contexto or "")[:20000]
+        # La AGENDA es contexto del curso tanto como el sílabo. El docente ya cargó ahí las
+        # fechas y ponderaciones de sus evaluaciones; sin esto, «¿cuándo es el Solemne?» se
+        # le escalaba a él mismo para que respondiera un dato que YA había escrito.
+        ctx = (_bloque_agenda(db, a) + ctx) if ctx else _bloque_agenda(db, a)
         user = "CONTEXTO DEL CURSO:\n" + (ctx or "(el docente aún no cargó material; responde el aprendizaje general y marca fuera_corpus solo los parámetros del curso)")
         if historial:
             user += ("\n\nCONVERSACIÓN RECIENTE (para entender continuaciones breves; NO es contexto del curso):\n"

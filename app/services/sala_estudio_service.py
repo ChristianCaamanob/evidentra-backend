@@ -125,7 +125,7 @@ def postear(db: Session, codigo: str, alias: str | None, device_id: str | None, 
         hist = _historial_sala(db, s)
         try:
             tipo, resp, _cat, _urg, necesita, _cita, tema, _fuente, _ev = sil._clasificar_y_responder(
-                a, texto, intentos=0, historial=hist)
+                a, texto, intentos=0, historial=hist, db=db)
         except Exception:  # noqa: BLE001
             tipo, resp, necesita, tema = "conceptual", None, False, None
         reservado = (tipo in _TIPOS_RESERVADOS) or necesita

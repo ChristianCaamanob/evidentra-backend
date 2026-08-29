@@ -75,3 +75,40 @@ def test_sin_clave_configurada_tampoco_se_escala_al_docente(monkeypatch):
     assert tipo == "servicio_caido", f"quedó como {tipo}"
     assert necesita is False, "no debe escalarse al docente: no es una duda, es una caída"
     assert "No es tu pregunta" in resp
+
+
+# ── La agenda es contexto: Runi no debe escalarle al docente lo que él ya escribió ──────
+def test_las_evaluaciones_de_la_agenda_entran_al_contexto():
+    """El docente cargó «SOLEMNE N°1 · 10-09 · 30%»; que Runi le pregunte a él la fecha
+    que él mismo escribió no tiene sentido, y llena su bandeja de derivaciones."""
+    import types
+    import uuid as _u
+    from app.services import silabo_service as sil
+
+    fecha = "2026-09-10"
+
+    class _Eval:
+        titulo, hora, tipo, ponderacion = "SOLEMNE Nº1", None, "certamen", "30%"
+    _Eval.fecha = fecha
+
+    class _Q:
+        def filter(self, *a, **k):
+            return self
+        def order_by(self, *a, **k):
+            return self
+        def all(self):
+            return [_Eval()]
+
+    class _DB:
+        def query(self, *a, **k):
+            return _Q()
+
+    a = types.SimpleNamespace(course_id=str(_u.uuid4()))
+    bloque = sil._bloque_agenda(_DB(), a)
+    assert "SOLEMNE" in bloque and fecha in bloque and "30%" in bloque, bloque
+    assert "oficiales" in bloque, "hay que decirle al modelo que son datos del docente"
+
+
+def test_sin_agenda_el_bloque_queda_vacio():
+    from app.services import silabo_service as sil
+    assert sil._bloque_agenda(None, None) == ""
