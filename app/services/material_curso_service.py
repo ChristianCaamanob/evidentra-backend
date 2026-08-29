@@ -22,9 +22,14 @@ def _tipo(v) -> str:
 
 
 def _dict(m: MaterialCurso, incluir_datos: bool = False) -> dict:
+    # Un video lleva su miniatura como "archivo": se sirve por la ruta que ya existe, así el
+    # listado no arrastra el base64 de todas las portadas.
+    es_video = (m.tipo == "video")
     d = {"id": str(m.id), "titulo": m.titulo, "tipo": m.tipo, "descripcion": m.descripcion,
          "url": m.url, "archivo_nombre": m.archivo_nombre, "archivo_mime": m.archivo_mime,
-         "tamano": m.tamano, "tiene_archivo": bool(m.archivo_datos)}
+         "tamano": m.tamano, "tiene_archivo": bool(m.archivo_datos),
+         "es_video": es_video,
+         "preview_url": (f"/api/v1/materiales/{m.id}/archivo" if (es_video and m.archivo_datos) else None)}
     if incluir_datos:
         d["archivo_datos"] = m.archivo_datos
     return d

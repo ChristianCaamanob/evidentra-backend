@@ -584,6 +584,32 @@ def materiales_crear(course_id: UUID, request: Request, payload: dict, db: Sessi
     return mc.crear(db, course_id, payload)
 
 
+@router.post("/courses/{course_id}/materiales/video", dependencies=[Depends(req_profesor)])
+@limit("20/minute")
+def material_video(course_id: UUID, request: Request, payload: dict, db: Session = Depends(get_db)):
+    """Agrega un video (TikTok, YouTube…) como material, con su vista previa resuelta.
+
+    El docente pega el enlace y nada más: el título, el autor y la miniatura los entrega la
+    propia plataforma por oEmbed.
+    """
+    from app.services import video_link_service as vl
+    from app.services import material_curso_service as mc
+    p = payload or {}
+    meta = vl.resolver(p.get("url", ""))
+    return mc.crear(db, course_id, {
+        "titulo": (str(p.get("titulo") or "").strip() or meta["titulo"]),
+        "tipo": "video",
+        "url": meta["url"],
+        "descripcion": (str(p.get("descripcion") or "").strip()
+                        or (meta["proveedor"] + (" · " + meta["autor"] if meta["autor"] else ""))),
+        # La miniatura se guarda como el archivo del material: así se sirve por la ruta que
+        # ya existe y no depende de una URL firmada que caduca.
+        "archivo_datos": meta.get("thumb_data_url"),
+        "archivo_nombre": ("preview-" + meta["proveedor"].lower() + ".jpg") if meta.get("thumb_data_url") else None,
+        "archivo_mime": "image/jpeg" if meta.get("thumb_data_url") else None,
+    })
+
+
 @router.get("/courses/{course_id}/materiales", dependencies=[Depends(req_profesor)])
 def materiales_listar(course_id: UUID, db: Session = Depends(get_db)):
     from app.services import material_curso_service as mc
