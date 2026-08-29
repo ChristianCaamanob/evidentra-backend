@@ -33,6 +33,10 @@ class Encuesta(UUIDMixin, Base):
     ver_resultados: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     # ¿Puede cambiar su respuesta? Por defecto NO: se responde una vez y queda.
     permite_cambio: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    # Ventana de la encuesta. Se guardan en UTC; el cliente las pinta en su hora local.
+    # Nulas = sin límite por ese lado (abierta desde ya / sin cierre automático).
+    abre_at: Mapped["DateTime | None"] = mapped_column(DateTime(timezone=True), nullable=True)
+    cierra_at: Mapped["DateTime | None"] = mapped_column(DateTime(timezone=True), nullable=True)
     creada_por: Mapped[str | None] = mapped_column(String(120), nullable=True)
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

@@ -256,3 +256,47 @@ def test_identificado_no_queda_nada_esperando(ent):
     d = ent["c"].post(f"{API}/silabo/{ent['cod']}/encuestas",
                       json={"token": ent["tok"](_CEO_RUT)}).json()
     assert len(d["encuestas"]) == 1 and d["requieren_identidad"] == 0
+
+
+# ── Ventana: fecha de activación y de cierre ──────────────────────────────────────────
+import datetime as _dt
+
+
+def _iso(h):
+    return (_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(hours=h)).isoformat()
+
+
+def test_programada_no_se_ve_ni_se_vota(ent):
+    """Antes de su fecha de activación no existe para el estudiante."""
+    e = _crear(ent, solo_ruts=[_CEO_RUT], abre_at=_iso(3), cierra_at=_iso(48)).json()
+    assert e["estado"] == "programada" and e["abre_at"]
+    c, tok, cod = ent["c"], ent["tok"], ent["cod"]
+    assert c.post(f"{API}/silabo/{cod}/encuestas", json={"token": tok(_CEO_RUT)}).json()["encuestas"] == []
+    r = c.post(f"{API}/silabo/{cod}/encuestas/{e['id']}/votar",
+               json={"token": tok(_CEO_RUT), "opcion": 0})
+    assert r.status_code == 409 and "todavía no se abre" in r.json()["detail"]
+
+
+def test_dentro_de_la_ventana_se_ve_y_se_vota(ent):
+    e = _crear(ent, solo_ruts=[_CEO_RUT], abre_at=_iso(-1), cierra_at=_iso(24)).json()
+    assert e["estado"] == "abierta"
+    c, tok, cod = ent["c"], ent["tok"], ent["cod"]
+    d = c.post(f"{API}/silabo/{cod}/encuestas", json={"token": tok(_CEO_RUT)}).json()
+    assert len(d["encuestas"]) == 1 and d["encuestas"][0]["cierra_at"]
+    assert c.post(f"{API}/silabo/{cod}/encuestas/{e['id']}/votar",
+                  json={"token": tok(_CEO_RUT), "opcion": 0}).status_code == 200
+
+
+def test_pasada_la_fecha_de_cierre_se_cierra_sola(ent):
+    """La ventana manda sobre el interruptor: es lo que se espera al poner una fecha."""
+    e = _crear(ent, solo_ruts=[_CEO_RUT], abre_at=_iso(-48), cierra_at=_iso(-1)).json()
+    assert e["estado"] == "cerrada", e
+    c, tok, cod = ent["c"], ent["tok"], ent["cod"]
+    r = c.post(f"{API}/silabo/{cod}/encuestas/{e['id']}/votar",
+               json={"token": tok(_CEO_RUT), "opcion": 0})
+    assert r.status_code == 409 and "cerrada" in r.json()["detail"]
+
+
+def test_sin_fechas_sigue_funcionando_como_antes(ent):
+    e = _crear(ent).json()
+    assert e["estado"] == "abierta" and e["abre_at"] is None and e["cierra_at"] is None

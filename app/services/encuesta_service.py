@@ -8,6 +8,7 @@ Dos decisiones que sostienen el resto:
 """
 from __future__ import annotations
 
+import datetime as _dt
 import re
 
 from sqlalchemy.orm import Session
@@ -29,6 +30,41 @@ def _rut_de_owner(owner_key: str) -> str:
     ow = str(owner_key or "")
     return _norm_rut(ow[4:]) if ow.startswith("rut:") else ""
 
+
+
+def _aware(x):
+    """A UTC-aware. Acepta datetime o ISO (el cliente manda 'YYYY-MM-DDTHH:MM' local)."""
+    if x is None:
+        return None
+    if isinstance(x, str):
+        t = x.strip()
+        if not t:
+            return None
+        try:
+            x = _dt.datetime.fromisoformat(t.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if x.tzinfo is None:
+        x = x.replace(tzinfo=_dt.timezone.utc)
+    return x.astimezone(_dt.timezone.utc)
+
+
+def estado_de(e: Encuesta) -> str:
+    """programada · abierta · cerrada.
+
+    La ventana manda sobre el interruptor manual: una encuesta con fecha de cierre pasada
+    está cerrada aunque nadie la haya cerrado a mano, que es justo lo que se espera al
+    poner una fecha.
+    """
+    ahora = _dt.datetime.now(_dt.timezone.utc)
+    abre, cierra = _aware(e.abre_at), _aware(e.cierra_at)
+    if not e.abierta:
+        return "cerrada"
+    if abre and ahora < abre:
+        return "programada"
+    if cierra and ahora > cierra:
+        return "cerrada"
+    return "abierta"
 
 def puede_verla(e: Encuesta, owner_key: str) -> bool:
     """Lista blanca: si la encuesta nombra RUT, solo esos la ven."""
@@ -62,7 +98,10 @@ def _dict(db: Session, e: Encuesta, owner_key: str | None = None, es_docente: bo
         ops.append(o)
     return {
         "id": str(e.id), "pregunta": e.pregunta, "anonima": bool(e.anonima),
-        "abierta": bool(e.abierta),
+        "abierta": estado_de(e) == "abierta",
+        "estado": estado_de(e),
+        "abre_at": (_aware(e.abre_at).isoformat() if e.abre_at else None),
+        "cierra_at": (_aware(e.cierra_at).isoformat() if e.cierra_at else None),
         "total": (total if muestra else None),
         "ver_resultados": bool(e.ver_resultados),
         "permite_cambio": bool(e.permite_cambio),
@@ -75,7 +114,8 @@ def _dict(db: Session, e: Encuesta, owner_key: str | None = None, es_docente: bo
 
 def crear(db: Session, silabo: str, pregunta: str, opciones: list, autor: str = "",
           solo_ruts: list | None = None, anonima: bool = True,
-          ver_resultados: bool = False, permite_cambio: bool = False) -> dict:
+          ver_resultados: bool = False, permite_cambio: bool = False,
+          abre_at=None, cierra_at=None) -> dict:
     p = str(pregunta or "").strip()[:300]
     if not p:
         raise unprocessable("Escribe la pregunta de la encuesta.")
@@ -88,6 +128,7 @@ def crear(db: Session, silabo: str, pregunta: str, opciones: list, autor: str = 
     e = Encuesta(silabo=str(silabo or "").strip().upper()[:12], pregunta=p, opciones=ops,
                  anonima=bool(anonima), abierta=True, solo_ruts=(ruts or None),
                  ver_resultados=bool(ver_resultados), permite_cambio=bool(permite_cambio),
+                 abre_at=_aware(abre_at), cierra_at=_aware(cierra_at),
                  creada_por=(str(autor or "").strip()[:120] or None))
     db.add(e); db.commit(); db.refresh(e)
     return _dict(db, e, es_docente=True)
@@ -104,10 +145,12 @@ def listar_para(db: Session, silabo: str, owner_key: str | None) -> dict:
     filas = (db.query(Encuesta)
              .filter(Encuesta.silabo == str(silabo or "").strip().upper())
              .order_by(Encuesta.created_at.desc()).all())
-    visibles = [e for e in filas if puede_verla(e, owner_key or "")]
+    visibles = [e for e in filas
+                if puede_verla(e, owner_key or "") and estado_de(e) != "programada"]
     esperando = 0
     if not owner_key:
-        esperando = sum(1 for e in filas if e.abierta and e not in visibles)
+        esperando = sum(1 for e in filas
+                        if estado_de(e) == "abierta" and not puede_verla(e, ""))
     return {"ok": True, "encuestas": [_dict(db, e, owner_key) for e in visibles],
             "requieren_identidad": esperando}
 
@@ -125,7 +168,10 @@ def votar(db: Session, encuesta_id, owner_key: str, nombre: str | None, opcion,
     e = db.query(Encuesta).filter(Encuesta.id == encuesta_id).first()
     if not e:
         raise not_found("Esa encuesta no existe.")
-    if not e.abierta:
+    est = estado_de(e)
+    if est == "programada":
+        raise conflict("Esta encuesta todavía no se abre.")
+    if est != "abierta":
         raise conflict("Esta encuesta ya está cerrada.")
     if not puede_verla(e, owner_key):
         raise conflict("Esta encuesta no está disponible para ti.")
@@ -173,7 +219,7 @@ def eliminar(db: Session, encuesta_id) -> dict:
     return {"ok": True}
 
 def editar(db: Session, encuesta_id, pregunta=None, opciones=None, solo_ruts=None,
-           ver_resultados=None, permite_cambio=None) -> dict:
+           ver_resultados=None, permite_cambio=None, abre_at=None, cierra_at=None) -> dict:
     """Corregir una encuesta ya publicada sin perderla.
 
     Existe porque la alternativa era borrar y volver a crear por una errata. Regla: el

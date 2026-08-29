@@ -539,6 +539,8 @@ _COLUMNAS_ADITIVAS = {
         "grupo_codigo": "VARCHAR(10)",
     },
     "encuestas": {
+        "abre_at": "TIMESTAMPTZ",
+        "cierra_at": "TIMESTAMPTZ",
         "ver_resultados": "BOOLEAN NOT NULL DEFAULT false",
         "permite_cambio": "BOOLEAN NOT NULL DEFAULT false",
     },
