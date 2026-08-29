@@ -39,11 +39,16 @@ def pendientes(pseudo_id: str = "", db: Session = Depends(get_db)):
 
 @router.get("/recompensas/cumbre")
 def cumbre(pseudo_id: str = "", db: Session = Depends(get_db)):
-    """Los 8 tramos del ascenso. Se apoya en el motor de medallas: aquí no se decide nada."""
-    est = ls.estado(db, pseudo_id) if pseudo_id else {"medals": []}
-    hechas = [m["id"] for m in (est.get("medals") or []) if m.get("unlocked")]
-    return {"ok": True, "tramos": rw.cumbre(db, pseudo_id, hechas),
-            "xp": est.get("xp", 0), "saldo": rw.saldo(db, pseudo_id) if pseudo_id else 0}
+    """Los 8 tramos del ascenso, qué falta en cada uno y las reglas del juego.
+
+    Se apoya en el motor de medallas: aquí no se decide ningún desbloqueo. Las reglas viajan desde
+    el servidor para que la pantalla no pueda contar una versión distinta de la que se aplica.
+    """
+    est = ls.estado(db, pseudo_id) if pseudo_id else {"medals": [], "xp": 0}
+    return {"ok": True, "tramos": rw.cumbre(db, pseudo_id, est.get("medals") or []),
+            "xp": est.get("xp", 0), "proxima": est.get("proxima"),
+            "reglas": rw.reglas(),
+            "saldo": rw.saldo(db, pseudo_id) if pseudo_id else 0}
 
 
 @router.post("/recompensas/reclamar")

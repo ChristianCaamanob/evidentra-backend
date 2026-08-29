@@ -209,10 +209,10 @@ def test_los_ocho_tramos_cubren_las_doce_medallas():
 
 
 def test_el_tramo_se_completa_con_todos_sus_hitos(db):
-    t = rw.cumbre(db, PS, [3])                      # el tramo 3 tiene las medallas 3 y 4
+    t = rw.cumbre(db, PS, _medallas_falsas(desbloqueadas={3}))   # el tramo 3 tiene las medallas 3 y 4
     tramo3 = t[2]
     assert tramo3["logrados"] == 1 and not tramo3["completo"]
-    assert rw.cumbre(db, PS, [3, 4])[2]["completo"]
+    assert rw.cumbre(db, PS, _medallas_falsas(desbloqueadas={3, 4}))[2]["completo"]
 
 
 def test_cada_medalla_abre_el_cofre_de_su_altura(db):
@@ -265,3 +265,37 @@ def test_los_trofeos_marcan_3_6_y_8_tramos(db):
 
 def test_la_coleccion_cuenta_las_39(db):
     assert rw.inventario(db, PS)["coleccion_total"] == 39
+
+
+# ── la Cumbre explicada: qué falta en cada tramo y las reglas ────────────────────────
+def _medallas_falsas(desbloqueadas=()):
+    """Como las devuelve el motor de logros: con progreso y evidencia faltante."""
+    return [{"id": i, "slug": f"m{i}", "unlocked": i in desbloqueadas,
+             "progress": 100 if i in desbloqueadas else 40, "falta_xp": 0 if i in desbloqueadas else 80,
+             "falta_evidencia": [] if i in desbloqueadas else [f"Haz algo para la medalla {i}"]}
+            for i in range(1, 13)]
+
+
+def test_cada_tramo_dice_que_falta(db):
+    t = rw.cumbre(db, PS, _medallas_falsas(desbloqueadas={1}))
+    assert t[0]["completo"] and not t[0]["falta"]
+    # El tramo 2 no está: tiene que decir qué hacer, no solo que está incompleto.
+    assert t[1]["falta"] and any("XP" in x for x in t[1]["falta"])
+
+
+def test_el_tramo_muestra_su_progreso_aunque_no_este_completo(db):
+    t = rw.cumbre(db, PS, _medallas_falsas(desbloqueadas={3}))
+    tramo3 = t[2]                                  # medallas 3 y 4: una hecha, otra al 40%
+    assert not tramo3["completo"] and 0 < tramo3["progreso"] < 100
+
+
+def test_sin_datos_la_cumbre_no_se_cae(db):
+    t = rw.cumbre(db, PS, [])
+    assert len(t) == 8 and all(x["progreso"] == 0 for x in t)
+
+
+def test_las_reglas_nombran_las_acciones_reales_y_lo_que_no_suma():
+    r = rw.reglas()
+    ids = {a["id"] for a in r["acciones"]}
+    assert {"consulta", "repaso", "diferida", "error", "pandilla"} <= ids
+    assert r["no_suma"] and r["sin_castigo"] and "nunca notas" in r["lumis"]

@@ -394,15 +394,70 @@ def al_desbloquear_medalla(db: Session, pseudo_id: str, medal_id: int, slug: str
         db.rollback()
 
 
-def cumbre(db: Session, pseudo_id: str, medallas_desbloqueadas: list) -> list:
-    """Los 8 tramos con su medalla-portada y cuántos hitos lleva cada uno. La vista del ascenso."""
-    hechas = set(int(x) for x in (medallas_desbloqueadas or []))
+def cumbre(db: Session, pseudo_id: str, medallas: list) -> list:
+    """Los 8 tramos con su medalla-portada, sus hitos y QUÉ FALTA para cada uno.
+
+    `medallas` es la lista de medallas tal como la devuelve el motor de logros (con `progress` y
+    `falta_evidencia`), no solo los ids: sin eso el tramo puede decir que está incompleto pero no
+    qué hacer, que es justo lo que preguntaba quien lo miraba.
+    """
+    por_id = {int(m["id"]): m for m in (medallas or []) if isinstance(m, dict) and m.get("id")}
     out = []
-    for orden, (asset, nombre, medallas) in enumerate(TRAMOS, start=1):
-        listos = [m for m in medallas if m in hechas]
+    for orden, (asset, nombre, ids) in enumerate(TRAMOS, start=1):
+        hitos = [por_id.get(i, {"id": i}) for i in ids]
+        listos = [h for h in hitos if h.get("unlocked")]
+        falta = []
+        for h in hitos:
+            if not h.get("unlocked"):
+                if h.get("falta_xp"):
+                    falta.append(f"Acumula {h['falta_xp']} XP más")
+                falta.extend(h.get("falta_evidencia") or [])
+        prog = round(sum(h.get("progress", 0) for h in hitos) / len(hitos)) if hitos else 0
         out.append({"orden": orden, "id": asset, "nombre": nombre,
                     "asset128": f"assets/medals/png-128/{asset}.png",
                     "asset512": f"assets/medals/png-512/{asset}.png",
-                    "hitos": len(medallas), "logrados": len(listos),
-                    "completo": len(listos) == len(medallas)})
+                    "hitos": len(ids), "logrados": len(listos),
+                    "completo": len(listos) == len(ids),
+                    "progreso": 100 if len(listos) == len(ids) else prog,
+                    "medallas": [{"id": h.get("id"), "slug": h.get("slug"),
+                                  "unlocked": bool(h.get("unlocked")), "progress": h.get("progress", 0)}
+                                 for h in hitos],
+                    "falta": falta[:4]})
     return out
+
+
+# Las reglas del juego, en el idioma del estudiante. Viven aquí y no en la pantalla para que la
+# app no pueda contar una versión distinta de la que el servidor aplica.
+def reglas() -> dict:
+    return {
+        "principio": "Una medalla exige puntos Y evidencia de que aprendiste. Los puntos solos nunca "
+                     "desbloquean nada, y abrir la app no suma.",
+        "acciones": [
+            {"id": "consulta", "titulo": "Pregúntale a Runi y marca tu confianza",
+             "detalle": "Cuando resuelvas una duda, dile si quedaste con confianza baja, media o alta. "
+                        "Ahí tu consulta se vuelve un episodio de aprendizaje y Runi te programa una "
+                        "comprobación a 7 días.",
+             "xp": "10–25 XP", "cta": "runi"},
+            {"id": "repaso", "titulo": "Haz un repaso de 5 minutos",
+             "detalle": "Tres preguntas sobre un tema tuyo, sin mirar apuntes. Al terminar, el episodio "
+                        "queda verificado en el momento.",
+             "xp": "10–25 XP", "cta": "repaso"},
+            {"id": "diferida", "titulo": "Responde la comprobación cuando Runi te avise",
+             "detalle": "A los días te pregunta si todavía lo recuerdas. Esa respuesta es la que prueba "
+                        "que aprendiste de verdad, y es la que más suma.",
+             "xp": "25 XP", "cta": "repaso"},
+            {"id": "error", "titulo": "Corrige algo que dabas por seguro",
+             "detalle": "Si marcaste alta confianza y estaba mal, volver sobre ese tema y acertar es lo "
+                        "que más vale de todo.",
+             "xp": "30 XP", "cta": "repaso"},
+            {"id": "pandilla", "titulo": "Ayuda a tu Pandilla y que te lo reconozcan",
+             "detalle": "La ayuda cuenta cuando quien la recibió la valida. Máximo dos al día, para que "
+                        "sea ayuda de verdad y no un intercambio de favores.",
+             "xp": "20 XP", "cta": "pandilla"},
+        ],
+        "no_suma": ["Abrir la app o dejarla abierta", "Repetir la misma evidencia una y otra vez",
+                    "Responder sin haberlo intentado"],
+        "sin_castigo": "Si pierdes una racha no te quitamos nada: empiezas otra y conservas todo lo tuyo.",
+        "lumis": "Cada medalla te da 40 Lumis y un cofre donde eliges una de tres. Los Lumis solo compran "
+                 "cosas para verte bien: nunca notas, ni pistas, ni prioridad con tu profe.",
+    }
