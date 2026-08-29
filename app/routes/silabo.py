@@ -493,6 +493,68 @@ def evals_eliminar(eval_id: UUID, db: Session = Depends(get_db)):
     return ev.eliminar(db, eval_id)
 
 
+# ── Encuestas de Runi ─────────────────────────────────────────────────────────────────
+@router.post("/courses/{course_id}/encuestas", dependencies=[Depends(req_profesor)])
+def encuesta_crear(course_id: UUID, payload: dict, usuario=Depends(usuario_actual),
+                   db: Session = Depends(get_db)):
+    """Crea una encuesta. Con `solo_ruts` se estrena en unos pocos perfiles antes de soltarla."""
+    from app.services import encuesta_service as enc
+    a = sil.agente_de_curso(db, course_id)
+    if not a:
+        raise conflict("Publica primero el agente de Runi de este curso.")
+    p = payload or {}
+    return enc.crear(db, a.codigo, p.get("pregunta", ""), p.get("opciones") or [],
+                     autor=(getattr(usuario, "name", "") or "Tu profesor"),
+                     solo_ruts=p.get("solo_ruts") or [], anonima=bool(p.get("anonima", True)))
+
+
+@router.get("/courses/{course_id}/encuestas", dependencies=[Depends(req_profesor)])
+def encuesta_listar_docente(course_id: UUID, db: Session = Depends(get_db)):
+    from app.services import encuesta_service as enc
+    a = sil.agente_de_curso(db, course_id)
+    if not a:
+        return {"ok": True, "encuestas": []}
+    return enc.listar_del_docente(db, a.codigo)
+
+
+@router.post("/encuestas/{encuesta_id}/cerrar", dependencies=[Depends(req_profesor)])
+def encuesta_cerrar(encuesta_id: UUID, payload: dict | None = None, db: Session = Depends(get_db)):
+    from app.services import encuesta_service as enc
+    return enc.cerrar(db, encuesta_id, bool((payload or {}).get("abierta", False)))
+
+
+@router.delete("/encuestas/{encuesta_id}", dependencies=[Depends(req_profesor)])
+def encuesta_eliminar(encuesta_id: UUID, db: Session = Depends(get_db)):
+    from app.services import encuesta_service as enc
+    return enc.eliminar(db, encuesta_id)
+
+
+@router.post("/silabo/{codigo}/encuestas")
+def encuesta_listar_alumno(codigo: str, payload: dict | None = None, db: Session = Depends(get_db)):
+    """Las que ESTA persona puede ver. Sin identidad solo se ven las abiertas a todo el curso."""
+    from app.services import encuesta_service as enc
+    from app.services import pandilla_service as pand
+    ow = ""
+    tok = (payload or {}).get("token")
+    if tok:
+        try:
+            ow, _cid, _n = pand._tok_ok(tok)
+        except Exception:  # noqa: BLE001
+            ow = ""
+    return enc.listar_para(db, codigo, ow)
+
+
+@router.post("/silabo/{codigo}/encuestas/{encuesta_id}/votar")
+@limit("30/minute")
+def encuesta_votar(codigo: str, encuesta_id: UUID, request: Request, payload: dict,
+                   db: Session = Depends(get_db)):
+    from app.services import encuesta_service as enc
+    from app.services import pandilla_service as pand
+    p = payload or {}
+    ow, _cid, nom = pand._tok_ok(p.get("token"))     # la identidad sale del token, no del cuerpo
+    return enc.votar(db, encuesta_id, ow, nom, p.get("opcion"), p.get("comentario"))
+
+
 @router.get("/silabo/{codigo}/evaluaciones")
 def evals_publicas(codigo: str, db: Session = Depends(get_db)):
     from app.services import evaluaciones_agenda_service as ev

@@ -35,6 +35,7 @@ from app.models.pand_nota import PandNota  # noqa: F401
 from app.models.pand_momento import PandMomento  # noqa: F401
 from app.models.pand_chat import PandChat  # noqa: F401
 from app.models.pand_grupo import PandGrupo, PandGrupoMiembro  # noqa: F401
+from app.models.encuesta import Encuesta, EncuestaVoto  # noqa: F401
 from app.models.admin_log import AccesoAdminLog  # noqa: F401
 from app.models.anuncio import Anuncio  # noqa: F401
 from app.models.episode import Episode, ConfidenceObs, RetentionCheck  # noqa: F401
