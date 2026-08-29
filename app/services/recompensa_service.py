@@ -457,6 +457,10 @@ def reglas() -> dict:
              "detalle": "Si marcaste alta confianza y estaba mal, volver sobre ese tema y acertar es lo "
                         "que más vale de todo.",
              "xp": "30 XP", "cta": "repaso"},
+            {"id": "plan", "titulo": "Ponte tu propia meta de la semana",
+             "detalle": "Tú decides cuántos repasos quieres cerrar. Cumplir tu propio plan dos "
+                        "semanas es lo que abre «Rumbo propio». Si no llegas, no pierdes nada.",
+             "xp": "Meta propia", "cta": "plan"},
             {"id": "pandilla", "titulo": "Ayuda a tu Pandilla y que te lo reconozcan",
              "detalle": "La ayuda cuenta cuando quien la recibió la valida. Máximo dos al día, para que "
                         "sea ayuda de verdad y no un intercambio de favores.",

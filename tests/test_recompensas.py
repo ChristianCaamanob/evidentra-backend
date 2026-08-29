@@ -297,7 +297,7 @@ def test_sin_datos_la_cumbre_no_se_cae(db):
 def test_las_reglas_nombran_las_acciones_reales_y_lo_que_no_suma():
     r = rw.reglas()
     ids = {a["id"] for a in r["acciones"]}
-    assert {"consulta", "repaso", "diferida", "error", "pandilla"} <= ids
+    assert {"consulta", "repaso", "diferida", "error", "plan", "pandilla"} <= ids
     assert r["no_suma"] and r["sin_castigo"] and "nunca notas" in r["lumis"]
 
 
@@ -308,13 +308,24 @@ def test_el_tramo_solo_pide_el_siguiente_hito(db):
 
 
 def test_lo_que_el_motor_aun_no_mide_se_dice_no_se_esconde(db):
+    """El mecanismo, no el estado: si una puerta pidiera algo sin instrumentar, hay que declararlo.
+
+    Se prueba con una medalla fabricada porque hoy TODAS las señales están instrumentadas (ver el
+    test siguiente). Si mañana se añade una puerta nueva sin su señal, este separador la delata en
+    vez de dejar que alguien la persiga en vano.
+    """
+    medallas = _medallas_falsas()
+    medallas[0]["falta_evidencia"] = ["Haz 2 cosas medibles", "Resuelve 3 casos (en preparación)"]
+    t = rw.cumbre(db, PS, medallas)[0]
+    assert t["falta"] == ["Acumula 80 XP más", "Haz 2 cosas medibles"]
+    assert t["en_preparacion"] == ["Resuelve 3 casos"]
+    assert not t["alcanzable"]
+
+
+def test_hoy_ningun_tramo_esta_bloqueado(db):
+    """Antes el ascenso se cortaba en el tramo 4: sus puertas pedían transferencia e integración,
+    que el motor no medía. Con el repaso juzgado y el plan semanal, los ocho son alcanzables."""
     from app.services import logros_service as ls
-    est = ls.estado(db, PS)
-    tramos = rw.cumbre(db, PS, est["medals"])
-    # Con señales sin instrumentar hay tramos que hoy NO se pueden completar; hay que declararlo.
-    bloqueados = [t for t in tramos if not t["alcanzable"]]
-    assert bloqueados, "si todo fuera alcanzable, este test sobra"
-    assert all(t["en_preparacion"] for t in bloqueados)
-    # Y al revés: si un tramo tiene una señal sin instrumentar, no puede figurar como alcanzable.
-    assert all(t["alcanzable"] for t in tramos if not t["en_preparacion"])
-    assert all("en preparación" not in x for t in tramos for x in t["falta"])
+    tramos = rw.cumbre(db, PS, ls.estado(db, PS)["medals"])
+    assert all(t["alcanzable"] for t in tramos)
+    assert all(not t["en_preparacion"] for t in tramos)

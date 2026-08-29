@@ -58,6 +58,43 @@ def episode_close(request: Request, payload: dict, db: Session = Depends(get_db)
                      p.get("programar_diferida", "7d"))
 
 
+@router.post("/episodes/juzgar")
+@limit("60/minute")
+def episode_juzgar(request: Request, payload: dict, db: Session = Depends(get_db)):
+    """Runi lee la respuesta escrita y dice si demuestra lo que se pidió.
+
+    Hasta ahora ese texto se descartaba y todo el repaso era autocalificado. Una evidencia abre la
+    puerta de una medalla solo si el autorreporte y el juicio COINCIDEN (ver juicio_service).
+    """
+    from app.services import juicio_service as js
+    p = payload or {}
+    return js.juzgar(db, p.get("pseudo_id", ""), p.get("tipo", "recordar"), p.get("ra", ""),
+                     p.get("respuesta", ""), p.get("auto_reporte"),
+                     episode_id=p.get("episode_id"), course_id=p.get("course_id"),
+                     ra_b=p.get("ra_b"), confianza=p.get("confianza") or 0)
+
+
+@router.get("/episodes/mis-juicios")
+def episode_mis_juicios(pseudo_id: str = "", limite: int = 20, db: Session = Depends(get_db)):
+    from app.services import juicio_service as js
+    return js.mis_juicios(db, pseudo_id, limite)
+
+
+# ── Plan de la semana (lo pone la estudiante; medalla «Rumbo propio») ─────────────
+@router.get("/plan-semanal")
+def plan_semanal_ver(pseudo_id: str = "", db: Session = Depends(get_db)):
+    from app.services import plan_semanal_service as ps
+    return ps.estado(db, pseudo_id)
+
+
+@router.post("/plan-semanal")
+@limit("30/minute")
+def plan_semanal_fijar(request: Request, payload: dict, db: Session = Depends(get_db)):
+    from app.services import plan_semanal_service as ps
+    p = payload or {}
+    return ps.fijar(db, p.get("pseudo_id", ""), p.get("meta"), p.get("nota", ""))
+
+
 @router.post("/episodes/diferida/{check_id}")
 @limit("60/minute")
 def episode_diferida(request: Request, check_id: str, payload: dict, db: Session = Depends(get_db)):

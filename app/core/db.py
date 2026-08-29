@@ -43,6 +43,7 @@ from app.models.analytics import AnalyticsEvent  # noqa: F401
 from app.models.consent import Consent  # noqa: F401
 from app.models.ia_eval import IAEvalCase, IAEvalRun, IAEvalResult  # noqa: F401
 from app.models.logros import MedalUnlock  # noqa: F401
+from app.models.juicio import EpisodeJuicio, PlanSemanal  # noqa: F401
 from app.models.recompensa import (  # noqa: F401
     RecompensaItem, RecompensaEquipo, LuminMovimiento, RecompensaPendiente)
 from app.models.terminologia import TermProfile, TermEntry, CourseTermBinding  # noqa: F401

@@ -60,6 +60,21 @@ def _signals(db: Session, pseudo_id: str) -> dict:
     # "duda valiente": marcó baja confianza (≤40) y aun así resultó correcta (reconocer la incertidumbre y resolverla)
     duda_valiente = sum(1 for o in obs if o.confidence <= 40 and o.correct is True)
 
+    # Evidencia juzgada por Runi (medallas 4, 5 y 7) y plan propio (medalla 8). Aditivas: si algo
+    # falla, el resto de la progresión sigue en pie con las señales que sí se pudieron leer.
+    ju = {"linkedConcepts": 0, "novelTransferCases": 0, "conceptsIntegrated": 0, "integratedOutcomes": 0}
+    try:
+        from app.services import juicio_service as _js
+        ju = _js.senales(db, pseudo_id)
+    except Exception:  # noqa: BLE001
+        pass
+    plan = 0
+    try:
+        from app.services import plan_semanal_service as _ps
+        plan = _ps.semanas_cumplidas(db, pseudo_id)
+    except Exception:  # noqa: BLE001
+        pass
+
     # F7 · señales de Maestría compartida (Pandilla), instrumentadas con anti-farming
     try:
         from app.services import pandilla_logros_service as pls
@@ -79,12 +94,11 @@ def _signals(db: Session, pseudo_id: str) -> dict:
         "validatedPeerSupports": sm.get("validatedPeerSupports", 0),
         "sharedGroupGoalsCompleted": sm.get("sharedGroupGoalsCompleted", 0),
         "courseDefinedLongitudinalMastery": bool(sm.get("courseDefinedLongitudinalMastery", False)),
-        # aún no instrumentadas (honestas en 0 → medalla pendiente, nunca inventada)
-        "novelTransferCases": 0,
-        "linkedConcepts": 0,
-        "conceptsIntegrated": 0,
-        "integratedOutcomes": 0,
-        "weeklyPlanCompletionAtLeast80Percent": 0,
+        # Evidencia JUZGADA (repaso en escalera: conectar/aplicar/integrar). Solo cuenta lo que
+        # el autorreporte y el juicio de Runi confirman a la vez — ver juicio_service.
+        **ju,
+        # Su propio plan de la semana, medido contra episodios verificados.
+        "weeklyPlanCompletionAtLeast80Percent": plan,
     }
 
 
@@ -113,16 +127,19 @@ def dimensiones(sig: dict) -> list:
         "courage": sig["correctedHighConfidenceErrors"] * 30 + sig["resolvedUncertaintyEvents"] * 15,
         "consistency": sig["activeDays"] * 12,
         "community": sig["validatedPeerSupports"] * 20 + sig["sharedGroupGoalsCompleted"] * 40,
-        "curiosity": 0, "creation": 0, "integrity": 0,
+        # Conectar temas es explorar cómo se relacionan; integrar y aplicar es producir algo propio.
+        "curiosity": sig["linkedConcepts"] * 25,
+        "creation": sig["novelTransferCases"] * 30 + sig["integratedOutcomes"] * 40,
+        "integrity": 0,
     }
-    instrumentadas = {"mastery", "courage", "consistency", "community"}
+    instrumentadas = {"mastery", "courage", "consistency", "community", "curiosity", "creation"}
     ayuda = {
         "mastery": "Episodios verificados, retención diferida y transferencia.",
-        "curiosity": "Preguntas productivas, hipótesis y exploración de fuentes (en preparación).",
+        "curiosity": "Conectar temas que parecían separados.",
         "consistency": "Sesiones planificadas y práctica distribuida en el tiempo.",
         "courage": "Declarar incertidumbre y corregir errores de alta confianza.",
         "community": "Apoyo entre pares validado y metas compartidas.",
-        "creation": "Iteración de artefactos y soluciones originales (en preparación).",
+        "creation": "Aplicar a casos nuevos e integrar conceptos en un resultado.",
         "integrity": "Citar fuentes, declarar límites y uso responsable de IA (en preparación).",
     }
     out = []
@@ -169,11 +186,16 @@ def _cond(sig: dict, key: str, need):
                                                   f"Corrige {need} error(es) que diste con alta confianza (llevas {S['correctedHighConfidenceErrors']})", True),
         "delayedRetentionAtLeast75Percent": lambda: ((1.0 if (S["delayedRetentionPct"] or 0) >= 75 else 0.0),
                                                      "Mantén ≥75% de retención en repasos a 7–21 días", True),
-        "linkedConcepts": lambda: (0.0, f"Conecta {need} conceptos entre sí (en preparación)", False),
-        "novelTransferCases": lambda: (0.0, f"Resuelve {need} caso(s) nuevo(s) de transferencia (en preparación)", False),
-        "conceptsIntegrated": lambda: (0.0, f"Integra {need} conceptos en un resultado (en preparación)", False),
-        "integratedOutcomes": lambda: (0.0, "Logra un resultado de aprendizaje integrado (en preparación)", False),
-        "weeklyPlanCompletionAtLeast80Percent": lambda: (0.0, f"Cumple ≥80% de tu plan semanal en {need} semanas (en preparación)", False),
+        "linkedConcepts": lambda: (frac(S["linkedConcepts"], need),
+                                   f"Conecta {need} pares de temas entre sí en un repaso (llevas {S['linkedConcepts']})", True),
+        "novelTransferCases": lambda: (frac(S["novelTransferCases"], need),
+                                       f"Aplica lo aprendido a {need} caso(s) nuevo(s) en un repaso (llevas {S['novelTransferCases']})", True),
+        "conceptsIntegrated": lambda: (frac(S["conceptsIntegrated"], need),
+                                       f"Integra {need} conceptos en un mismo resultado (tu mejor síntesis lleva {S['conceptsIntegrated']})", True),
+        "integratedOutcomes": lambda: (frac(S["integratedOutcomes"], need),
+                                       f"Logra {need} síntesis que integre tres conceptos o más (llevas {S['integratedOutcomes']})", True),
+        "weeklyPlanCompletionAtLeast80Percent": lambda: (frac(S["weeklyPlanCompletionAtLeast80Percent"], need),
+                                                         f"Cumple ≥80% de tu plan en {need} semanas (llevas {S['weeklyPlanCompletionAtLeast80Percent']})", True),
         "validatedPeerSupports": lambda: (frac(S["validatedPeerSupports"], need),
                                           f"Ayuda a {need} compañeros con validación (llevas {S['validatedPeerSupports']})", True),
         "sharedGroupGoalsCompleted": lambda: (frac(S["sharedGroupGoalsCompleted"], need),
