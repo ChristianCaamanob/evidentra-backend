@@ -406,12 +406,15 @@ def cumbre(db: Session, pseudo_id: str, medallas: list) -> list:
     for orden, (asset, nombre, ids) in enumerate(TRAMOS, start=1):
         hitos = [por_id.get(i, {"id": i}) for i in ids]
         listos = [h for h in hitos if h.get("unlocked")]
-        falta = []
-        for h in hitos:
-            if not h.get("unlocked"):
-                if h.get("falta_xp"):
-                    falta.append(f"Acumula {h['falta_xp']} XP más")
-                falta.extend(h.get("falta_evidencia") or [])
+        # Solo el SIGUIENTE hito sin conseguir: listar los dos a la vez daba dos "Acumula X XP más"
+        # seguidos y lo que se necesita es un próximo paso, no un inventario de deudas.
+        siguiente = next((h for h in hitos if not h.get("unlocked")), None)
+        falta, preparacion = [], []
+        if siguiente:
+            if siguiente.get("falta_xp"):
+                falta.append(f"Acumula {siguiente['falta_xp']} XP más")
+            for t in (siguiente.get("falta_evidencia") or []):
+                (preparacion if "en preparación" in t else falta).append(t)
         prog = round(sum(h.get("progress", 0) for h in hitos) / len(hitos)) if hitos else 0
         out.append({"orden": orden, "id": asset, "nombre": nombre,
                     "asset128": f"assets/medals/png-128/{asset}.png",
@@ -422,7 +425,11 @@ def cumbre(db: Session, pseudo_id: str, medallas: list) -> list:
                     "medallas": [{"id": h.get("id"), "slug": h.get("slug"),
                                   "unlocked": bool(h.get("unlocked")), "progress": h.get("progress", 0)}
                                  for h in hitos],
-                    "falta": falta[:4]})
+                    "falta": falta[:4],
+                    # Señales que el motor todavía no mide: se dicen, no se esconden. Un tramo que
+                    # depende solo de ellas no se puede completar hoy y el estudiante merece saberlo.
+                    "en_preparacion": [t.replace(" (en preparación)", "") for t in preparacion[:3]],
+                    "alcanzable": not preparacion})
     return out
 
 

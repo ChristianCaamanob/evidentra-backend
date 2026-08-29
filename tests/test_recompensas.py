@@ -299,3 +299,22 @@ def test_las_reglas_nombran_las_acciones_reales_y_lo_que_no_suma():
     ids = {a["id"] for a in r["acciones"]}
     assert {"consulta", "repaso", "diferida", "error", "pandilla"} <= ids
     assert r["no_suma"] and r["sin_castigo"] and "nunca notas" in r["lumis"]
+
+
+def test_el_tramo_solo_pide_el_siguiente_hito(db):
+    """Listar los dos hitos a la vez daba dos «Acumula X XP más» seguidos: se necesita un paso."""
+    t = rw.cumbre(db, PS, _medallas_falsas())[2]        # tramo 3: medallas 3 y 4
+    assert sum(1 for x in t["falta"] if "XP" in x) == 1
+
+
+def test_lo_que_el_motor_aun_no_mide_se_dice_no_se_esconde(db):
+    from app.services import logros_service as ls
+    est = ls.estado(db, PS)
+    tramos = rw.cumbre(db, PS, est["medals"])
+    # Con señales sin instrumentar hay tramos que hoy NO se pueden completar; hay que declararlo.
+    bloqueados = [t for t in tramos if not t["alcanzable"]]
+    assert bloqueados, "si todo fuera alcanzable, este test sobra"
+    assert all(t["en_preparacion"] for t in bloqueados)
+    # Y al revés: si un tramo tiene una señal sin instrumentar, no puede figurar como alcanzable.
+    assert all(t["alcanzable"] for t in tramos if not t["en_preparacion"])
+    assert all("en preparación" not in x for t in tramos for x in t["falta"])
