@@ -34,6 +34,27 @@ _PROVEEDORES = [
 ]
 
 
+
+def _titulo_limpio(bruto, proveedor: str) -> str:
+    """El pie de un TikTok es una sopa de hashtags; como título no sirve.
+
+    Se corta en el primer hashtag y se recorta a algo que quepa en una tarjeta. Si al
+    quitar los hashtags no queda nada (hay videos que solo son etiquetas), se usan las
+    etiquetas convertidas en palabras antes que dejarlo sin nombre.
+    """
+    t = str(bruto or "").strip()
+    if not t:
+        return f"Video de {proveedor}"
+    limpio = re.split(r"\s*#", t)[0].strip(" .·-—|")
+    if len(limpio) < 8:                       # el pie era casi todo hashtags
+        etiquetas = re.findall(r"#([A-Za-zÁÉÍÓÚÑáéíóúñ0-9_]{3,})", t)[:4]
+        if etiquetas:
+            limpio = " · ".join(x.replace("_", " ").capitalize() for x in etiquetas)
+    limpio = re.sub(r"\s+", " ", limpio).strip()
+    if not limpio:
+        return f"Video de {proveedor}"
+    return (limpio[:117] + "…") if len(limpio) > 120 else limpio
+
 def proveedor_de(url: str):
     u = str(url or "")
     for nombre, patron, endpoint in _PROVEEDORES:
@@ -68,7 +89,7 @@ def resolver(url: str) -> dict:
             f"{nombre} no me dio la información de ese video. Revisa que el enlace sea "
             "público y esté completo.")
 
-    titulo = str(d.get("title") or "").strip()[:200] or f"Video de {nombre}"
+    titulo = _titulo_limpio(d.get("title"), nombre)
     autor = str(d.get("author_name") or "").strip()[:120] or None
 
     # La miniatura se guarda con nosotros (ver el docstring del módulo).

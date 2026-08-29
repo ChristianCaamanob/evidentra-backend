@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.errors import not_found, unprocessable
 from app.models.material_curso import MaterialCurso
 
-_TIPOS = {"programa", "calendario", "apunte", "libro", "articulo", "enlace", "otro"}
+_TIPOS = {"video", "programa", "calendario", "apunte", "libro", "articulo", "enlace", "otro"}
 _MAX_BYTES = 9 * 1024 * 1024   # 9 MB por archivo (para más grande, usar enlace)
 
 
@@ -24,7 +24,12 @@ def _tipo(v) -> str:
 def _dict(m: MaterialCurso, incluir_datos: bool = False) -> dict:
     # Un video lleva su miniatura como "archivo": se sirve por la ruta que ya existe, así el
     # listado no arrastra el base64 de todas las portadas.
-    es_video = (m.tipo == "video")
+    import re as _re
+    # También por la URL: los videos agregados antes de que "video" existiera como tipo
+    # quedaron marcados "otro", y no hay razón para que se vean peor por eso.
+    es_video = (m.tipo == "video") or bool(
+        m.url and _re.search(r"(tiktok\.com|youtube\.com|youtu\.be|vimeo\.com|instagram\.com)",
+                             str(m.url), _re.I))
     d = {"id": str(m.id), "titulo": m.titulo, "tipo": m.tipo, "descripcion": m.descripcion,
          "url": m.url, "archivo_nombre": m.archivo_nombre, "archivo_mime": m.archivo_mime,
          "tamano": m.tamano, "tiene_archivo": bool(m.archivo_datos),

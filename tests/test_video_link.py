@@ -88,3 +88,29 @@ def test_una_miniatura_gigante_no_se_guarda(monkeypatch):
         {"title": "X", "thumbnail_url": "https://x/y.jpg"}, thumb=b"\xff\xd8" + b"z" * (2 * 1024 * 1024)))
     d = vl.resolver("https://www.tiktok.com/@x/video/1")
     assert d["thumb_data_url"] is None and d["titulo"] == "X"
+
+
+# ── El pie de TikTok no sirve como título ─────────────────────────────────────────────
+@pytest.mark.parametrize("bruto,esperado", [
+    ("ANATOMÍA DE PAREDES DE PELVIS. #anatomia #pelvis #perineo", "ANATOMÍA DE PAREDES DE PELVIS"),
+    ("Diafragma pélvico en 60 segundos", "Diafragma pélvico en 60 segundos"),
+])
+def test_titulo_se_corta_en_los_hashtags(bruto, esperado):
+    assert vl._titulo_limpio(bruto, "TikTok") == esperado
+
+
+def test_si_es_solo_hashtags_se_arma_un_titulo_igual():
+    """Hay videos cuyo pie son puras etiquetas: dejarlo sin nombre sería peor."""
+    t = vl._titulo_limpio("#pisopelvico #elevadordelano #anatomia", "TikTok")
+    assert "Pisopelvico" in t and "#" not in t
+
+
+def test_titulo_muy_largo_se_recorta():
+    t = vl._titulo_limpio("A" * 400, "TikTok")
+    assert len(t) <= 121 and t.endswith("…")
+
+
+def test_el_tipo_video_ya_es_valido():
+    """Sin esto quedaba como 'otro' y por eso no se mostraba la portada."""
+    from app.services import material_curso_service as mc
+    assert mc._tipo("video") == "video"

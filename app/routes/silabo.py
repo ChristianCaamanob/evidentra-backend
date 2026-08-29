@@ -616,6 +616,43 @@ def materiales_listar(course_id: UUID, db: Session = Depends(get_db)):
     return mc.listar(db, course_id)
 
 
+@router.post("/materiales/{material_id}/preview", dependencies=[Depends(req_profesor)])
+@limit("20/minute")
+def material_refrescar_preview(material_id: UUID, request: Request, db: Session = Depends(get_db)):
+    """Vuelve a pedir título y portada de un material de video ya guardado.
+
+    Sirve para los que se agregaron antes de que existiera el tipo «video», y para cuando
+    la plataforma no respondió a la primera.
+    """
+    from app.models.material_curso import MaterialCurso
+    from app.services import video_link_service as vl
+    from app.services import material_curso_service as mc
+    m = db.query(MaterialCurso).filter(MaterialCurso.id == material_id).first()
+    if not m:
+        from app.core.errors import not_found
+        raise not_found("Ese material no existe.")
+    if not m.url:
+        from app.core.errors import unprocessable as _u
+        raise _u("Ese material no es un enlace de video.")
+    meta = vl.resolver(m.url)
+    m.tipo = "video"
+    m.titulo = meta["titulo"]
+    m.descripcion = meta["proveedor"] + (" · " + meta["autor"] if meta["autor"] else "")
+    if meta.get("thumb_data_url"):
+        import base64
+        import re as _re
+        crudo = _re.sub(r"^data:[^;]+;base64,", "", meta["thumb_data_url"])
+        m.archivo_datos = crudo
+        m.archivo_nombre = "preview-" + meta["proveedor"].lower() + ".jpg"
+        m.archivo_mime = "image/jpeg"
+        try:
+            m.tamano = len(base64.b64decode(crudo, validate=False))
+        except Exception:  # noqa: BLE001
+            m.tamano = 0
+    db.commit(); db.refresh(m)
+    return {"ok": True, "material": mc._dict(m)}
+
+
 @router.delete("/materiales/{material_id}", dependencies=[Depends(req_profesor)])
 def materiales_eliminar(material_id: UUID, db: Session = Depends(get_db)):
     from app.services import material_curso_service as mc
