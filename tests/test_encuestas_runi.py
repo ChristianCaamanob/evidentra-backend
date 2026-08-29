@@ -163,3 +163,42 @@ def test_limites_de_forma(ent):
     assert _crear(ent, opciones=["Solo una"]).status_code == 422
     assert _crear(ent, pregunta="  ").status_code == 422
     assert _crear(ent, opciones=["a", "b", "c", "d", "e", "f", "g"]).status_code == 422
+
+
+# ── Editar una encuesta ya publicada ──────────────────────────────────────────────────
+# Sin esto, corregir una errata obligaba a borrar y volver a crear -perdiendo los votos-.
+
+def test_corregir_una_errata_sin_perder_la_encuesta(ent):
+    e = _crear(ent, opciones=["MARTES 08 DE SEPTIEMBRE", "MIÉCOLES 09 DE SPETIEMBRE"]).json()
+    r = ent["c"].patch(f"{API}/encuestas/{e['id']}",
+                       json={"opciones": ["MARTES 08 DE SEPTIEMBRE", "MIÉRCOLES 09 DE SEPTIEMBRE"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["opciones"][1]["texto"] == "MIÉRCOLES 09 DE SEPTIEMBRE"
+    assert r.json()["id"] == e["id"], "debe ser la MISMA encuesta, no una nueva"
+
+
+def test_con_votos_se_corrige_el_texto_pero_no_se_agregan_opciones(ent):
+    """Los votos guardan el índice: agregar o quitar movería lo que la gente eligió."""
+    e = _crear(ent).json()
+    c, tok, cod = ent["c"], ent["tok"], ent["cod"]
+    c.post(f"{API}/silabo/{cod}/encuestas/{e['id']}/votar",
+           json={"token": tok(_CEO_RUT), "opcion": 2})
+
+    ok = c.patch(f"{API}/encuestas/{e['id']}",
+                 json={"opciones": ["Muy cómoda", "Bien", "Justo, pero llego", "Me cuesta seguirlo"]})
+    assert ok.status_code == 200, "corregir el texto debe seguir permitido"
+    assert ok.json()["opciones"][2]["n"] == 1, "el voto se mantuvo donde estaba"
+
+    mal = c.patch(f"{API}/encuestas/{e['id']}", json={"opciones": ["Sí", "No"]})
+    assert mal.status_code == 409, "quitar opciones con votos cambiaría lo que eligieron"
+
+
+def test_se_puede_abrir_al_curso_editando_la_lista_blanca(ent):
+    """Terminado el piloto: se quita la lista y la ve todo el curso, con sus votos intactos."""
+    e = _crear(ent, solo_ruts=[_CEO_RUT]).json()
+    c, tok, cod = ent["c"], ent["tok"], ent["cod"]
+    assert c.post(f"{API}/silabo/{cod}/encuestas", json={"token": tok("22222222-2")}).json()["encuestas"] == []
+
+    c.patch(f"{API}/encuestas/{e['id']}", json={"solo_ruts": []})
+    d = c.post(f"{API}/silabo/{cod}/encuestas", json={"token": tok("22222222-2")}).json()
+    assert len(d["encuestas"]) == 1 and d["encuestas"][0]["piloto"] is False

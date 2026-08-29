@@ -523,6 +523,15 @@ def encuesta_cerrar(encuesta_id: UUID, payload: dict | None = None, db: Session 
     return enc.cerrar(db, encuesta_id, bool((payload or {}).get("abierta", False)))
 
 
+@router.patch("/encuestas/{encuesta_id}", dependencies=[Depends(req_profesor)])
+def encuesta_editar(encuesta_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    """Corrige una encuesta publicada (texto, opciones, lista blanca) sin perder los votos."""
+    from app.services import encuesta_service as enc
+    p = payload or {}
+    return enc.editar(db, encuesta_id, pregunta=p.get("pregunta"),
+                      opciones=p.get("opciones"), solo_ruts=p.get("solo_ruts"))
+
+
 @router.delete("/encuestas/{encuesta_id}", dependencies=[Depends(req_profesor)])
 def encuesta_eliminar(encuesta_id: UUID, db: Session = Depends(get_db)):
     from app.services import encuesta_service as enc

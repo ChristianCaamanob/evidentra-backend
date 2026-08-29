@@ -144,3 +144,41 @@ def eliminar(db: Session, encuesta_id) -> dict:
     db.query(EncuestaVoto).filter(EncuestaVoto.encuesta_id == e.id).delete(synchronize_session=False)
     db.delete(e); db.commit()
     return {"ok": True}
+
+def editar(db: Session, encuesta_id, pregunta=None, opciones=None, solo_ruts=None) -> dict:
+    """Corregir una encuesta ya publicada sin perderla.
+
+    Existe porque la alternativa era borrar y volver a crear por una errata. Regla: el
+    TEXTO se puede arreglar siempre, pero **no se puede cambiar el número de opciones si
+    ya hay votos** — los votos guardan el índice, así que agregar o quitar una movería
+    silenciosamente lo que la gente eligió.
+    """
+    e = db.query(Encuesta).filter(Encuesta.id == encuesta_id).first()
+    if not e:
+        raise not_found("Esa encuesta no existe.")
+    n_votos = db.query(EncuestaVoto).filter(EncuestaVoto.encuesta_id == e.id).count()
+
+    if pregunta is not None:
+        p = str(pregunta).strip()[:300]
+        if not p:
+            raise unprocessable("La pregunta no puede quedar vacía.")
+        e.pregunta = p
+
+    if opciones is not None:
+        ops = [str(o).strip()[:_MAX_LARGO_OPCION] for o in opciones if str(o or "").strip()]
+        if len(ops) < 2:
+            raise unprocessable("Una encuesta necesita al menos dos opciones.")
+        if len(ops) > _MAX_OPCIONES:
+            raise unprocessable(f"Máximo {_MAX_OPCIONES} opciones.")
+        if n_votos and len(ops) != len(e.opciones or []):
+            raise conflict(
+                f"Ya hay {n_votos} voto(s): puedes corregir el texto de las opciones, pero no "
+                "agregar ni quitar, porque cambiaría lo que esas personas eligieron.")
+        e.opciones = ops
+
+    if solo_ruts is not None:
+        ruts = [_norm_rut(x) for x in solo_ruts if _norm_rut(x)]
+        e.solo_ruts = (ruts or None)
+
+    db.commit(); db.refresh(e)
+    return _dict(db, e)
