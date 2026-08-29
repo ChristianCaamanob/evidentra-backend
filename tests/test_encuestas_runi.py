@@ -80,6 +80,8 @@ def test_crear_encuesta(ent):
     assert d["pregunta"].startswith("¿Cómo te sientes")
     assert len(d["opciones"]) == 4 and d["total"] == 0
     assert d["opciones"][0]["pct"] == 0, "sin votos no puede haber porcentaje"
+    # Defectos elegidos: el estudiante NO ve el recuento y NO puede cambiar su voto.
+    assert d["ver_resultados"] is False and d["permite_cambio"] is False
 
 
 def test_piloto_solo_para_el_rut_indicado(ent):
@@ -106,24 +108,59 @@ def test_el_rut_se_reconoce_escrito_de_cualquier_forma(ent):
     assert len(d["encuestas"]) == 1, "la lista blanca no toleró los puntos del RUT"
 
 
-def test_votar_y_contar(ent):
+def test_votar_registra_solo_TU_respuesta(ent):
+    """Por defecto el estudiante ve QUÉ eligió él, no cómo va el curso."""
     eid = _crear(ent, solo_ruts=[_CEO_RUT]).json()["id"]
     c, tok, cod = ent["c"], ent["tok"], ent["cod"]
     d = c.post(f"{API}/silabo/{cod}/encuestas/{eid}/votar",
                json={"token": tok(_CEO_RUT), "opcion": 1}).json()
-    assert d["total"] == 1 and d["mi_voto"] == 1
-    assert d["opciones"][1]["n"] == 1 and d["opciones"][1]["pct"] == 100
+    assert d["mi_voto"] == 1
+    assert d["total"] is None, "el total no puede viajar al estudiante"
+    assert "n" not in d["opciones"][1] and "pct" not in d["opciones"][1], (
+        "los conteos NO deben salir del servidor: ocultarlos solo en pantalla no sirve, "
+        "bastaría mirar la respuesta de red")
 
 
-def test_cambiar_de_opinion_no_infla_el_grafico(ent):
-    """Si cada cambio sumara una fila, el gráfico mostraría quién insistió más."""
+def test_con_resultados_visibles_si_se_ve_el_recuento(ent):
+    """Cuando el docente lo permite explícitamente, vuelve el gráfico completo."""
+    eid = _crear(ent, solo_ruts=[_CEO_RUT], ver_resultados=True).json()["id"]
+    c, tok, cod = ent["c"], ent["tok"], ent["cod"]
+    d = c.post(f"{API}/silabo/{cod}/encuestas/{eid}/votar",
+               json={"token": tok(_CEO_RUT), "opcion": 1}).json()
+    assert d["total"] == 1 and d["opciones"][1]["pct"] == 100
+
+
+def test_el_docente_SIEMPRE_ve_el_recuento(ent):
+    """Aunque el alumno no lo vea: es quien tiene que tomar la decisión."""
+    _crear(ent, solo_ruts=[_CEO_RUT])
+    d = ent["c"].get(f"{API}/courses/{ent['cid']}/encuestas").json()["encuestas"][0]
+    assert d["total"] == 0 and "pct" in d["opciones"][0]
+
+
+def test_no_se_puede_cambiar_la_respuesta(ent):
+    """Se responde una vez y queda: es lo que hace que el resultado sirva para decidir."""
     eid = _crear(ent).json()["id"]
     c, tok, cod = ent["c"], ent["tok"], ent["cod"]
     t = tok(_CEO_RUT)
+    assert c.post(f"{API}/silabo/{cod}/encuestas/{eid}/votar",
+                  json={"token": t, "opcion": 0}).status_code == 200
+    r = c.post(f"{API}/silabo/{cod}/encuestas/{eid}/votar", json={"token": t, "opcion": 3})
+    assert r.status_code == 409, "pudo cambiar su voto"
+    assert "Ya respondiste" in r.json()["detail"]
+    # y el voto original sigue intacto
+    d = ent["c"].get(f"{API}/courses/{ent['cid']}/encuestas").json()["encuestas"][0]
+    assert d["opciones"][0]["n"] == 1 and d["opciones"][3]["n"] == 0
+
+
+def test_si_el_docente_lo_permite_si_se_puede_cambiar(ent):
+    eid = _crear(ent, permite_cambio=True).json()["id"]
+    c, tok, cod = ent["c"], ent["tok"], ent["cod"]
+    t = tok(_CEO_RUT)
     c.post(f"{API}/silabo/{cod}/encuestas/{eid}/votar", json={"token": t, "opcion": 0})
-    d = c.post(f"{API}/silabo/{cod}/encuestas/{eid}/votar", json={"token": t, "opcion": 3}).json()
-    assert d["total"] == 1, f"se acumularon votos: {d['total']}"
-    assert d["opciones"][0]["n"] == 0 and d["opciones"][3]["n"] == 1
+    assert c.post(f"{API}/silabo/{cod}/encuestas/{eid}/votar",
+                  json={"token": t, "opcion": 3}).status_code == 200
+    d = ent["c"].get(f"{API}/courses/{ent['cid']}/encuestas").json()["encuestas"][0]
+    assert d["opciones"][3]["n"] == 1 and d["opciones"][0]["n"] == 0, "debe MOVER, no acumular"
 
 
 def test_no_se_puede_votar_en_una_que_no_te_toca(ent):

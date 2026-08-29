@@ -538,6 +538,10 @@ _COLUMNAS_ADITIVAS = {
     "salas_estudio": {
         "grupo_codigo": "VARCHAR(10)",
     },
+    "encuestas": {
+        "ver_resultados": "BOOLEAN NOT NULL DEFAULT false",
+        "permite_cambio": "BOOLEAN NOT NULL DEFAULT false",
+    },
     "sala_mensajes": {
         "char": "VARCHAR(24)",
     },

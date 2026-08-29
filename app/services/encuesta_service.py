@@ -38,7 +38,10 @@ def puede_verla(e: Encuesta, owner_key: str) -> bool:
     return _rut_de_owner(owner_key) in {_norm_rut(x) for x in permitidos}
 
 
-def _dict(db: Session, e: Encuesta, owner_key: str | None = None) -> dict:
+def _dict(db: Session, e: Encuesta, owner_key: str | None = None, es_docente: bool = False) -> dict:
+    """Ojo con `es_docente`: si el resultado está oculto, los conteos NO se envían al
+    estudiante. Ocultarlos solo en la pantalla no serviría de nada — bastaría con mirar la
+    respuesta de red para saber cómo va la votación."""
     votos = db.query(EncuestaVoto).filter(EncuestaVoto.encuesta_id == e.id).all()
     opciones = list(e.opciones or [])
     conteo = [0] * len(opciones)
@@ -47,22 +50,32 @@ def _dict(db: Session, e: Encuesta, owner_key: str | None = None) -> dict:
             conteo[int(v.opcion)] += 1
     total = sum(conteo)
     mio = next((v for v in votos if owner_key and v.owner_key == owner_key), None)
+    muestra = es_docente or bool(e.ver_resultados)
+    ops = []
+    for i, t in enumerate(opciones):
+        o = {"i": i, "texto": t}
+        if muestra:
+            # El porcentaje se calcula aquí para que el gráfico no lo reinvente en cada
+            # cliente y todos vean exactamente lo mismo.
+            o["n"] = conteo[i]
+            o["pct"] = (round(conteo[i] * 100 / total) if total else 0)
+        ops.append(o)
     return {
         "id": str(e.id), "pregunta": e.pregunta, "anonima": bool(e.anonima),
-        "abierta": bool(e.abierta), "total": total,
+        "abierta": bool(e.abierta),
+        "total": (total if muestra else None),
+        "ver_resultados": bool(e.ver_resultados),
+        "permite_cambio": bool(e.permite_cambio),
         "mi_voto": (int(mio.opcion) if mio else None),
         "piloto": bool([x for x in (e.solo_ruts or []) if x]),
-        "opciones": [{"i": i, "texto": t, "n": conteo[i],
-                      # El porcentaje se calcula aquí para que el gráfico no lo reinvente en
-                      # cada cliente y todos vean exactamente lo mismo.
-                      "pct": (round(conteo[i] * 100 / total) if total else 0)}
-                     for i, t in enumerate(opciones)],
+        "opciones": ops,
         "created_at": e.created_at.isoformat() if e.created_at else None,
     }
 
 
 def crear(db: Session, silabo: str, pregunta: str, opciones: list, autor: str = "",
-          solo_ruts: list | None = None, anonima: bool = True) -> dict:
+          solo_ruts: list | None = None, anonima: bool = True,
+          ver_resultados: bool = False, permite_cambio: bool = False) -> dict:
     p = str(pregunta or "").strip()[:300]
     if not p:
         raise unprocessable("Escribe la pregunta de la encuesta.")
@@ -74,9 +87,10 @@ def crear(db: Session, silabo: str, pregunta: str, opciones: list, autor: str = 
     ruts = [_norm_rut(x) for x in (solo_ruts or []) if _norm_rut(x)]
     e = Encuesta(silabo=str(silabo or "").strip().upper()[:12], pregunta=p, opciones=ops,
                  anonima=bool(anonima), abierta=True, solo_ruts=(ruts or None),
+                 ver_resultados=bool(ver_resultados), permite_cambio=bool(permite_cambio),
                  creada_por=(str(autor or "").strip()[:120] or None))
     db.add(e); db.commit(); db.refresh(e)
-    return _dict(db, e)
+    return _dict(db, e, es_docente=True)
 
 
 def listar_para(db: Session, silabo: str, owner_key: str | None) -> dict:
@@ -103,7 +117,7 @@ def listar_del_docente(db: Session, silabo: str) -> dict:
     filas = (db.query(Encuesta)
              .filter(Encuesta.silabo == str(silabo or "").strip().upper())
              .order_by(Encuesta.created_at.desc()).all())
-    return {"ok": True, "encuestas": [_dict(db, e) for e in filas]}
+    return {"ok": True, "encuestas": [_dict(db, e, es_docente=True) for e in filas]}
 
 
 def votar(db: Session, encuesta_id, owner_key: str, nombre: str | None, opcion,
@@ -122,10 +136,13 @@ def votar(db: Session, encuesta_id, owner_key: str, nombre: str | None, opcion,
     if not (0 <= i < len(e.opciones or [])):
         raise unprocessable("Esa opción no existe.")
 
-    # Un voto por persona: cambiar de opinión actualiza, no acumula.
+    # Un voto por persona. Por defecto NO se puede cambiar: se responde una vez y queda,
+    # que es lo que hace que el resultado sirva para tomar una decisión.
     mio = db.query(EncuestaVoto).filter(
         EncuestaVoto.encuesta_id == e.id, EncuestaVoto.owner_key == owner_key).first()
     txt = (str(comentario or "").strip()[:500] or None)
+    if mio and not e.permite_cambio:
+        raise conflict("Ya respondiste esta encuesta. Tu respuesta quedó registrada.")
     if mio:
         mio.opcion = i
         if txt:
@@ -144,7 +161,7 @@ def cerrar(db: Session, encuesta_id, abierta: bool = False) -> dict:
         raise not_found("Esa encuesta no existe.")
     e.abierta = bool(abierta)
     db.commit()
-    return _dict(db, e)
+    return _dict(db, e, es_docente=True)
 
 
 def eliminar(db: Session, encuesta_id) -> dict:
@@ -155,7 +172,8 @@ def eliminar(db: Session, encuesta_id) -> dict:
     db.delete(e); db.commit()
     return {"ok": True}
 
-def editar(db: Session, encuesta_id, pregunta=None, opciones=None, solo_ruts=None) -> dict:
+def editar(db: Session, encuesta_id, pregunta=None, opciones=None, solo_ruts=None,
+           ver_resultados=None, permite_cambio=None) -> dict:
     """Corregir una encuesta ya publicada sin perderla.
 
     Existe porque la alternativa era borrar y volver a crear por una errata. Regla: el
@@ -191,4 +209,4 @@ def editar(db: Session, encuesta_id, pregunta=None, opciones=None, solo_ruts=Non
         e.solo_ruts = (ruts or None)
 
     db.commit(); db.refresh(e)
-    return _dict(db, e)
+    return _dict(db, e, es_docente=True)

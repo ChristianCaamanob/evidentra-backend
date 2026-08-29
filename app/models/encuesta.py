@@ -28,6 +28,11 @@ class Encuesta(UUIDMixin, Base):
     abierta: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
     # Lista blanca de RUT normalizados. Vacía = todo el curso.
     solo_ruts: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # ¿El estudiante ve el recuento del curso? Por defecto NO: en una votación, saber lo
+    # que eligieron los demás arrastra el voto propio.
+    ver_resultados: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    # ¿Puede cambiar su respuesta? Por defecto NO: se responde una vez y queda.
+    permite_cambio: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     creada_por: Mapped[str | None] = mapped_column(String(120), nullable=True)
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

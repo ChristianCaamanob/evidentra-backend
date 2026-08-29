@@ -505,7 +505,9 @@ def encuesta_crear(course_id: UUID, payload: dict, usuario=Depends(usuario_actua
     p = payload or {}
     return enc.crear(db, a.codigo, p.get("pregunta", ""), p.get("opciones") or [],
                      autor=(getattr(usuario, "name", "") or "Tu profesor"),
-                     solo_ruts=p.get("solo_ruts") or [], anonima=bool(p.get("anonima", True)))
+                     solo_ruts=p.get("solo_ruts") or [], anonima=bool(p.get("anonima", True)),
+                     ver_resultados=bool(p.get("ver_resultados", False)),
+                     permite_cambio=bool(p.get("permite_cambio", False)))
 
 
 @router.get("/courses/{course_id}/encuestas", dependencies=[Depends(req_profesor)])
@@ -529,7 +531,9 @@ def encuesta_editar(encuesta_id: UUID, payload: dict, db: Session = Depends(get_
     from app.services import encuesta_service as enc
     p = payload or {}
     return enc.editar(db, encuesta_id, pregunta=p.get("pregunta"),
-                      opciones=p.get("opciones"), solo_ruts=p.get("solo_ruts"))
+                      opciones=p.get("opciones"), solo_ruts=p.get("solo_ruts"),
+                      ver_resultados=p.get("ver_resultados"),
+                      permite_cambio=p.get("permite_cambio"))
 
 
 @router.delete("/encuestas/{encuesta_id}", dependencies=[Depends(req_profesor)])
