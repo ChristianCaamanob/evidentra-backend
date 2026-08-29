@@ -82,6 +82,12 @@ def ver_agente(course_id: UUID, request: Request, solo_pendientes: bool = False,
     return data
 
 
+@router.post("/courses/{course_id}/silabo/probar", dependencies=[Depends(req_profesor)])
+def probar_agente(course_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    # El docente prueba una pregunta como su estudiante. No queda en la bandeja ni en el mapa.
+    return sil.probar(db, course_id, (payload or {}).get("pregunta", ""))
+
+
 @router.get("/courses/{course_id}/silabo/mapa", dependencies=[Depends(req_profesor)])
 def mapa(course_id: UUID, db: Session = Depends(get_db)):
     return sil.mapa_confusion(db, course_id)

@@ -916,6 +916,83 @@ def _bloque_agenda(db, a) -> str:
             + "\n".join(lineas) + "\n\n")
 
 
+_TOPE_CONTEXTO = 40000
+
+# Palabras que delatan que la pregunta es por un PARÁMETRO del curso. Cuando aparecen, los
+# fragmentos del sílabo que hablan de evaluación pesan más: es justo donde vive el dato.
+_MARCAS_PARAMETRO = ("ponderacion", "ponderaciones", "porcentaje", "evaluacion", "evaluaciones",
+                     "nota", "notas", "certamen", "solemne", "examen", "prueba", "pruebas",
+                     "fecha", "fechas", "plazo", "asistencia", "requisito", "eximicion", "aprobacion")
+
+
+def _trozos(texto: str, largo: int = 1400) -> list:
+    """Parte el contexto en trozos legibles, cortando por párrafos y nunca a mitad de línea."""
+    trozos, actual = [], ""
+    for par in re.split(r"\n\s*\n", texto):
+        if len(par) > largo:                       # un párrafo enorme (tabla OCR) se subdivide por líneas
+            for linea in par.splitlines():
+                if len(actual) + len(linea) + 1 > largo and actual:
+                    trozos.append(actual.strip()); actual = ""
+                actual += linea + "\n"
+            continue
+        if len(actual) + len(par) + 2 > largo and actual:
+            trozos.append(actual.strip()); actual = ""
+        actual += par + "\n\n"
+    if actual.strip():
+        trozos.append(actual.strip())
+    return [t for t in trozos if t]
+
+
+def _ventana_contexto(contexto: str, pregunta: str, tope: int = _TOPE_CONTEXTO) -> str:
+    """El contexto que se le manda al modelo para ESTA pregunta.
+
+    Antes eran «los primeros 20 000 caracteres», y ahí estaba el problema: en un sílabo las
+    ponderaciones y las fechas viven en la sección de evaluación, que suele ir al FINAL. Con un
+    programa escaneado y largo, el corte se llevaba justo el dato que la estudiante preguntaba —
+    y Runi respondía con toda honestidad que no lo tenía escrito, porque para él no lo estaba.
+
+    Ahora, si el contexto no cabe entero: se conserva SIEMPRE el encabezado (identifica el curso)
+    y se eligen los fragmentos que hablan de lo que se pregunta. Los saltos se marcan con […] para
+    que el modelo sepa que está viendo una selección y no un documento completo.
+    """
+    ctx = contexto or ""
+    if len(ctx) <= tope:
+        return ctx
+    trozos = _trozos(ctx)
+    t_q = _tokens(pregunta)
+    por_parametro = bool(t_q & set(_MARCAS_PARAMETRO))
+
+    # El encabezado va siempre: sin él el modelo pierde de qué curso habla.
+    elegidos, usados = set(), 0
+    for i, t in enumerate(trozos):
+        if usados + len(t) > tope * 0.15:
+            break
+        elegidos.add(i); usados += len(t)
+
+    puntajes = []
+    for i, t in enumerate(trozos):
+        if i in elegidos:
+            continue
+        t_t = _tokens(t)
+        p = (len(t_q & t_t) / len(t_q)) if t_q else 0.0
+        if por_parametro and any(m in t_t for m in _MARCAS_PARAMETRO):
+            p += 0.5
+        if "%" in t:
+            p += 0.1
+        puntajes.append((p, i))
+    for p, i in sorted(puntajes, key=lambda x: (-x[0], x[1])):
+        if p <= 0 or usados + len(trozos[i]) > tope:
+            continue
+        elegidos.add(i); usados += len(trozos[i])
+
+    salida, anterior = [], -1
+    for i in sorted(elegidos):
+        if anterior >= 0 and i != anterior + 1:
+            salida.append("[…]")
+        salida.append(trozos[i]); anterior = i
+    return "\n\n".join(salida)
+
+
 def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, material: str | None = None,
                             imagenes: list | None = None, historial: str | None = None,
                             vinculo: dict | None = None, db=None):
@@ -1028,7 +1105,7 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, m
             '"decision_docente":"..","certeza":".."}.'
         )
         system += _bloque_vinculo(vinculo)   # v4-F2 · adapta el tono/iniciativa de Runi al vínculo elegido
-        ctx = (a.contexto or "")[:20000]
+        ctx = _ventana_contexto(a.contexto or "", pregunta)
         # La AGENDA es contexto del curso tanto como el sílabo. El docente ya cargó ahí las
         # fechas y ponderaciones de sus evaluaciones; sin esto, «¿cuándo es el Solemne?» se
         # le escalaba a él mismo para que respondiera un dato que YA había escrito.
@@ -1128,6 +1205,32 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, m
                 "otro", "media", False, None, None, "ninguna",
                 _evidencia(decision="Si no logro resolverlo, lo revisa tu docente.", fuente="ninguna",
                            certeza_sug="insuficiente"))
+
+
+def probar(db: Session, course_id, pregunta: str) -> dict:
+    """El docente prueba una pregunta como si fuera su estudiante. NO se guarda nada.
+
+    Existe porque «¿Runi puede responder esto?» no se contestaba mirando código: había que
+    preguntárselo, y hacerlo desde la app del alumno dejaba la consulta en la bandeja y le
+    ensuciaba al docente su propio mapa de vacíos. Aquí no se escribe mensaje, ni bitácora, ni
+    caché. Además devuelve CUÁNTO de su contexto alcanzó a mirar Runi para esta pregunta, que es
+    lo que suele explicar un «no lo tengo escrito» cuando el dato sí estaba cargado.
+    """
+    a = agente_de_curso(db, course_id)
+    if not a:
+        raise not_found("Este curso todavía no tiene agente de Runi.")
+    p = (pregunta or "").strip()[:1000]
+    if len(p) < 3:
+        raise conflict("Escriba la pregunta que quiere probar.")
+    tipo, respuesta, categoria, urgencia, necesita, cita, tema, fuente, ev = _clasificar_y_responder(
+        a, p, intentos=0, db=db)
+    entero = a.contexto or ""
+    mirado = _ventana_contexto(entero, p)
+    return {"ok": True, "pregunta": p, "tipo": tipo, "respuesta": respuesta, "categoria": categoria,
+            "urgencia": urgencia, "necesita_docente": bool(necesita), "cita": cita, "tema": tema,
+            "fuente": fuente, "evidencia": ev,
+            "contexto_chars": len(entero), "contexto_leido": len(mirado),
+            "contexto_completo": len(mirado) >= len(entero)}
 
 
 def mis_consultas(db: Session, codigo: str, device_id: str) -> dict:
