@@ -179,3 +179,29 @@ def test_una_transferencia_juzgada_se_ve_en_el_motor(db, runi):
     js.juzgar(db, PS, "aplicar", "pelvis", "Un caso nuevo y concreto", auto_reporte=True)
     sig = ls.estado(db, PS)["signals"]
     assert sig["novelTransferCases"] == 1
+
+
+def test_el_juicio_se_reintenta_antes_de_rendirse(monkeypatch, db):
+    """Un tropiezo puntual del modelo dejaría sin contar una respuesta que estaba bien, y ella no
+    tendría forma de saber que le pasó eso. Visto en producción: falló dos veces y anduvo a la tercera."""
+    intentos = {"n": 0}
+
+    def flaky(system, user, max_tokens=500):
+        intentos["n"] += 1
+        if intentos["n"] < 3:
+            raise RuntimeError("overloaded")
+        return '{"correcto": true, "conceptos": ["a"], "razon": "bien"}'
+
+    from app.services import correccion_experta_service as ce
+    monkeypatch.setattr(ce, "_llamar_anthropic", flaky)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    r = js.juzgar(db, PS, "recordar", "pelvis", "una respuesta", auto_reporte=True)
+    assert intentos["n"] == 3 and r["concordancia"]
+
+
+def test_si_falla_tres_veces_se_rinde_sin_dar_por_mala(monkeypatch, db):
+    from app.services import correccion_experta_service as ce
+    monkeypatch.setattr(ce, "_llamar_anthropic", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("caído")))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    r = js.juzgar(db, PS, "recordar", "pelvis", "una respuesta", auto_reporte=True)
+    assert r["sin_juicio"] and r["juicio"] is None and not r["concordancia"]

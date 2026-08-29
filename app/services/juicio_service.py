@@ -106,19 +106,22 @@ def _juzgar_con_ia(tipo: str, ra: str, ra_b: str | None, respuesta: str, context
         return None
     system, user = _prompt(tipo, ra, ra_b, contexto)
     user += "\nRESPUESTA DE LA ESTUDIANTE:\n" + (respuesta or "")[:_MAX_RESP]
-    try:
-        from app.services import correccion_experta_service as ce
-        crudo = ce._llamar_anthropic(system, user, max_tokens=500)
-        m = re.search(r"\{.*\}", crudo or "", re.S)
-        d = json.loads(m.group(0)) if m else None
-        if not isinstance(d, dict) or "correcto" not in d:
-            return None
-        return {"correcto": bool(d.get("correcto")),
-                "conceptos": [str(x)[:80] for x in (d.get("conceptos") or [])][:8],
-                "razon": str(d.get("razon") or "")[:400]}
-    except Exception as e:  # noqa: BLE001
-        _LOG.warning("juicio: no se pudo juzgar (%s): %s", tipo, str(e)[:120])
-        return None
+    # Se reintenta: un tropiezo puntual del modelo (o un JSON mal cerrado) dejaría sin contar una
+    # respuesta que estaba bien, y la estudiante no tiene forma de saber que le pasó eso. Visto en
+    # producción: la misma respuesta falló dos veces seguidas y funcionó al tercer intento.
+    for intento in range(3):
+        try:
+            from app.services import correccion_experta_service as ce
+            crudo = ce._llamar_anthropic(system, user, max_tokens=500)
+            m = re.search(r"\{.*\}", crudo or "", re.S)
+            d = json.loads(m.group(0)) if m else None
+            if isinstance(d, dict) and "correcto" in d:
+                return {"correcto": bool(d.get("correcto")),
+                        "conceptos": [str(x)[:80] for x in (d.get("conceptos") or [])][:8],
+                        "razon": str(d.get("razon") or "")[:400]}
+        except Exception as e:  # noqa: BLE001
+            _LOG.warning("juicio: intento %d/3 falló (%s): %s", intento + 1, tipo, str(e)[:120])
+    return None
 
 
 def _contexto_del_curso(db: Session, course_id) -> str:
