@@ -165,7 +165,11 @@ def silabo_por_curso(course_code: str, db: Session = Depends(get_db)):
 @router.get("/silabo/{codigo}")
 def info_publica(codigo: str, db: Session = Depends(get_db)):
     a = sil.agente_por_codigo(db, codigo)
-    return {"codigo": a.codigo, "activo": a.activo, "nombre_curso": a.nombre_curso}
+    # `musica`: las playlists que el docente eligió para su curso. Van aquí y no en un endpoint
+    # aparte porque la app del alumno ya pide esto al entrar; una llamada más por una lista de
+    # tres enlaces no se justifica.
+    return {"codigo": a.codigo, "activo": a.activo, "nombre_curso": a.nombre_curso,
+            "musica": sil.limpiar_musica((a.config or {}).get("musica"))}
 
 
 @router.post("/silabo/{codigo}/preguntar")
