@@ -867,6 +867,19 @@ def anuncio_listar_docente(course_id: UUID, db: Session = Depends(get_db)):
     return ans.listar_por_course(db, course_id)
 
 
+@router.post("/anuncios/{anuncio_id}/detener", dependencies=[Depends(req_profesor)])
+def anuncio_detener(anuncio_id: UUID, db: Session = Depends(get_db)):
+    """Apaga la repetición sin borrar el comunicado: deja de sonar, el texto sigue en la bandeja."""
+    from app.services import anuncio_service as ans
+    return ans.detener(db, anuncio_id)
+
+
+@router.delete("/anuncios/{anuncio_id}", dependencies=[Depends(req_profesor)])
+def anuncio_eliminar(anuncio_id: UUID, db: Session = Depends(get_db)):
+    from app.services import anuncio_service as ans
+    return ans.eliminar(db, anuncio_id)
+
+
 @router.get("/anuncios/{anuncio_id}/archivo")
 def anuncio_archivo(anuncio_id: UUID, db: Session = Depends(get_db)):
     """Sirve el adjunto de un aviso. Público como el aviso mismo: el alumno lo abre desde

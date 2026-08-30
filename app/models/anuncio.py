@@ -25,4 +25,14 @@ class Anuncio(UUIDMixin, Base):
     archivo_mime: Mapped[str | None] = mapped_column(String(100), nullable=True)
     archivo_datos: Mapped[str | None] = mapped_column(Text, nullable=True)   # base64
     tamano: Mapped[int] = mapped_column(Integer, default=0)
+    # ── Recurrencia ──────────────────────────────────────────────────────────────────
+    # Un comunicado puede ser de una vez ("el examen se cambió de sala") o repetirse mientras siga
+    # vigente ("recuerden traer el delantal cada práctico"). Se repite el AVISO, no el anuncio: la
+    # bandeja del alumno conserva una sola entrada, o cada recordatorio la inundaría de duplicados.
+    repeticion: Mapped[str] = mapped_column(String(16), default="unica", server_default="unica")
+    # Hasta cuándo se repite. OBLIGATORIA en los recurrentes: un aviso que se repite para siempre
+    # deja de ser un aviso y pasa a ser ruido que nadie mira.
+    repetir_hasta: Mapped[str | None] = mapped_column(String(10), nullable=True)   # "YYYY-MM-DD"
+    veces_enviado: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    ultimo_envio: Mapped[str | None] = mapped_column(String(10), nullable=True)    # "YYYY-MM-DD"
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())

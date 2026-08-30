@@ -565,6 +565,10 @@ _COLUMNAS_ADITIVAS = {
         "archivo_mime": "VARCHAR(100)",
         "archivo_datos": "TEXT",
         "tamano": "INTEGER",
+        "repeticion": "VARCHAR(16) DEFAULT 'unica'",
+        "repetir_hasta": "VARCHAR(10)",
+        "veces_enviado": "INTEGER DEFAULT 1",
+        "ultimo_envio": "VARCHAR(10)",
     },
     "pandilla_ubicaciones": {
         "owner_key": "VARCHAR(80)",

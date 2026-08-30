@@ -217,6 +217,14 @@ def tick(db: Session) -> dict:
             db.add(PushSent(eval_id=str(e.id), owner_key=f.owner_key, hito=str(dias)))
             db.commit()
             enviados += n
+    # Comunicados recurrentes del docente ("recuerden traer el delantal cada práctico").
+    recurrentes = {}
+    try:
+        from app.services import anuncio_service as _an
+        recurrentes = _an.tick(db)
+    except Exception:  # noqa: BLE001 — aditivo: nunca puede tumbar los recordatorios de evaluación
+        recurrentes = {}
+
     # Alarmas de recordatorios personales del alumno (fecha/hora que él mismo puso).
     personales = 0
     try:
@@ -231,4 +239,5 @@ def tick(db: Session) -> dict:
         repasos = eps.tick_repasos(db)
     except Exception:  # noqa: BLE001
         _log.exception("tick repasos diferidos")
-    return {"ok": True, "enviados": enviados, "personales": personales, "repasos": repasos}
+    return {"ok": True, "enviados": enviados, "personales": personales, "repasos": repasos,
+            "comunicados": (recurrentes or {}).get("recurrentes_reenviados", 0)}
