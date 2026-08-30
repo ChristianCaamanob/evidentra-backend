@@ -50,6 +50,17 @@ def reto_manual(course_id: UUID, payload: dict, db: Session = Depends(get_db)):
     return rt.crear_manual(db, course_id, payload or {}, (payload or {}).get("eval_id"))
 
 
+@router.post("/courses/{course_id}/reto/publicar-todas", dependencies=[Depends(req_profesor)])
+def reto_publicar_todas(course_id: UUID, db: Session = Depends(get_db)):
+    """Publica el lote por revisar. Lo que no convenza se descarta antes, una por una."""
+    return rt.aprobar_todas(db, course_id)
+
+
+@router.post("/courses/{course_id}/reto/vaciar", dependencies=[Depends(req_profesor)])
+def reto_vaciar(course_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    return rt.vaciar(db, course_id, str((payload or {}).get("estado") or "descartada"))
+
+
 @router.post("/courses/{course_id}/reto/importar", dependencies=[Depends(req_profesor)])
 @limit("6/minute")
 def reto_importar(course_id: UUID, request: Request, payload: dict, db: Session = Depends(get_db)):

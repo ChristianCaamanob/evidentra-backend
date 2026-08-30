@@ -210,6 +210,39 @@ def revisar(db: Session, pregunta_id, accion: str, cambios: dict | None = None) 
     return {"ok": True, "pregunta": _dict(p, con_respuesta=True)}
 
 
+def aprobar_todas(db: Session, course_id) -> dict:
+    """Publica de una vez todo lo que está por revisar.
+
+    Revisar treinta preguntas con un clic cada una no es una revisión: es una fila de clics que se
+    despacha sin mirar. El docente lee la lista completa en pantalla y publica el lote; lo que no le
+    convenza lo descarta antes, una por una, que es donde el clic sí significa algo.
+    """
+    filas = db.query(RetoPregunta).filter(RetoPregunta.course_id == str(course_id),
+                                          RetoPregunta.estado == "propuesta").all()
+    ok, rotas = 0, 0
+    for p in filas:
+        if p.correcta in (p.alternativas or {}):
+            p.estado = "aprobada"; ok += 1
+        else:
+            rotas += 1          # sin correcta válida no se puede corregir: se queda para revisión
+    db.commit()
+    return {"ok": True, "publicadas": ok, "sin_correcta": rotas}
+
+
+def vaciar(db: Session, course_id, estado: str) -> dict:
+    """Borra de golpe un estado completo (típicamente las descartadas). No toca las demás."""
+    if estado not in ESTADOS:
+        raise unprocessable("Estado no válido.")
+    ids = [p.id for p in db.query(RetoPregunta).filter(
+        RetoPregunta.course_id == str(course_id), RetoPregunta.estado == estado).all()]
+    if not ids:
+        return {"ok": True, "eliminadas": 0}
+    db.query(RetoRespuesta).filter(RetoRespuesta.pregunta_id.in_(ids)).delete(synchronize_session=False)
+    db.query(RetoPregunta).filter(RetoPregunta.id.in_(ids)).delete(synchronize_session=False)
+    db.commit()
+    return {"ok": True, "eliminadas": len(ids)}
+
+
 def crear_manual(db: Session, course_id, datos: dict, eval_id: str | None = None) -> dict:
     """Una pregunta escrita por el docente. Nace aprobada: ya la escribió él."""
     p = _normalizar(datos or {}, {})

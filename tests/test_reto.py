@@ -346,3 +346,48 @@ def test_una_linea_mal_formada_no_corrompe_la_pregunta_anterior():
     raro = _PAUTA + [("Pregunta sin numerar", False), ("a) Intrusa", False)]
     qs = rt.parsear_docx(_docx(raro), "Pelvis")
     assert qs[1]["alternativas"]["A"] == "Elevador del ano"
+
+
+# ── publicar el lote y limpiar ───────────────────────────────────────────────────────
+def test_publicar_todas_de_una_vez(db):
+    """Revisar treinta preguntas con un clic cada una no es una revisión: es una fila de clics."""
+    _sembrar(db, 12, estado="propuesta")
+    r = rt.aprobar_todas(db, CID)
+    assert r["publicadas"] == 12 and r["sin_correcta"] == 0
+    assert len(rt.sesion(db, CID, ANA)["preguntas"]) == rt.POR_SESION
+
+
+def test_publicar_todas_deja_atras_las_que_no_se_pueden_corregir(db):
+    ps = _sembrar(db, 3, estado="propuesta")
+    ps[0].correcta = "Z"; db.commit()
+    r = rt.aprobar_todas(db, CID)
+    assert r["publicadas"] == 2 and r["sin_correcta"] == 1
+    assert db.query(RetoPregunta).filter(RetoPregunta.estado == "propuesta").count() == 1
+
+
+def test_publicar_todas_no_toca_lo_descartado(db):
+    _sembrar(db, 2, estado="descartada")
+    _sembrar(db, 2, estado="propuesta")
+    rt.aprobar_todas(db, CID)
+    assert db.query(RetoPregunta).filter(RetoPregunta.estado == "descartada").count() == 2
+
+
+def test_vaciar_borra_solo_ese_estado(db):
+    _sembrar(db, 4, estado="descartada")
+    _sembrar(db, 3, estado="aprobada")
+    r = rt.vaciar(db, CID, "descartada")
+    assert r["eliminadas"] == 4
+    assert db.query(RetoPregunta).count() == 3
+
+
+def test_eliminar_una_publicada_borra_tambien_sus_respuestas(db):
+    p = _sembrar(db, 1)[0]
+    rt.responder(db, p.id, ANA, "B")
+    rt.eliminar(db, p.id)
+    from app.models.reto import RetoRespuesta
+    assert db.query(RetoPregunta).count() == 0 and db.query(RetoRespuesta).count() == 0
+
+
+def test_vaciar_un_estado_inventado_se_rechaza(db):
+    with pytest.raises(Exception):
+        rt.vaciar(db, CID, "loquesea")
