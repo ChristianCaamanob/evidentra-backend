@@ -347,32 +347,6 @@ def agente_por_codigo(db: Session, codigo: str) -> SilaboAgente:
     return a
 
 
-# Música de estudio: SOLO estos dominios. El enlace lo pone el docente y lo abre el teléfono de la
-# estudiante, así que una URL libre aquí sería un salto a cualquier sitio desde dentro de la app.
-_MUSICA_HOSTS = {
-    "spotify": ("open.spotify.com",),
-    "apple": ("music.apple.com",),
-    "youtube": ("music.youtube.com", "www.youtube.com", "youtube.com", "youtu.be"),
-}
-
-
-def limpiar_musica(m) -> dict:
-    """Deja solo enlaces https de los servicios conocidos. Lo demás se descarta en silencio."""
-    out = {}
-    for clave, hosts in _MUSICA_HOSTS.items():
-        u = str((m or {}).get(clave) or "").strip()[:500]
-        if not u.startswith("https://"):
-            continue
-        try:
-            import urllib.parse as _up
-            host = (_up.urlparse(u).hostname or "").lower()
-        except Exception:  # noqa: BLE001
-            continue
-        if host in hosts:
-            out[clave] = u
-    return out
-
-
 def crear_o_actualizar(db: Session, course_id, contexto: str, activo: bool,
                        nombre_curso: str | None = None, config: dict | None = None) -> SilaboAgente:
     a = agente_de_curso(db, course_id)
@@ -388,12 +362,6 @@ def crear_o_actualizar(db: Session, course_id, contexto: str, activo: bool,
             a.nombre_curso = nombre_curso
         if config is not None:
             a.config = config
-    # La música se sanea SIEMPRE, venga de donde venga: el enlace acaba abriéndose en el teléfono
-    # de la estudiante, y ahí un dominio inesperado es un salto fuera de la app.
-    cfg = dict(a.config or {})
-    if "musica" in cfg:
-        cfg["musica"] = limpiar_musica(cfg.get("musica"))
-        a.config = cfg
     db.commit(); db.refresh(a)
     return a
 
