@@ -867,6 +867,15 @@ def anuncio_listar_docente(course_id: UUID, db: Session = Depends(get_db)):
     return ans.listar_por_course(db, course_id)
 
 
+@router.patch("/anuncios/{anuncio_id}", dependencies=[Depends(req_profesor)])
+def anuncio_editar(anuncio_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    """Corrige un comunicado publicado. Por defecto vuelve a avisar: una corrección silenciosa deja
+    a quien ya lo leyó con el dato viejo."""
+    from app.services import anuncio_service as ans
+    p = payload or {}
+    return ans.editar(db, anuncio_id, p, notificar=bool(p.get("notificar", True)))
+
+
 @router.post("/anuncios/{anuncio_id}/detener", dependencies=[Depends(req_profesor)])
 def anuncio_detener(anuncio_id: UUID, db: Session = Depends(get_db)):
     """Apaga la repetición sin borrar el comunicado: deja de sonar, el texto sigue en la bandeja."""

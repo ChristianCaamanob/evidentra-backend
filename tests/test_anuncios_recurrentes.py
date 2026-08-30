@@ -160,3 +160,75 @@ def test_detener_algo_que_no_existe_falla_claro(db):
     import uuid
     with pytest.raises(Exception):
         an.detener(db, uuid.uuid4())
+
+
+# ── editar y eliminar ────────────────────────────────────────────────────────────────
+def test_editar_corrige_el_texto_y_vuelve_a_avisar(db):
+    """Una corrección silenciosa deja a quien ya lo leyó con el dato viejo: por eso avisa."""
+    a = an.crear(db, CID, {"titulo": "Cambio de sala", "cuerpo": "Vamos a la 302."})["anuncio"]
+    r = an.editar(db, a["id"], {"titulo": "Cambio de sala", "cuerpo": "Vamos a la 304."})
+    assert r["anuncio"]["cuerpo"] == "Vamos a la 304." and r["enviados"] == 3
+    assert db.query(Anuncio).count() == 1                 # se corrige, no se duplica
+
+
+def test_quien_arregla_una_tilde_puede_no_avisar(db):
+    a = an.crear(db, CID, {"titulo": "Practico", "cuerpo": "Manana"})["anuncio"]
+    r = an.editar(db, a["id"], {"titulo": "Práctico", "cuerpo": "Mañana"}, notificar=False)
+    assert r["enviados"] == 0 and r["anuncio"]["titulo"] == "Práctico"
+
+
+def test_editar_conserva_el_adjunto_que_no_se_vuelve_a_subir(db):
+    """No se borra un archivo por el hecho de no volver a adjuntarlo al corregir el texto."""
+    a = an.crear(db, CID, {"titulo": "Pauta", "archivo_datos": "aGVsbG8=",
+                           "archivo_nombre": "pauta.pdf", "archivo_mime": "application/pdf"})["anuncio"]
+    assert a["archivo_nombre"] == "pauta.pdf"
+    r = an.editar(db, a["id"], {"titulo": "Pauta corregida"}, notificar=False)
+    assert r["anuncio"]["archivo_nombre"] == "pauta.pdf"
+
+
+def test_se_puede_quitar_el_adjunto_a_proposito(db):
+    a = an.crear(db, CID, {"titulo": "Pauta", "archivo_datos": "aGVsbG8=",
+                           "archivo_nombre": "pauta.pdf"})["anuncio"]
+    r = an.editar(db, a["id"], {"quitar_archivo": True}, notificar=False)
+    assert not r["anuncio"]["archivo_nombre"] and r["anuncio"]["tamano"] == 0
+
+
+def test_editar_no_puede_dejarlo_sin_titulo_ni_mensaje(db):
+    a = an.crear(db, CID, {"titulo": "Algo", "cuerpo": "x"})["anuncio"]
+    with pytest.raises(Exception):
+        an.editar(db, a["id"], {"titulo": "", "cuerpo": ""}, notificar=False)
+
+
+def test_volverlo_recurrente_no_dispara_el_recordatorio_al_instante(db):
+    """La cuenta parte hoy: si no, un anuncio viejo sonaría en el mismo momento de guardarlo."""
+    a = an.crear(db, CID, {"titulo": "Delantal"})["anuncio"]
+    fila = db.query(Anuncio).first()
+    fila.ultimo_envio = _en(-90); db.commit()             # se publicó hace tres meses
+    an.editar(db, a["id"], {"repeticion": "semanal", "repetir_hasta": _en(30)}, notificar=False)
+    assert an.tick(db)["recurrentes_reenviados"] == 0
+
+
+def test_se_puede_apagar_la_recurrencia_editando(db):
+    a = an.crear(db, CID, {"titulo": "Delantal", "repeticion": "diaria", "repetir_hasta": _en(30)})["anuncio"]
+    r = an.editar(db, a["id"], {"repeticion": "unica"}, notificar=False)
+    assert not r["anuncio"]["recurrente"] and not r["anuncio"]["vigente"]
+
+
+def test_la_correccion_se_distingue_del_aviso_original(db):
+    a = an.crear(db, CID, {"titulo": "Sala"})["anuncio"]
+    fila = db.query(Anuncio).first()
+    assert an._payload_push(fila, corregido=True)["title"].startswith("✏️ Corregido")
+    assert an._payload_push(fila)["title"].startswith("📣")
+
+
+def test_eliminar_lo_borra_de_verdad(db):
+    a = an.crear(db, CID, {"titulo": "Se me fue"})["anuncio"]
+    assert an.eliminar(db, a["id"])["ok"]
+    assert db.query(Anuncio).count() == 0
+    assert not an.listar_por_course(db, CID)["anuncios"]
+
+
+def test_editar_algo_que_no_existe_falla_claro(db):
+    import uuid
+    with pytest.raises(Exception):
+        an.editar(db, uuid.uuid4(), {"titulo": "x"})

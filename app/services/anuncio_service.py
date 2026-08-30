@@ -166,10 +166,12 @@ def listar_por_codigo(db: Session, codigo: str, limite: int = 30) -> dict:
     return listar_por_course(db, a.course_id, limite)
 
 
-def _payload_push(a: Anuncio, recordatorio: bool = False) -> dict:
+def _payload_push(a: Anuncio, recordatorio: bool = False, corregido: bool = False) -> dict:
     tiene = bool(getattr(a, "archivo_datos", None) or getattr(a, "url", None))
     titulo = a.titulo or "Anuncio del curso"
-    return {"title": ("🔁 " if recordatorio else "📣 ") + titulo,
+    # El emoji dice de qué se trata antes de abrirlo: nuevo, recordatorio o corrección.
+    marca = "✏️ Corregido · " if corregido else ("🔁 " if recordatorio else "📣 ")
+    return {"title": marca + titulo,
             "body": ((a.cuerpo or "")[:380] or titulo) + (" 📎" if tiene else ""),
             # El tag lleva la vuelta: sin eso el sistema operativo reemplazaría el aviso anterior
             # y un recordatorio pasaría desapercibido justo por ser el mismo texto.
@@ -222,6 +224,66 @@ def _buscar(db: Session, anuncio_id) -> Anuncio:
     if not a:
         raise not_found("Ese anuncio no existe.")
     return a
+
+
+def editar(db: Session, anuncio_id, payload: dict, notificar: bool = True) -> dict:
+    """Corrige un comunicado ya publicado, sin perderlo ni perder su historial de envíos.
+
+    **Por defecto vuelve a avisar.** Un aviso corregido en silencio es peor que un pitido de más:
+    quien ya leyó «sala 302» se queda con ese dato y llega al lugar equivocado. Quien solo arregla
+    una tilde puede desmarcarlo.
+
+    El adjunto se conserva salvo que manden uno nuevo o pidan quitarlo explícitamente: no se borra
+    un archivo por el hecho de no volver a subirlo al editar.
+    """
+    a = _buscar(db, anuncio_id)
+    p = payload or {}
+
+    if "titulo" in p or "cuerpo" in p:
+        titulo = str(p.get("titulo", a.titulo) or "").strip()[:140]
+        cuerpo = str(p.get("cuerpo", a.cuerpo) or "").strip()[:1000]
+        if not titulo and not cuerpo:
+            raise unprocessable("El anuncio necesita al menos un título o un mensaje.")
+        a.titulo = titulo or "Anuncio del curso"
+        a.cuerpo = cuerpo
+    if "url" in p:
+        a.url = str(p.get("url") or "").strip()[:2000] or None
+
+    if p.get("quitar_archivo"):
+        a.archivo_datos = None; a.archivo_nombre = None; a.archivo_mime = None; a.tamano = 0
+    elif p.get("archivo_datos"):
+        crudo = re.sub(r"^data:[^;]+;base64,", "", str(p["archivo_datos"]))
+        try:
+            tamano = len(base64.b64decode(crudo, validate=False))
+        except Exception:  # noqa: BLE001
+            tamano = int(len(crudo) * 0.75)
+        if tamano > _MAX_BYTES:
+            raise unprocessable("El archivo supera 6 MB. Comparte un enlace (Drive/web) en su lugar.")
+        a.archivo_datos = crudo
+        a.archivo_nombre = str(p.get("archivo_nombre") or "").strip()[:200] or a.archivo_nombre
+        a.archivo_mime = str(p.get("archivo_mime") or "").strip()[:100] or a.archivo_mime
+        a.tamano = tamano
+
+    if "repeticion" in p:
+        antes = a.repeticion or "unica"
+        rep, hasta = _leer_recurrencia(p)
+        a.repeticion, a.repetir_hasta = rep, hasta
+        # Al pasar de «una vez» a recurrente, la cuenta parte HOY: si no, un anuncio viejo dispararía
+        # el recordatorio en el mismo instante de guardarlo.
+        if antes == "unica" and rep != "unica":
+            a.ultimo_envio = _dt.date.today().isoformat()
+
+    db.commit(); db.refresh(a)
+    enviados = 0
+    if notificar:
+        try:
+            enviados = push_service.enviar_a_curso(db, a.course_id, _payload_push(a, corregido=True))
+            a.veces_enviado = int(a.veces_enviado or 1) + 1
+            a.ultimo_envio = _dt.date.today().isoformat()
+            db.commit()
+        except Exception:  # noqa: BLE001 — la corrección ya quedó guardada; el push es lo accesorio
+            enviados = 0
+    return {"ok": True, "anuncio": _dict(a), "enviados": enviados}
 
 
 def detener(db: Session, anuncio_id) -> dict:
