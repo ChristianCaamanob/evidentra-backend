@@ -783,7 +783,13 @@ def _es_falla_de_servicio(e) -> bool:
     m = str(e or "").lower()
     señales = ("authentication_error", "api key", "401", "403", "unauthorized",
                "rate_limit", "429", "overloaded", "529", "connection", "timeout",
-               "temporarily unavailable", "service unavailable", "503")
+               "temporarily unavailable", "service unavailable", "503",
+               # Vistas en producción cayendo por el hueco: sin saldo, modelo rechazado, petición
+               # inválida y "sin respuesta del modelo" (el JSON no llegó tras 3 intentos). Ninguna es
+               # culpa de la pregunta, y decirle a la estudiante que la reformule la manda a repetir
+               # para siempre algo que estaba bien — además de ensuciarle al docente el mapa de vacíos.
+               "credit balance", "billing", "quota", "not_found", "does not exist",
+               "invalid_request_error", "sin respuesta del modelo", "500", "502", "internal server")
     return any(x in m for x in señales)
 
 

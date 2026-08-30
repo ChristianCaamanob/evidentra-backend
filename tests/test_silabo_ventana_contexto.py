@@ -57,3 +57,31 @@ def test_los_trozos_respetan_las_lineas():
     for t in sil._trozos(tabla, largo=500):
         assert t.strip()
         assert not t.startswith(" ")
+
+
+# ── qué se le dice al estudiante cuando el motor falla ───────────────────────────────
+def test_una_caida_del_motor_nunca_se_le_cobra_al_estudiante():
+    """Visto en producción: la cuenta sin saldo devolvía «reformula tu pregunta».
+
+    Eso manda a la estudiante a repetir para siempre una pregunta que estaba bien, y le ensucia al
+    docente el mapa de vacíos con temas que Runi nunca llegó a intentar. Ninguna de estas fallas es
+    de la pregunta.
+    """
+    fallas = [
+        "Your credit balance is too low to access the Anthropic API",
+        "billing error: payment required",
+        "model claude-x does not exist",
+        "not_found_error: model",
+        "invalid_request_error",
+        "sin respuesta del modelo",
+        "502 Bad Gateway",
+        "rate_limit_error", "overloaded_error", "connection reset", "timeout",
+    ]
+    for f in fallas:
+        assert sil._es_falla_de_servicio(Exception(f)), f
+
+
+def test_una_pregunta_fuera_del_silabo_sigue_siendo_del_silabo():
+    """Al revés: ensanchar las señales no puede convertir cualquier error en «servicio caído»."""
+    for f in ("KeyError: 'tema'", "list index out of range", ""):
+        assert not sil._es_falla_de_servicio(Exception(f)), f

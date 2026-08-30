@@ -35,16 +35,40 @@ def healthcheck_ia():
     if not clave:
         return {"ok": False, "estado": "sin_clave",
                 "detalle": "ANTHROPIC_API_KEY no está definida en el entorno del servidor."}
+    import anthropic
+    from app.services import correccion_experta_service as ce
     try:
-        import anthropic
-        anthropic.Anthropic().models.list(limit=1)      # llamada mínima: valida credencial
-        return {"ok": True, "estado": "ok"}
+        anthropic.Anthropic().models.list(limit=1)
     except Exception as e:                               # noqa: BLE001
         msg = str(e)
-        invalida = "authentication_error" in msg or "invalid" in msg.lower() or "401" in msg
+        invalida = "authentication_error" in msg or "401" in msg
         return {"ok": False, "estado": "clave_invalida" if invalida else "error",
                 "detalle": ("La clave existe pero el proveedor la rechaza; hay que rotarla."
-                            if invalida else msg[:200])}
+                            if invalida else msg[:300])}
+    # Listar modelos NO consume créditos ni usa el modelo: con la cuenta sin saldo, o con un id de
+    # modelo rechazado, ESTO sigue devolviendo 200 mientras Runi falla en cada respuesta. Pasó en
+    # producción y el health decía "ok" durante toda la caída. Por eso ahora se manda un mensaje
+    # de verdad, con el mismo modelo que usa Runi.
+    try:
+        anthropic.Anthropic().messages.create(
+            model=ce.MODELO_EXPERTO, max_tokens=4,
+            messages=[{"role": "user", "content": "ping"}])
+        return {"ok": True, "estado": "ok", "modelo": ce.MODELO_EXPERTO}
+    except Exception as e:                               # noqa: BLE001
+        msg = str(e)
+        b = msg.lower()
+        if "credit balance" in b or "billing" in b or "quota" in b:
+            estado, detalle = "sin_saldo", "La cuenta de Anthropic no tiene saldo. Hay que recargarla."
+        elif "not_found" in b or "model" in b and "does not exist" in b:
+            estado, detalle = "modelo_invalido", f"El modelo «{ce.MODELO_EXPERTO}» no está disponible para esta cuenta."
+        elif "rate_limit" in b or "429" in b:
+            estado, detalle = "limite", "Límite de peticiones alcanzado; se recupera solo."
+        elif "overloaded" in b or "529" in b:
+            estado, detalle = "sobrecargado", "El proveedor está sobrecargado; se recupera solo."
+        else:
+            estado, detalle = "error", msg[:300]
+        return {"ok": False, "estado": estado, "detalle": detalle, "modelo": ce.MODELO_EXPERTO,
+                "crudo": msg[:300]}
 
 
 @api_router.get("/bootstrap", response_model=BootstrapOut, tags=["health"])
