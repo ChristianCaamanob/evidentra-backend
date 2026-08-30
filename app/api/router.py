@@ -151,6 +151,8 @@ api_router.include_router(logros_router)
 
 from app.routes.recompensas import router as recompensas_router
 api_router.include_router(recompensas_router)
+from app.routes.reto import router as reto_router
+api_router.include_router(reto_router)
 from app.routes.terminologia import router as terminologia_router
 api_router.include_router(terminologia_router)
 from app.routes.pandilla_logros import router as pandilla_logros_router

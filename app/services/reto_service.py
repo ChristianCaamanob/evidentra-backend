@@ -1,0 +1,402 @@
+"""
+El Reto de Runi: Runi deja de esperar y propone.
+
+El CEO lo diagnosticó sobre su propio producto: Runi es pasivo, alguien con quien conversar. Si la
+estudiante no entra, no pasa nada. La idea es que cada vez que entre encuentre algo nuevo — y que ese
+algo nuevo sea **lo que de verdad entra en el Solemne**, no entretención suelta.
+
+Cómo funciona, y por qué así:
+
+- **Un banco por curso, no una pregunta por alumna por día.** La IA propone una vez, sobre el
+  programa y la tabla de especificaciones que el docente ya cargó. Una llamada por estudiante por
+  día son miles al mes; el pilotaje ya se quedó sin saldo una vez y Runi entero dejó de responder.
+- **La personalización NO cuesta IA.** Elegir qué le toca hoy a esta persona es ordenar el banco:
+  primero sus vacíos, después lo que pesa en la tabla, y nunca lo que ya respondió.
+- **El docente aprueba antes.** En anatomía aplicada una pregunta mal generada le enseña algo falso
+  a quien la responde. La IA propone; la firma es del profesor.
+- **2 o 3 por sesión.** Suficiente para que haya algo nuevo, poco para que no se vuelva una tarea.
+"""
+from __future__ import annotations
+
+import hashlib
+import logging
+import uuid as _uuid
+
+from sqlalchemy.orm import Session
+
+from app.core.errors import conflict, not_found, unprocessable
+from app.models.reto import ESTADOS, RetoPregunta, RetoRespuesta
+
+_LOG = logging.getLogger("evalys")
+POR_SESION = 3            # tope duro: el CEO pidió 2 o 3, nunca una rueda infinita
+_MAX_BANCO = 400          # por curso; más que esto no lo revisa nadie
+NIVELES = ("recordar", "conectar", "aplicar")
+
+
+# ── generación (propone; NO publica) ──────────────────────────────────────────────────
+def _prompt(curso: str, temas: list, contexto: str, n_por_tema: int) -> tuple:
+    system = (
+        f"Eres quien prepara preguntas de estudio para el curso {curso}. Trabajas SOLO con el "
+        "material del profesor que viene abajo: no inventes contenidos que no estén ahí.\n"
+        "Para CADA tema entrega preguntas de opción múltiple con 4 alternativas, una sola correcta y "
+        "distractores plausibles (errores que un estudiante comete de verdad, no absurdos).\n"
+        "Reparte los niveles: 'recordar' (recuperar un hecho), 'conectar' (relacionar dos ideas del "
+        "curso) y 'aplicar' (un caso concreto que no está en el material).\n"
+        "La justificación explica POR QUÉ la correcta lo es, en una o dos frases, en segunda persona "
+        "y sin condescendencia: la va a leer la estudiante justo después de responder.\n"
+        "Si el material no alcanza para un tema, entrega MENOS preguntas de ese tema. Preferimos "
+        "pocas y sólidas antes que rellenar.\n"
+        'Devuelve SOLO JSON: {"preguntas":[{"tema":"…","nivel":"recordar|conectar|aplicar",'
+        '"enunciado":"…","alternativas":{"A":"…","B":"…","C":"…","D":"…"},"correcta":"A",'
+        '"justificacion":"…"}]}'
+    )
+    user = ("TEMAS QUE ENTRAN EN LA EVALUACIÓN (con su peso):\n"
+            + "\n".join(f"- {t.get('tema')} (peso {t.get('peso', 1)})" for t in temas)
+            + f"\n\nGenera hasta {n_por_tema} preguntas por tema.\n\n"
+            + "MATERIAL DEL PROFESOR:\n" + (contexto or "")[:24000])
+    return system, user
+
+
+def _temas_desde(temas_txt: str) -> list:
+    """Lee los temas que escribió el docente: una línea por tema, con «peso» opcional al final."""
+    out = []
+    for linea in str(temas_txt or "").splitlines():
+        t = linea.strip(" -•\t")
+        if not t:
+            continue
+        peso = 1
+        # «Pelvis ósea 30%» o «Pelvis ósea | 3»
+        import re as _re
+        m = _re.search(r"[|·]?\s*(\d{1,3})\s*%?\s*$", t)
+        if m:
+            peso = max(1, min(100, int(m.group(1))))
+            t = t[:m.start()].strip(" -•|·\t")
+        if t:
+            out.append({"tema": t[:160], "peso": peso})
+    return out[:40]
+
+
+def generar(db: Session, course_id, temas_txt: str, contexto: str, curso: str = "",
+            eval_id: str | None = None, n_por_tema: int = 3) -> dict:
+    """Propone preguntas para el banco. Quedan en 'propuesta': NADIE las ve hasta que se aprueben."""
+    temas = _temas_desde(temas_txt)
+    if not temas:
+        raise unprocessable("Escribe al menos un tema (una línea por tema).")
+    if not str(contexto or "").strip():
+        raise unprocessable("Este curso todavía no tiene material cargado para basarse.")
+    n_por_tema = max(1, min(6, int(n_por_tema or 3)))
+
+    import json
+    import os
+    import re
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise conflict("El motor de IA no está disponible ahora mismo.")
+    system, user = _prompt(curso or "el curso", temas, contexto, n_por_tema)
+    crudas = []
+    for intento in range(3):
+        try:
+            from app.services import correccion_experta_service as ce
+            txt = ce._llamar_anthropic(system, user, max_tokens=8000)
+            m = re.search(r"\{.*\}", txt or "", re.S)
+            d = json.loads(m.group(0)) if m else {}
+            crudas = d.get("preguntas") or []
+            if crudas:
+                break
+        except Exception as e:  # noqa: BLE001
+            _LOG.warning("reto: generación intento %d/3 falló: %s", intento + 1, str(e)[:140])
+    if not crudas:
+        raise conflict("No se pudieron generar preguntas ahora. Reintenta en un momento.")
+
+    pesos = {t["tema"].lower(): t["peso"] for t in temas}
+    ya = db.query(RetoPregunta).filter(RetoPregunta.course_id == str(course_id)).count()
+    nuevas = []
+    for q in crudas:
+        if ya + len(nuevas) >= _MAX_BANCO:
+            break
+        p = _normalizar(q, pesos)
+        if p:
+            nuevas.append(RetoPregunta(course_id=str(course_id), eval_id=eval_id, **p))
+    if not nuevas:
+        raise conflict("Las preguntas generadas no eran utilizables. Reintenta.")
+    db.add_all(nuevas); db.commit()
+    return {"ok": True, "propuestas": len(nuevas),
+            "preguntas": [_dict(p, con_respuesta=True) for p in nuevas]}
+
+
+def _normalizar(q: dict, pesos: dict) -> dict | None:
+    """Descarta lo inservible en vez de guardarlo a medias: una pregunta rota gasta el tiempo del
+    docente cuando la revisa, y peor aún si se le escapa aprobada."""
+    enun = str((q or {}).get("enunciado") or "").strip()
+    alts = (q or {}).get("alternativas") or {}
+    if not enun or not isinstance(alts, dict):
+        return None
+    limpias = {k.upper(): str(v).strip()[:300] for k, v in alts.items()
+               if str(k).upper() in ("A", "B", "C", "D", "E") and str(v or "").strip()}
+    if len(limpias) < 2:
+        return None
+    corr = str(q.get("correcta") or "").strip().upper()[:1]
+    if corr not in limpias:
+        return None
+    tema = str(q.get("tema") or "").strip()[:160] or "General"
+    nivel = str(q.get("nivel") or "recordar").strip().lower()
+    return {"tema": tema, "peso": pesos.get(tema.lower(), 1),
+            "enunciado": enun[:1200], "alternativas": limpias, "correcta": corr,
+            "justificacion": str(q.get("justificacion") or "").strip()[:600] or None,
+            "nivel": nivel if nivel in NIVELES else "recordar", "estado": "propuesta", "origen": "ia"}
+
+
+# ── revisión del docente ──────────────────────────────────────────────────────────────
+def _dict(p: RetoPregunta, con_respuesta: bool = False) -> dict:
+    d = {"id": str(p.id), "tema": p.tema, "peso": p.peso, "enunciado": p.enunciado,
+         "alternativas": p.alternativas or {}, "nivel": p.nivel, "estado": p.estado,
+         "origen": p.origen, "veces_servida": p.veces_servida, "aciertos": p.aciertos}
+    if con_respuesta:
+        d["correcta"] = p.correcta
+        d["justificacion"] = p.justificacion
+    return d
+
+
+def _buscar(db: Session, pregunta_id) -> RetoPregunta:
+    try:
+        uid = pregunta_id if isinstance(pregunta_id, _uuid.UUID) else _uuid.UUID(str(pregunta_id))
+    except (ValueError, TypeError, AttributeError):
+        raise not_found("Esa pregunta no existe.")
+    p = db.query(RetoPregunta).filter(RetoPregunta.id == uid).first()
+    if not p:
+        raise not_found("Esa pregunta no existe.")
+    return p
+
+
+def listar_docente(db: Session, course_id, estado: str = "") -> dict:
+    q = db.query(RetoPregunta).filter(RetoPregunta.course_id == str(course_id))
+    if estado:
+        q = q.filter(RetoPregunta.estado == estado)
+    filas = q.order_by(RetoPregunta.created_at.desc()).limit(500).all()
+    cuenta = {e: 0 for e in ESTADOS}
+    for p in db.query(RetoPregunta).filter(RetoPregunta.course_id == str(course_id)).all():
+        cuenta[p.estado] = cuenta.get(p.estado, 0) + 1
+    return {"ok": True, "preguntas": [_dict(p, con_respuesta=True) for p in filas], "conteos": cuenta}
+
+
+def revisar(db: Session, pregunta_id, accion: str, cambios: dict | None = None) -> dict:
+    """aprobar · descartar · editar. Editar y aprobar en un solo paso: corregir una pregunta y
+    tener que aprobarla aparte es un clic de más en una tarea que ya son decenas de clics."""
+    p = _buscar(db, pregunta_id)
+    c = cambios or {}
+    if "enunciado" in c:
+        p.enunciado = str(c["enunciado"]).strip()[:1200] or p.enunciado
+    if "alternativas" in c and isinstance(c["alternativas"], dict):
+        limpias = {k.upper(): str(v).strip()[:300] for k, v in c["alternativas"].items() if str(v or "").strip()}
+        if len(limpias) >= 2:
+            p.alternativas = limpias
+    if "correcta" in c:
+        corr = str(c["correcta"]).strip().upper()[:1]
+        if corr in (p.alternativas or {}):
+            p.correcta = corr
+    if "justificacion" in c:
+        p.justificacion = str(c["justificacion"]).strip()[:600] or None
+    if "tema" in c:
+        p.tema = str(c["tema"]).strip()[:160] or p.tema
+
+    if accion == "aprobar":
+        if p.correcta not in (p.alternativas or {}):
+            raise unprocessable("Marca cuál es la alternativa correcta antes de aprobar.")
+        p.estado = "aprobada"
+    elif accion == "descartar":
+        p.estado = "descartada"
+    elif accion != "editar":
+        raise unprocessable("Acción no válida.")
+    db.commit()
+    return {"ok": True, "pregunta": _dict(p, con_respuesta=True)}
+
+
+def crear_manual(db: Session, course_id, datos: dict, eval_id: str | None = None) -> dict:
+    """Una pregunta escrita por el docente. Nace aprobada: ya la escribió él."""
+    p = _normalizar(datos or {}, {})
+    if not p:
+        raise unprocessable("La pregunta necesita enunciado, al menos dos alternativas y cuál es la correcta.")
+    p["estado"] = "aprobada"; p["origen"] = "docente"
+    p["tema"] = str((datos or {}).get("tema") or "General")[:160]
+    fila = RetoPregunta(course_id=str(course_id), eval_id=eval_id, **p)
+    db.add(fila); db.commit()
+    return {"ok": True, "pregunta": _dict(fila, con_respuesta=True)}
+
+
+def eliminar(db: Session, pregunta_id) -> dict:
+    p = _buscar(db, pregunta_id)
+    db.query(RetoRespuesta).filter(RetoRespuesta.pregunta_id == p.id).delete(synchronize_session=False)
+    db.delete(p); db.commit()
+    return {"ok": True}
+
+
+# ── la sesión del estudiante ──────────────────────────────────────────────────────────
+def _prioridad(p: RetoPregunta, vacios: set, pseudo_id: str) -> tuple:
+    """Orden en que se le sirven las preguntas a ESTA persona.
+
+    Primero sus vacíos —lo que ya mostró que no domina—, después lo que más pesa en la tabla de
+    especificaciones. El desempate es un hash de (persona, pregunta): así dos estudiantes con los
+    mismos vacíos no reciben la lista en el mismo orden, y a nadie le toca siempre lo mismo primero.
+    """
+    es_vacio = 0 if (p.tema or "").lower() in vacios else 1
+    desempate = hashlib.sha256(f"{pseudo_id}|{p.id}".encode()).hexdigest()
+    return (es_vacio, -int(p.peso or 1), desempate)
+
+
+def _vacios_de(db: Session, pseudo_id: str) -> set:
+    """Los temas donde esta persona se declaró con baja confianza o falló creyendo saber."""
+    try:
+        from app.models.episode import ConfidenceObs
+        obs = db.query(ConfidenceObs).filter(ConfidenceObs.pseudo_id == pseudo_id).all()
+    except Exception:  # noqa: BLE001
+        return set()
+    flojos = set()
+    for o in obs:
+        if not o.ra:
+            continue
+        if o.correct is False or (o.confidence or 0) <= 40:
+            flojos.add(str(o.ra).lower())
+    return flojos
+
+
+def sesion(db: Session, course_id, pseudo_id: str, n: int = POR_SESION) -> dict:
+    """Las 2–3 preguntas que le tocan hoy. Nunca una que ya respondió."""
+    if not (pseudo_id or "").strip():
+        raise unprocessable("Falta la identidad del estudiante.")
+    n = max(1, min(POR_SESION, int(n or POR_SESION)))
+    respondidas = {r.pregunta_id for r in db.query(RetoRespuesta).filter(
+        RetoRespuesta.pseudo_id == pseudo_id).all()}
+    banco = db.query(RetoPregunta).filter(RetoPregunta.course_id == str(course_id),
+                                          RetoPregunta.estado == "aprobada").all()
+    pendientes = [p for p in banco if p.id not in respondidas]
+    if not pendientes:
+        # Que se acabe el banco NO es un error: es que ya respondió todo lo que su profe aprobó.
+        return {"ok": True, "preguntas": [], "sin_pendientes": True,
+                "banco": len(banco), "respondidas": len(respondidas)}
+    vacios = _vacios_de(db, pseudo_id)
+    pendientes.sort(key=lambda p: _prioridad(p, vacios, pseudo_id))
+    elegidas = pendientes[:n]
+    for p in elegidas:
+        p.veces_servida = int(p.veces_servida or 0) + 1
+    db.commit()
+    return {"ok": True, "sin_pendientes": False,
+            "preguntas": [_dict(p) for p in elegidas],      # sin la correcta: se revela al responder
+            "banco": len(banco), "respondidas": len(respondidas),
+            "quedan": len(pendientes) - len(elegidas)}
+
+
+def responder(db: Session, pregunta_id, pseudo_id: str, elegida: str, course_id=None) -> dict:
+    """Registra la respuesta y devuelve el veredicto con su justificación. Idempotente."""
+    p = _buscar(db, pregunta_id)
+    if p.estado != "aprobada":
+        raise conflict("Esa pregunta no está disponible.")
+    letra = str(elegida or "").strip().upper()[:1]
+    if letra not in (p.alternativas or {}):
+        raise unprocessable("Elige una de las alternativas.")
+
+    ya = db.query(RetoRespuesta).filter(RetoRespuesta.pseudo_id == pseudo_id,
+                                        RetoRespuesta.pregunta_id == p.id).first()
+    if ya:
+        return {"ok": True, "ya_respondida": True, "correcta": p.correcta,
+                "acerto": bool(ya.correcta), "elegida": ya.elegida,
+                "justificacion": p.justificacion}
+
+    acerto = (letra == p.correcta)
+    db.add(RetoRespuesta(pregunta_id=p.id, pseudo_id=pseudo_id, elegida=letra, correcta=acerto))
+    if acerto:
+        p.aciertos = int(p.aciertos or 0) + 1
+    try:
+        db.commit()
+    except Exception:  # noqa: BLE001 — dos pestañas a la vez; la unicidad ya nos protegió
+        db.rollback()
+        return responder(db, pregunta_id, pseudo_id, elegida, course_id)
+
+    # El reto ALIMENTA la evidencia, no es un juego aparte: queda como episodio verificado con su
+    # observación de confianza, así cuenta para la Cumbre igual que un repaso.
+    try:
+        from app.services import episode_service as eps
+        e = eps.start(db, pseudo_id, str(course_id or p.course_id), p.tema,
+                      objetivo=f"Reto: {p.tema}", origen="reto")
+        eps.observe(db, e["episode_id"], {"item_id": f"reto-{p.id}", "correct": acerto,
+                                          "confidence": 60, "ra": p.tema})
+        eps.feedback(db, e["episode_id"])
+        eps.close(db, e["episode_id"], sintesis=f"Reto de {p.tema}",
+                  check_immediate=acerto, programar_diferida="7d")
+    except Exception:  # noqa: BLE001 — el reto ya quedó respondido; la evidencia es lo accesorio
+        db.rollback()
+
+    return {"ok": True, "acerto": acerto, "correcta": p.correcta, "elegida": letra,
+            "justificacion": p.justificacion}
+
+
+def mi_estado(db: Session, course_id, pseudo_id: str) -> dict:
+    """Para la tarjeta de Inicio: cuántos retos lleva y si hay algo nuevo esperándola."""
+    banco = db.query(RetoPregunta).filter(RetoPregunta.course_id == str(course_id),
+                                          RetoPregunta.estado == "aprobada").count()
+    filas = db.query(RetoRespuesta).filter(RetoRespuesta.pseudo_id == pseudo_id).all()
+    ids = {r.pregunta_id for r in filas}
+    aprobadas = {p.id for p in db.query(RetoPregunta).filter(
+        RetoPregunta.course_id == str(course_id), RetoPregunta.estado == "aprobada").all()}
+    hechas = len(ids & aprobadas)
+    return {"ok": True, "banco": banco, "respondidos": hechas,
+            "aciertos": sum(1 for r in filas if r.correcta and r.pregunta_id in aprobadas),
+            "hay_nuevos": hechas < banco}
+
+
+# ── el aviso diario ───────────────────────────────────────────────────────────────────
+# Ventana horaria en UTC. Chile está en UTC-4, así que 20:00–00:00 UTC es 16:00–20:00 allá: tarde,
+# cuando alguien puede sentarse a estudiar. **Nunca de noche**: un recordatorio académico a las 2 AM
+# no ayuda a nadie a aprender, solo entrena a silenciar la app.
+_HORA_DESDE_UTC, _HORA_HASTA_UTC = 20, 24
+
+
+def tick(db: Session, ahora=None) -> dict:
+    """Un aviso al día por curso, con las preguntas nuevas que esperan. Idempotente por día.
+
+    Se apoya en `PushSent` (única por eval_id+owner+hito) para no mandar el mismo aviso dos veces
+    aunque el barrido corra cada diez minutos.
+    """
+    import datetime as _dt
+    ahora = ahora or _dt.datetime.utcnow()
+    if not (_HORA_DESDE_UTC <= ahora.hour < _HORA_HASTA_UTC):
+        return {"ok": True, "fuera_de_hora": True, "avisados": 0}
+    hoy = ahora.date().isoformat()
+
+    from app.models.push import PushSent, StudentCourseFollow
+    from app.services import push_service as ps
+
+    cursos = {p.course_id for p in db.query(RetoPregunta).filter(
+        RetoPregunta.estado == "aprobada").all()}
+    avisados = 0
+    for cid in cursos:
+        banco = [p.id for p in db.query(RetoPregunta).filter(
+            RetoPregunta.course_id == cid, RetoPregunta.estado == "aprobada").all()]
+        if not banco:
+            continue
+        # `StudentCourseFollow.course_id` es UUID y el del banco es texto: si un curso quedó con un
+        # id que no es UUID, no puede tener seguidores y no vale la pena tumbar el barrido por él.
+        try:
+            seguidores = db.query(StudentCourseFollow).filter(
+                StudentCourseFollow.course_id == _uuid.UUID(str(cid))).all()
+        except (ValueError, TypeError, AttributeError):
+            continue
+        for f in seguidores:
+            ref = f"reto:{cid}"
+            if db.query(PushSent).filter(PushSent.eval_id == ref, PushSent.owner_key == f.owner_key,
+                                         PushSent.hito == hoy).first():
+                continue
+            db.add(PushSent(eval_id=ref, owner_key=f.owner_key, hito=hoy))
+            db.commit()
+            try:
+                avisados += ps.enviar_a_owner(db, f.owner_key, payload_push(len(banco)))
+            except Exception:  # noqa: BLE001 — un push caído no deja el barrido a medias
+                pass
+    return {"ok": True, "avisados": avisados}
+
+
+def payload_push(n_banco: int) -> dict:
+    """El aviso lleva la cara de Runi, como los anuncios: quien lo ve sabe de quién viene."""
+    return {"title": "🦊 Runi tiene un reto para ti",
+            "body": "Dos o tres preguntas de lo que entra en tu evaluación. Te toma un minuto.",
+            "tag": "reto-diario", "url": "/?reto=1",
+            "icon": "/runi/icons/icon-192.png", "badge": "/runi/icons/icon-192.png",
+            "vibrate": [90, 50, 90]}

@@ -217,6 +217,14 @@ def tick(db: Session) -> dict:
             db.add(PushSent(eval_id=str(e.id), owner_key=f.owner_key, hito=str(dias)))
             db.commit()
             enviados += n
+    # El Reto de Runi: preguntas de lo que entra en la evaluación, una vez al día y nunca de noche.
+    retos = {}
+    try:
+        from app.services import reto_service as _rt
+        retos = _rt.tick(db)
+    except Exception:  # noqa: BLE001 — aditivo
+        retos = {}
+
     # Comunicados recurrentes del docente ("recuerden traer el delantal cada práctico").
     recurrentes = {}
     try:
@@ -240,4 +248,5 @@ def tick(db: Session) -> dict:
     except Exception:  # noqa: BLE001
         _log.exception("tick repasos diferidos")
     return {"ok": True, "enviados": enviados, "personales": personales, "repasos": repasos,
-            "comunicados": (recurrentes or {}).get("recurrentes_reenviados", 0)}
+            "comunicados": (recurrentes or {}).get("recurrentes_reenviados", 0),
+            "retos": (retos or {}).get("avisados", 0)}
