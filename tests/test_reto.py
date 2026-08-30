@@ -272,3 +272,77 @@ def test_el_aviso_lleva_la_cara_de_runi(db):
     p = rt.payload_push(12)
     assert p["icon"].endswith("icon-192.png") and "Runi" in p["title"]
     assert p["url"] == "/?reto=1"
+
+
+# ── importar la pauta del docente ────────────────────────────────────────────────────
+def _docx(parrafos):
+    """Un .docx mínimo. `parrafos` = [(texto, ¿resaltado?)]."""
+    import io, zipfile
+    def p(t, hl):
+        rpr = '<w:rPr><w:highlight w:val="yellow"/></w:rPr>' if hl else ''
+        return f'<w:p><w:r>{rpr}<w:t>{t}</w:t></w:r></w:p>'
+    doc = ('<?xml version="1.0"?><w:document xmlns:w="x"><w:body>'
+           + "".join(p(t, h) for t, h in parrafos) + '</w:body></w:document>')
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("word/document.xml", doc)
+    return buf.getvalue()
+
+
+_PAUTA = [("1. ¿Qué hueso forma el estrecho superior?", False),
+          ("a) El fémur", False), ("b) El sacro", True),
+          ("c) La escápula", False), ("d) El húmero", False),
+          ("2. ¿Qué músculo cierra el periné?", False),
+          ("a) Elevador del ano", True), ("b) Psoas", False), ("c) Diafragma", False)]
+
+
+def test_la_pauta_se_lee_con_su_correcta_resaltada():
+    qs = rt.parsear_docx(_docx(_PAUTA), "Pelvis")
+    assert len(qs) == 2
+    assert qs[0]["correcta"] == "B" and qs[0]["alternativas"]["B"] == "El sacro"
+    assert qs[1]["correcta"] == "A" and len(qs[1]["alternativas"]) == 3
+
+
+def test_una_pregunta_sin_marcar_no_entra(db):
+    """Adivinar cuál era la correcta sería peor que dejarla fuera: se informa cuántas quedaron."""
+    import base64
+    sin_marcar = [("3. ¿Qué nervio inerva el periné?", False), ("a) Pudendo", False), ("b) Obturador", False)]
+    r = rt.importar_docx(db, CID, base64.b64encode(_docx(_PAUTA + sin_marcar)).decode(), "Pelvis")
+    assert r["importadas"] == 2 and r["sin_marcar"] == 1
+
+
+def test_lo_importado_nace_aprobado_y_le_llega_al_alumno(db):
+    import base64
+    rt.importar_docx(db, CID, base64.b64encode(_docx(_PAUTA)).decode(), "Pelvis")
+    s = rt.sesion(db, CID, ANA)
+    assert len(s["preguntas"]) == 2
+    assert all(q["tema"] == "Pelvis" for q in s["preguntas"])
+
+
+def test_reimportar_el_mismo_archivo_no_duplica(db):
+    import base64
+    b64 = base64.b64encode(_docx(_PAUTA)).decode()
+    rt.importar_docx(db, CID, b64, "Pelvis")
+    r = rt.importar_docx(db, CID, b64, "Pelvis")
+    assert r["importadas"] == 0 and r["repetidas"] == 2
+    assert db.query(RetoPregunta).count() == 2
+
+
+def test_un_archivo_que_no_es_docx_falla_claro(db):
+    import base64
+    with pytest.raises(Exception):
+        rt.importar_docx(db, CID, base64.b64encode(b"esto no es un docx").decode())
+
+
+def test_un_docx_sin_preguntas_lo_dice(db):
+    import base64
+    vacio = _docx([("Apuntes de clase", False), ("Nada con formato de pregunta", False)])
+    with pytest.raises(Exception):
+        rt.importar_docx(db, CID, base64.b64encode(vacio).decode())
+
+
+def test_una_linea_mal_formada_no_corrompe_la_pregunta_anterior():
+    """Si un bloque no se reconoce como enunciado, sus alternativas NO pisan las de la anterior."""
+    raro = _PAUTA + [("Pregunta sin numerar", False), ("a) Intrusa", False)]
+    qs = rt.parsear_docx(_docx(raro), "Pelvis")
+    assert qs[1]["alternativas"]["A"] == "Elevador del ano"

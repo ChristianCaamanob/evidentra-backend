@@ -400,3 +400,118 @@ def payload_push(n_banco: int) -> dict:
             "tag": "reto-diario", "url": "/?reto=1",
             "icon": "/runi/icons/icon-192.png", "badge": "/runi/icons/icon-192.png",
             "vibrate": [90, 50, 90]}
+
+
+# ── importar la pauta del docente (.docx) ─────────────────────────────────────────────
+# El profesor ya tiene sus variantes escritas y con la correcta RESALTADA EN AMARILLO. Pedirle que
+# las vuelva a escribir en un formulario sería tirar a la basura su trabajo; y transcribirlas a mano
+# es justo donde se cuelan los errores. Se lee su archivo tal como está.
+def _docx_parrafos(datos: bytes) -> list:
+    """(texto, ¿resaltado?) por párrafo del .docx."""
+    import io
+    import re as _re
+    import zipfile
+    from html import unescape
+    with zipfile.ZipFile(io.BytesIO(datos)) as z:
+        xml = z.read("word/document.xml").decode("utf-8", "replace")
+    out = []
+    for p in _re.findall(r"<w:p\b.*?</w:p>", xml, _re.S):
+        texto = unescape(_re.sub(r"<[^>]+>", "", p)).strip()
+        if texto:
+            # Cualquier resaltado sirve menos el explícito "none": no todos los docentes usan amarillo.
+            marcado = bool(_re.search(r'w:highlight[^>]*w:val="(?!none)', p))
+            out.append((texto, marcado))
+    return out
+
+
+_RE_ENUNCIADO = None
+_RE_ALTERNATIVA = None
+
+
+def _regex():
+    global _RE_ENUNCIADO, _RE_ALTERNATIVA
+    if _RE_ENUNCIADO is None:
+        import re as _re
+        _RE_ENUNCIADO = _re.compile(r"^\s*(\d{1,3})[.)]\s+(.{3,})$", _re.S)
+        _RE_ALTERNATIVA = _re.compile(r"^\s*([a-eA-E])[.)]\s+(.+)$", _re.S)
+    return _RE_ENUNCIADO, _RE_ALTERNATIVA
+
+
+def parsear_docx(datos: bytes, tema_defecto: str = "General") -> list:
+    """Lee «1. enunciado / a) … b) …» con la correcta resaltada. Devuelve preguntas listas."""
+    re_en, re_alt = _regex()
+    parrafos = _docx_parrafos(datos)
+    preguntas, actual = [], None
+    for texto, marcado in parrafos:
+        m = re_alt.match(texto)
+        if m and actual is not None:
+            letra = m.group(1).upper()
+            # Si esa letra YA existe, empezó otro bloque que no se reconoció como enunciado:
+            # sobrescribirla corrompería en silencio la pregunta anterior. Se ignora.
+            if letra not in actual["alternativas"]:
+                actual["alternativas"][letra] = m.group(2).strip()[:300]
+                if marcado:
+                    actual["correcta"] = letra
+            continue
+        m = re_en.match(texto)
+        if m:
+            if actual and len(actual["alternativas"]) >= 2 and actual.get("correcta"):
+                preguntas.append(actual)
+            actual = {"enunciado": m.group(2).strip()[:1200], "alternativas": {},
+                      "correcta": None, "tema": tema_defecto}
+    if actual and len(actual["alternativas"]) >= 2 and actual.get("correcta"):
+        preguntas.append(actual)
+    return preguntas
+
+
+def importar_docx(db: Session, course_id, datos_b64: str, tema: str = "General",
+                  eval_id: str | None = None) -> dict:
+    """Importa la pauta como preguntas APROBADAS: las escribió el docente, no hay nada que revisar.
+
+    Solo entran las que traen su correcta marcada. Una pregunta sin respuesta señalada no se puede
+    corregir, y adivinarla sería peor que dejarla fuera: se informa cuántas quedaron.
+    """
+    import base64
+    import re as _re
+    crudo = _re.sub(r"^data:[^;]+;base64,", "", str(datos_b64 or ""))
+    try:
+        datos = base64.b64decode(crudo, validate=False)
+    except Exception:  # noqa: BLE001
+        raise unprocessable("No pude leer el archivo. ¿Es un .docx?")
+    try:
+        preguntas = parsear_docx(datos, tema)
+    except Exception:  # noqa: BLE001
+        raise unprocessable("Ese archivo no parece un .docx de Word.")
+    if not preguntas:
+        raise unprocessable(
+            "No encontré preguntas con su alternativa marcada. El formato esperado es «1. enunciado» "
+            "y debajo «a) …», con la correcta resaltada en el documento.")
+
+    ya = db.query(RetoPregunta).filter(RetoPregunta.course_id == str(course_id)).count()
+    # No se importa dos veces el mismo enunciado: reimportar un archivo corregido es lo normal.
+    existentes = {(p.enunciado or "").strip().lower()
+                  for p in db.query(RetoPregunta).filter(RetoPregunta.course_id == str(course_id)).all()}
+    nuevas, repetidas = [], 0
+    for q in preguntas:
+        if ya + len(nuevas) >= _MAX_BANCO:
+            break
+        if q["enunciado"].strip().lower() in existentes:
+            repetidas += 1
+            continue
+        nuevas.append(RetoPregunta(
+            course_id=str(course_id), eval_id=eval_id, tema=q["tema"][:160], peso=1,
+            enunciado=q["enunciado"], alternativas=q["alternativas"], correcta=q["correcta"],
+            justificacion=None, nivel="recordar", estado="aprobada", origen="docente"))
+    if nuevas:
+        db.add_all(nuevas); db.commit()
+    return {"ok": True, "importadas": len(nuevas), "repetidas": repetidas,
+            "leidas": len(preguntas),
+            "sin_marcar": max(0, _contar_enunciados(datos) - len(preguntas))}
+
+
+def _contar_enunciados(datos: bytes) -> int:
+    re_en, _ = _regex()
+    try:
+        return sum(1 for t, _m in _docx_parrafos(datos) if re_en.match(t))
+    except Exception:  # noqa: BLE001
+        return 0

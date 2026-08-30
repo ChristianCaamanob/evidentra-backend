@@ -50,6 +50,15 @@ def reto_manual(course_id: UUID, payload: dict, db: Session = Depends(get_db)):
     return rt.crear_manual(db, course_id, payload or {}, (payload or {}).get("eval_id"))
 
 
+@router.post("/courses/{course_id}/reto/importar", dependencies=[Depends(req_profesor)])
+@limit("6/minute")
+def reto_importar(course_id: UUID, request: Request, payload: dict, db: Session = Depends(get_db)):
+    """Importa la pauta del docente (.docx) con la correcta resaltada. Entran APROBADAS: las escribió él."""
+    p = payload or {}
+    return rt.importar_docx(db, course_id, p.get("archivo_datos", ""),
+                            str(p.get("tema") or "General"), p.get("eval_id"))
+
+
 @router.delete("/reto/{pregunta_id}", dependencies=[Depends(req_profesor)])
 def reto_eliminar(pregunta_id: UUID, db: Session = Depends(get_db)):
     return rt.eliminar(db, pregunta_id)
