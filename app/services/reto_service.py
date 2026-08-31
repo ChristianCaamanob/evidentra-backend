@@ -373,6 +373,54 @@ def eliminar(db: Session, pregunta_id) -> dict:
     return {"ok": True}
 
 
+# ── ventanas del día: los retos aparecen y desaparecen ────────────────────────────────
+# Pedido del CEO, con su propia imagen: «son como los huevitos de chocolate». Si el banco entero
+# está disponible siempre, se convierte en una lista de tareas y se acaba en una sentada; la magia
+# está en que aparezcan unos pocos, a ratos, y que si no los tomaste se hayan ido.
+#
+# Cuatro ventanas de 90 minutos en hora de Chile (UTC-4). Ninguna de noche.
+_TZ_CHILE = -4
+VENTANAS = (9, 13, 17, 21)          # 9:00 · 13:00 · 17:00 · 21:00 hora local
+DURACION_MIN = 90
+
+
+def _local(ahora=None):
+    import datetime as _dt
+    return (ahora or _dt.datetime.utcnow()) + _dt.timedelta(hours=_TZ_CHILE)
+
+
+def ventana_de(ahora=None) -> dict:
+    """¿Hay ventana abierta ahora? Devuelve también cuándo abre la próxima, para poder decirlo."""
+    import datetime as _dt
+    loc = _local(ahora)
+    abierta, desde = None, None
+    for h in VENTANAS:
+        ini = loc.replace(hour=h, minute=0, second=0, microsecond=0)
+        if ini <= loc < ini + _dt.timedelta(minutes=DURACION_MIN):
+            abierta, desde = h, ini
+            break
+    prox = None
+    for h in VENTANAS:
+        if h > loc.hour or (h == loc.hour and loc.minute == 0):
+            prox = loc.replace(hour=h, minute=0, second=0, microsecond=0)
+            break
+    if prox is None:                       # ya pasaron todas: la primera de mañana
+        prox = (loc + _dt.timedelta(days=1)).replace(hour=VENTANAS[0], minute=0, second=0, microsecond=0)
+    return {"abierta": abierta is not None, "hora": abierta,
+            "desde_utc": (desde - _dt.timedelta(hours=_TZ_CHILE)) if desde else None,
+            "cierra_local": (desde + _dt.timedelta(minutes=DURACION_MIN)).strftime("%H:%M") if desde else None,
+            "proxima_local": prox.strftime("%H:%M"),
+            "minutos_para_proxima": max(0, int((prox - loc).total_seconds() // 60))}
+
+
+def _respondidas_en_ventana(db: Session, pseudo_id: str, v: dict) -> int:
+    if not v["abierta"] or not v["desde_utc"]:
+        return 0
+    return (db.query(RetoRespuesta)
+            .filter(RetoRespuesta.pseudo_id == pseudo_id,
+                    RetoRespuesta.created_at >= v["desde_utc"]).count())
+
+
 # ── la sesión del estudiante ──────────────────────────────────────────────────────────
 def _prioridad(p: RetoPregunta, vacios: set, pseudo_id: str) -> tuple:
     """Orden en que se le sirven las preguntas a ESTA persona.
@@ -402,11 +450,18 @@ def _vacios_de(db: Session, pseudo_id: str) -> set:
     return flojos
 
 
-def sesion(db: Session, course_id, pseudo_id: str, n: int = POR_SESION) -> dict:
-    """Las 2–3 preguntas que le tocan hoy. Nunca una que ya respondió."""
+def sesion(db: Session, course_id, pseudo_id: str, n: int = POR_SESION, ahora=None) -> dict:
+    """Las 2–3 preguntas de ESTA ventana. Nunca una que ya respondió, y solo si hay ventana abierta."""
     if not (pseudo_id or "").strip():
         raise unprocessable("Falta la identidad del estudiante.")
-    n = max(1, min(POR_SESION, int(n or POR_SESION)))
+    v = ventana_de(ahora)
+    if not v["abierta"]:
+        # Cerrado NO es un error: es lo que hace que valga la pena volver.
+        return {"ok": True, "preguntas": [], "cerrado": True, "ventana": v}
+    ya_en_ventana = _respondidas_en_ventana(db, pseudo_id, v)
+    n = max(0, min(POR_SESION - ya_en_ventana, min(POR_SESION, int(n or POR_SESION))))
+    if n <= 0:
+        return {"ok": True, "preguntas": [], "cerrado": True, "completa": True, "ventana": v}
     respondidas = {r.pregunta_id for r in db.query(RetoRespuesta).filter(
         RetoRespuesta.pseudo_id == pseudo_id).all()}
     banco = db.query(RetoPregunta).filter(RetoPregunta.course_id == str(course_id),
@@ -414,7 +469,7 @@ def sesion(db: Session, course_id, pseudo_id: str, n: int = POR_SESION) -> dict:
     pendientes = [p for p in banco if p.id not in respondidas]
     if not pendientes:
         # Que se acabe el banco NO es un error: es que ya respondió todo lo que su profe aprobó.
-        return {"ok": True, "preguntas": [], "sin_pendientes": True,
+        return {"ok": True, "preguntas": [], "sin_pendientes": True, "ventana": v,
                 "banco": len(banco), "respondidas": len(respondidas)}
     vacios = _vacios_de(db, pseudo_id)
     pendientes.sort(key=lambda p: _prioridad(p, vacios, pseudo_id))
@@ -422,7 +477,7 @@ def sesion(db: Session, course_id, pseudo_id: str, n: int = POR_SESION) -> dict:
     for p in elegidas:
         p.veces_servida = int(p.veces_servida or 0) + 1
     db.commit()
-    return {"ok": True, "sin_pendientes": False,
+    return {"ok": True, "sin_pendientes": False, "cerrado": False, "ventana": v,
             "preguntas": [_dict(p) for p in elegidas],      # sin la correcta: se revela al responder
             "banco": len(banco), "respondidas": len(respondidas),
             "quedan": len(pendientes) - len(elegidas)}
@@ -472,7 +527,7 @@ def responder(db: Session, pregunta_id, pseudo_id: str, elegida: str, course_id=
             "justificacion": p.justificacion}
 
 
-def mi_estado(db: Session, course_id, pseudo_id: str) -> dict:
+def mi_estado(db: Session, course_id, pseudo_id: str, ahora=None) -> dict:
     """Para la tarjeta de Inicio: cuántos retos lleva y si hay algo nuevo esperándola."""
     banco = db.query(RetoPregunta).filter(RetoPregunta.course_id == str(course_id),
                                           RetoPregunta.estado == "aprobada").count()
@@ -481,16 +536,24 @@ def mi_estado(db: Session, course_id, pseudo_id: str) -> dict:
     aprobadas = {p.id for p in db.query(RetoPregunta).filter(
         RetoPregunta.course_id == str(course_id), RetoPregunta.estado == "aprobada").all()}
     hechas = len(ids & aprobadas)
+    v = ventana_de(ahora)
+    quedan_ventana = max(0, POR_SESION - _respondidas_en_ventana(db, pseudo_id, v)) if v["abierta"] else 0
     return {"ok": True, "banco": banco, "respondidos": hechas,
             "aciertos": sum(1 for r in filas if r.correcta and r.pregunta_id in aprobadas),
-            "hay_nuevos": hechas < banco}
+            # `hay_nuevos` manda en la interfaz: solo hay algo que ofrecer si además la ventana
+            # está abierta y le quedan preguntas en ella.
+            "hay_nuevos": (hechas < banco) and v["abierta"] and quedan_ventana > 0,
+            "quedan_en_banco": banco - hechas, "quedan_en_ventana": quedan_ventana,
+            "ventana": v}
 
 
 # ── el aviso diario ───────────────────────────────────────────────────────────────────
 # Ventana horaria en UTC. Chile está en UTC-4, así que 20:00–00:00 UTC es 16:00–20:00 allá: tarde,
 # cuando alguien puede sentarse a estudiar. **Nunca de noche**: un recordatorio académico a las 2 AM
 # no ayuda a nadie a aprender, solo entrena a silenciar la app.
-_HORA_DESDE_UTC, _HORA_HASTA_UTC = 20, 24
+# El aviso se manda al ABRIRSE cada ventana (ver VENTANAS). Se tolera un retraso: el barrido corre
+# cada diez minutos y no siempre cae en el minuto exacto.
+_TOLERANCIA_MIN = 25
 
 
 def tick(db: Session, ahora=None) -> dict:
@@ -501,9 +564,14 @@ def tick(db: Session, ahora=None) -> dict:
     """
     import datetime as _dt
     ahora = ahora or _dt.datetime.utcnow()
-    if not (_HORA_DESDE_UTC <= ahora.hour < _HORA_HASTA_UTC):
+    v = ventana_de(ahora)
+    if not v["abierta"]:
         return {"ok": True, "fuera_de_hora": True, "avisados": 0}
-    hoy = ahora.date().isoformat()
+    loc = _local(ahora)
+    if loc.minute > _TOLERANCIA_MIN:
+        # Ya pasó el momento del aviso: avisar a mitad de ventana llega tarde y molesta.
+        return {"ok": True, "fuera_de_hora": True, "avisados": 0}
+    hoy = f"{loc.date().isoformat()}#{v['hora']}"      # una vez por VENTANA, no por día
 
     from app.models.push import PushSent, StudentCourseFollow
     from app.services import push_service as ps
@@ -531,17 +599,22 @@ def tick(db: Session, ahora=None) -> dict:
             db.add(PushSent(eval_id=ref, owner_key=f.owner_key, hito=hoy))
             db.commit()
             try:
-                avisados += ps.enviar_a_owner(db, f.owner_key, payload_push(len(banco)))
+                avisados += ps.enviar_a_owner(db, f.owner_key, payload_push(len(banco), v))
             except Exception:  # noqa: BLE001 — un push caído no deja el barrido a medias
                 pass
     return {"ok": True, "avisados": avisados}
 
 
-def payload_push(n_banco: int) -> dict:
-    """El aviso lleva la cara de Runi, como los anuncios: quien lo ve sabe de quién viene."""
-    return {"title": "🦊 Runi tiene un reto para ti",
-            "body": "Dos o tres preguntas de lo que entra en tu evaluación. Te toma un minuto.",
-            "tag": "reto-diario", "url": "/?reto=1",
+def payload_push(n_banco: int, v: dict | None = None) -> dict:
+    """El aviso lleva la cara de Runi, como los anuncios: quien lo ve sabe de quién viene.
+
+    Dice hasta cuándo está abierta: la ventana es corta a propósito, y no decirlo sería una trampa.
+    """
+    cierra = (v or {}).get("cierra_local")
+    return {"title": "🦊 Runi abrió un reto",
+            "body": ("Tres preguntas de lo que entra en tu evaluación"
+                     + (", hasta las " + cierra if cierra else "") + ". Te toma un minuto."),
+            "tag": "reto-ventana-" + str((v or {}).get("hora") or ""), "url": "/?reto=1",
             "icon": "/runi/icons/icon-192.png", "badge": "/runi/icons/icon-192.png",
             "vibrate": [90, 50, 90]}
 

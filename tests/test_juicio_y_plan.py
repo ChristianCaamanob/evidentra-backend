@@ -148,7 +148,7 @@ def test_la_semana_en_curso_no_se_cuenta_como_cumplida(db):
 
 
 def test_una_semana_pasada_cumplida_si_cuenta(db):
-    pasada = _dt.date.today() - _dt.timedelta(days=7)
+    pasada = _dt.datetime.utcnow().date() - _dt.timedelta(days=7)
     ps.fijar(db, PS, 2, semana=ps.semana_de(pasada))
     _episodios(db, 2, _dt.datetime.combine(pasada, _dt.time(12, 0)))
     assert ps.semanas_cumplidas(db, PS) == 1
@@ -161,7 +161,7 @@ def test_una_meta_absurda_se_rechaza(db):
 
 
 def test_la_sugerencia_mira_la_semana_pasada(db):
-    pasada = _dt.date.today() - _dt.timedelta(days=7)
+    pasada = _dt.datetime.utcnow().date() - _dt.timedelta(days=7)
     _episodios(db, 3, _dt.datetime.combine(pasada, _dt.time(12, 0)))
     assert ps.estado(db, PS)["sugerencia"] == 4      # lo que lograste, +1
 
@@ -205,3 +205,9 @@ def test_si_falla_tres_veces_se_rinde_sin_dar_por_mala(monkeypatch, db):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
     r = js.juzgar(db, PS, "recordar", "pelvis", "una respuesta", auto_reporte=True)
     assert r["sin_juicio"] and r["juicio"] is None and not r["concordancia"]
+
+
+def test_la_semana_se_calcula_en_utc_como_los_episodios(monkeypatch):
+    """Un domingo por la tarde en Chile ya es lunes en UTC. Mezclar la fecha LOCAL con marcas de
+    tiempo UTC partía la semana en dos y los episodios de ese día dejaban de contar."""
+    assert ps.semana_de() == ps.semana_de(_dt.datetime.utcnow().date())

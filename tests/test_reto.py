@@ -30,6 +30,13 @@ from app.models.reto import RetoPregunta
 from app.services import reto_service as rt
 
 CID = "3f2a1c44-8d21-4e6b-9a70-5c1e2d3f4a5b"
+
+# Los retos solo se sirven dentro de una ventana (ver VENTANAS). Estas son marcas UTC que caen
+# dentro de dos ventanas distintas del mismo día en hora de Chile (13:10 y 17:10 locales).
+import datetime as _dtt
+ABIERTA = _dtt.datetime(2026, 9, 1, 17, 10)          # 13:10 en Chile
+ABIERTA2 = _dtt.datetime(2026, 9, 1, 21, 10)         # 17:10 en Chile
+CERRADA = _dtt.datetime(2026, 9, 1, 15, 0)           # 11:00 en Chile, entre ventanas
 ANA, LUZ = "stu:ana", "stu:luz"
 
 
@@ -56,12 +63,12 @@ def _sembrar(db, n=10, estado="aprobada", tema="Pelvis ósea", peso=1):
 # ── lo que se aprueba y lo que no ────────────────────────────────────────────────────
 def test_una_propuesta_sin_aprobar_no_le_llega_a_nadie(db):
     _sembrar(db, 5, estado="propuesta")
-    assert rt.sesion(db, CID, ANA)["preguntas"] == []
+    assert rt.sesion(db, CID, ANA, ahora=ABIERTA)["preguntas"] == []
 
 
 def test_una_descartada_tampoco(db):
     _sembrar(db, 5, estado="descartada")
-    assert rt.sesion(db, CID, ANA)["preguntas"] == []
+    assert rt.sesion(db, CID, ANA, ahora=ABIERTA)["preguntas"] == []
 
 
 def test_aprobar_exige_que_la_correcta_exista(db):
@@ -82,7 +89,7 @@ def test_la_pregunta_escrita_por_el_docente_nace_aprobada(db):
     r = rt.crear_manual(db, CID, {"tema": "Periné", "enunciado": "¿Cuál?",
                                   "alternativas": {"A": "esta", "B": "otra"}, "correcta": "A"})
     assert r["pregunta"]["estado"] == "aprobada" and r["pregunta"]["origen"] == "docente"
-    assert len(rt.sesion(db, CID, ANA)["preguntas"]) == 1
+    assert len(rt.sesion(db, CID, ANA, ahora=ABIERTA)["preguntas"]) == 1
 
 
 def test_una_pregunta_manual_incompleta_se_rechaza(db):
@@ -96,15 +103,15 @@ def test_una_pregunta_manual_incompleta_se_rechaza(db):
 # ── la sesión ────────────────────────────────────────────────────────────────────────
 def test_nunca_mas_de_tres_por_sesion(db):
     _sembrar(db, 40)
-    assert len(rt.sesion(db, CID, ANA)["preguntas"]) == rt.POR_SESION
-    assert len(rt.sesion(db, CID, ANA, n=99)["preguntas"]) == rt.POR_SESION
+    assert len(rt.sesion(db, CID, ANA, ahora=ABIERTA)["preguntas"]) == rt.POR_SESION
+    assert len(rt.sesion(db, CID, ANA, n=99, ahora=ABIERTA)["preguntas"]) == rt.POR_SESION
 
 
 def test_lo_ya_respondido_no_vuelve_a_salir(db):
     _sembrar(db, 6)
     vistas = set()
-    for _ in range(2):
-        s = rt.sesion(db, CID, ANA)
+    for cuando in (ABIERTA, ABIERTA2):          # una ventana da 3; hacen falta dos para las 6
+        s = rt.sesion(db, CID, ANA, ahora=cuando)
         for q in s["preguntas"]:
             assert q["id"] not in vistas, "le salió de nuevo una que ya había respondido"
             vistas.add(q["id"])
@@ -114,29 +121,29 @@ def test_lo_ya_respondido_no_vuelve_a_salir(db):
 
 def test_la_sesion_no_revela_la_respuesta(db):
     _sembrar(db, 3)
-    for q in rt.sesion(db, CID, ANA)["preguntas"]:
+    for q in rt.sesion(db, CID, ANA, ahora=ABIERTA)["preguntas"]:
         assert "correcta" not in q and "justificacion" not in q
 
 
 def test_quedarse_sin_preguntas_no_es_un_error(db):
     _sembrar(db, 2)
-    for q in rt.sesion(db, CID, ANA)["preguntas"]:
+    for q in rt.sesion(db, CID, ANA, ahora=ABIERTA)["preguntas"]:
         rt.responder(db, q["id"], ANA, "B")
-    s = rt.sesion(db, CID, ANA)
+    s = rt.sesion(db, CID, ANA, ahora=ABIERTA)
     assert s["ok"] and s["sin_pendientes"] and s["preguntas"] == []
 
 
 def test_dos_estudiantes_no_reciben_la_misma_lista_en_el_mismo_orden(db):
     _sembrar(db, 30)
-    a = [q["id"] for q in rt.sesion(db, CID, ANA)["preguntas"]]
-    l = [q["id"] for q in rt.sesion(db, CID, LUZ)["preguntas"]]
+    a = [q["id"] for q in rt.sesion(db, CID, ANA, ahora=ABIERTA)["preguntas"]]
+    l = [q["id"] for q in rt.sesion(db, CID, LUZ, ahora=ABIERTA)["preguntas"]]
     assert a != l
 
 
 def test_lo_que_mas_pesa_en_la_tabla_sale_primero(db):
     _sembrar(db, 5, tema="Tema liviano", peso=1)
     _sembrar(db, 5, tema="Pelvis ósea", peso=40)
-    temas = {q["tema"] for q in rt.sesion(db, CID, ANA)["preguntas"]}
+    temas = {q["tema"] for q in rt.sesion(db, CID, ANA, ahora=ABIERTA)["preguntas"]}
     assert temas == {"Pelvis ósea"}
 
 
@@ -150,13 +157,13 @@ def test_sus_vacios_van_antes_que_el_peso(db):
     db.add(ConfidenceObs(episode_id=e.id, pseudo_id=ANA, ra="Periné", item_id="x",
                          correct=False, confidence=90))
     db.commit()
-    assert {q["tema"] for q in rt.sesion(db, CID, ANA)["preguntas"]} == {"Periné"}
+    assert {q["tema"] for q in rt.sesion(db, CID, ANA, ahora=ABIERTA)["preguntas"]} == {"Periné"}
 
 
 def test_sin_identidad_no_hay_sesion(db):
     _sembrar(db, 3)
     with pytest.raises(Exception):
-        rt.sesion(db, CID, "")
+        rt.sesion(db, CID, "", ahora=ABIERTA)
 
 
 # ── responder ────────────────────────────────────────────────────────────────────────
@@ -204,7 +211,7 @@ def test_el_reto_alimenta_la_evidencia_no_es_un_juego_aparte(db):
 def test_mi_estado_cuenta_solo_lo_aprobado(db):
     _sembrar(db, 4)
     _sembrar(db, 6, estado="propuesta")
-    e = rt.mi_estado(db, CID, ANA)
+    e = rt.mi_estado(db, CID, ANA, ahora=ABIERTA)
     assert e["banco"] == 4 and e["respondidos"] == 0 and e["hay_nuevos"]
 
 
@@ -212,7 +219,7 @@ def test_cuando_respondio_todo_deja_de_haber_nuevos(db):
     ps = _sembrar(db, 2)
     for p in ps:
         rt.responder(db, p.id, ANA, "B")
-    e = rt.mi_estado(db, CID, ANA)
+    e = rt.mi_estado(db, CID, ANA, ahora=ABIERTA)
     assert e["respondidos"] == 2 and not e["hay_nuevos"] and e["aciertos"] == 2
 
 
@@ -314,7 +321,7 @@ def test_una_pregunta_sin_marcar_no_entra(db):
 def test_lo_importado_nace_aprobado_y_le_llega_al_alumno(db):
     import base64
     rt.importar_docx(db, CID, base64.b64encode(_docx(_PAUTA)).decode(), "Pelvis")
-    s = rt.sesion(db, CID, ANA)
+    s = rt.sesion(db, CID, ANA, ahora=ABIERTA)
     assert len(s["preguntas"]) == 2
     assert all(q["tema"] == "Pelvis" for q in s["preguntas"])
 
@@ -354,7 +361,7 @@ def test_publicar_todas_de_una_vez(db):
     _sembrar(db, 12, estado="propuesta")
     r = rt.aprobar_todas(db, CID)
     assert r["publicadas"] == 12 and r["sin_correcta"] == 0
-    assert len(rt.sesion(db, CID, ANA)["preguntas"]) == rt.POR_SESION
+    assert len(rt.sesion(db, CID, ANA, ahora=ABIERTA)["preguntas"]) == rt.POR_SESION
 
 
 def test_publicar_todas_deja_atras_las_que_no_se_pueden_corregir(db):
@@ -414,7 +421,7 @@ def test_el_borrador_NO_lo_ve_la_estudiante(db, monkeypatch):
     r = rt.justificar(db, CID, "material del curso", "Anatomía")
     assert r["redactadas"] == 2
     # La sesión del alumno no trae ni el borrador ni la justificación
-    for q in rt.sesion(db, CID, ANA)["preguntas"]:
+    for q in rt.sesion(db, CID, ANA, ahora=ABIERTA)["preguntas"]:
         assert "justificacion" not in q and "justificacion_ia" not in q
     # Y al responder tampoco: todavía no hay justificación aceptada
     p = db.query(RetoPregunta).first()
@@ -484,3 +491,91 @@ def test_sin_material_no_se_redacta_nada(db):
     _sembrar(db, 1)
     with pytest.raises(Exception):
         rt.justificar(db, CID, "")
+
+
+# ── las ventanas del día ─────────────────────────────────────────────────────────────
+def test_fuera_de_ventana_no_hay_retos(db):
+    """«Son como los huevitos de chocolate»: si estuvieran siempre, dejarían de ser un hallazgo."""
+    _sembrar(db, 10)
+    s = rt.sesion(db, CID, ANA, ahora=CERRADA)
+    assert s["ok"] and s["cerrado"] and s["preguntas"] == []
+    assert s["ventana"]["proxima_local"] == "13:00"
+
+
+def test_dentro_de_ventana_da_tres(db):
+    _sembrar(db, 10)
+    s = rt.sesion(db, CID, ANA, ahora=ABIERTA)
+    assert not s["cerrado"] and len(s["preguntas"]) == 3
+
+
+def _responder_dentro(db, preguntas, quien, cuando):
+    """Responde y ancla la marca de tiempo DENTRO de la ventana: la base estampa la hora real, y los
+    tests usan una fecha fija."""
+    from app.models.reto import RetoRespuesta
+    for q in preguntas:
+        rt.responder(db, q["id"], quien, "B")
+    for r in db.query(RetoRespuesta).filter(RetoRespuesta.pseudo_id == quien).all():
+        if r.created_at is None or r.created_at < cuando:
+            r.created_at = cuando
+    db.commit()
+
+
+def test_la_ventana_se_agota_al_responder_sus_tres(db):
+    _sembrar(db, 20)
+    _responder_dentro(db, rt.sesion(db, CID, ANA, ahora=ABIERTA)["preguntas"], ANA, ABIERTA)
+    s = rt.sesion(db, CID, ANA, ahora=ABIERTA)
+    assert s["cerrado"] and s.get("completa") and s["preguntas"] == []
+
+
+def test_la_siguiente_ventana_trae_mas(db):
+    _sembrar(db, 20)
+    _responder_dentro(db, rt.sesion(db, CID, ANA, ahora=ABIERTA)["preguntas"], ANA, ABIERTA)
+    assert len(rt.sesion(db, CID, ANA, ahora=ABIERTA2)["preguntas"]) == 3
+
+
+def test_hay_cuatro_ventanas_y_ninguna_de_noche():
+    assert len(rt.VENTANAS) == 4
+    assert min(rt.VENTANAS) >= 7 and max(rt.VENTANAS) <= 21
+
+
+def test_la_ventana_dice_cuando_vuelve_a_abrir(db):
+    v = rt.ventana_de(CERRADA)
+    assert not v["abierta"] and v["proxima_local"] == "13:00" and v["minutos_para_proxima"] == 120
+    v2 = rt.ventana_de(ABIERTA)
+    assert v2["abierta"] and v2["cierra_local"] == "14:30"
+
+
+def test_pasadas_todas_las_ventanas_la_proxima_es_manana(db):
+    tarde = _dtt.datetime(2026, 9, 2, 3, 0)      # 23:00 en Chile
+    assert rt.ventana_de(tarde)["proxima_local"] == "09:00"
+
+
+def test_el_estado_de_inicio_no_ofrece_nada_fuera_de_ventana(db):
+    _sembrar(db, 10)
+    e = rt.mi_estado(db, CID, ANA, ahora=CERRADA)
+    assert not e["hay_nuevos"] and e["quedan_en_banco"] == 10
+    assert rt.mi_estado(db, CID, ANA, ahora=ABIERTA)["hay_nuevos"]
+
+
+def test_el_aviso_solo_sale_al_abrirse_la_ventana(db, monkeypatch):
+    from app.services import push_service
+    monkeypatch.setattr(push_service, "enviar_a_owner", lambda *a, **k: 1)
+    _sembrar(db, 5); _seguidor(db)
+    assert rt.tick(db, ahora=CERRADA)["avisados"] == 0
+    tarde_en_ventana = _dtt.datetime(2026, 9, 1, 18, 40)   # 14:40 local: la ventana sigue abierta…
+    assert rt.tick(db, ahora=tarde_en_ventana)["avisados"] == 0   # …pero avisar ahora llega tarde
+    assert rt.tick(db, ahora=ABIERTA)["avisados"] == 1
+    assert rt.tick(db, ahora=ABIERTA)["avisados"] == 0            # una vez por ventana
+
+
+def test_cada_ventana_avisa_una_vez(db, monkeypatch):
+    from app.services import push_service
+    monkeypatch.setattr(push_service, "enviar_a_owner", lambda *a, **k: 1)
+    _sembrar(db, 5); _seguidor(db)
+    assert rt.tick(db, ahora=ABIERTA)["avisados"] == 1
+    assert rt.tick(db, ahora=ABIERTA2)["avisados"] == 1
+
+
+def test_el_aviso_dice_hasta_cuando(db):
+    p = rt.payload_push(20, rt.ventana_de(ABIERTA))
+    assert "14:30" in p["body"] and "Runi" in p["title"]

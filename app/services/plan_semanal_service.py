@@ -27,8 +27,16 @@ _MIN, _MAX = 1, 20
 UMBRAL = 0.8            # ≥80% del propio plan, como pide la puerta de la medalla 8
 
 
+def _hoy() -> _dt.date:
+    """Siempre en UTC. Los episodios se guardan con `utcnow()`, así que mezclar la fecha LOCAL con
+    marcas de tiempo UTC parte la semana en dos: un domingo por la tarde en Chile ya es lunes en UTC
+    y los episodios de ese día dejaban de contar para el plan. Cazado por un test que empezó a
+    fallar al cruzar la medianoche UTC."""
+    return _dt.datetime.utcnow().date()
+
+
 def semana_de(d: _dt.date | None = None) -> str:
-    d = d or _dt.date.today()
+    d = d or _hoy()
     a, s, _ = d.isocalendar()
     return f"{a}-W{s:02d}"
 
@@ -89,7 +97,7 @@ def _sugerencia(db: Session, pseudo_id: str) -> int:
     Proponer un número alto a quien recién empieza no motiva, lo desmoraliza; y proponerle siempre
     3 a quien ya hace 8 lo vuelve irrelevante.
     """
-    prev = semana_de(_dt.date.today() - _dt.timedelta(days=7))
+    prev = semana_de(_hoy() - _dt.timedelta(days=7))
     return max(2, min(6, _hechos(db, pseudo_id, prev) + 1))
 
 
