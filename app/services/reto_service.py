@@ -145,6 +145,115 @@ def _normalizar(q: dict, pesos: dict) -> dict | None:
             "nivel": nivel if nivel in NIVELES else "recordar", "estado": "propuesta", "origen": "ia"}
 
 
+# ── los «porqués»: Runi redacta, el docente firma ─────────────────────────────────────
+# Una pauta trae la respuesta correcta, no la explicación. Sin ella el reto solo CORRIGE; con ella
+# ENSEÑA, que es la diferencia entre marcar un error y cerrar un vacío. Pero una explicación
+# equivocada de anatomía enseña algo falso igual que una pregunta mala: por eso el texto de la IA
+# queda en `justificacion_ia` y NO se le muestra a nadie hasta que el docente lo acepta.
+_POR_TANDA = 8          # más preguntas por llamada = respuestas más pobres y JSON que se corta
+
+
+def _prompt_justificar(curso: str, contexto: str, preguntas: list) -> tuple:
+    system = (
+        f"Escribes las explicaciones de un banco de preguntas del curso {curso}. Para cada pregunta "
+        "te doy el enunciado, las alternativas y CUÁL ES LA CORRECTA (ya está decidida por el "
+        "profesor: no la discutas ni la cambies).\n"
+        "Escribe POR QUÉ esa alternativa es la correcta, en una o dos frases. Si hay un distractor "
+        "que se elige mucho por confusión, di en media frase qué lo distingue.\n"
+        "La lee la estudiante justo después de responder: segunda persona, directo, sin "
+        "condescendencia y sin felicitarla (de eso se encarga la app). Nada de «como sabemos» ni "
+        "«obviamente».\n"
+        "Apóyate SOLO en el material del profesor. Si el material no alcanza para justificar una, "
+        "devuelve su texto vacío antes que inventar.\n"
+        'Devuelve SOLO JSON: {"justificaciones":[{"n":1,"texto":"…"},…]} con la misma numeración.'
+    )
+    lineas = []
+    for i, p in enumerate(preguntas, start=1):
+        alts = "; ".join(f"{k}) {v}" for k, v in sorted((p.alternativas or {}).items()))
+        lineas.append(f"{i}. {p.enunciado}\n   {alts}\n   CORRECTA: {p.correcta}")
+    user = ("MATERIAL DEL PROFESOR:\n" + (contexto or "")[:14000]
+            + "\n\nPREGUNTAS:\n" + "\n\n".join(lineas))
+    return system, user
+
+
+def justificar(db: Session, course_id, contexto: str, curso: str = "", rehacer: bool = False) -> dict:
+    """Redacta los porqués que faltan. Quedan como BORRADOR hasta que el docente los acepte."""
+    import json
+    import os
+    import re
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise conflict("El motor de IA no está disponible ahora mismo.")
+    if not str(contexto or "").strip():
+        raise unprocessable("Este curso todavía no tiene material cargado para basarse.")
+
+    q = db.query(RetoPregunta).filter(RetoPregunta.course_id == str(course_id),
+                                      RetoPregunta.estado != "descartada")
+    faltan = [p for p in q.all()
+              if rehacer or (not (p.justificacion or "").strip() and not (p.justificacion_ia or "").strip())]
+    if not faltan:
+        return {"ok": True, "redactadas": 0, "sin_material": 0, "nada_que_hacer": True}
+
+    from app.services import correccion_experta_service as ce
+    redactadas, vacias = 0, 0
+    for i in range(0, len(faltan), _POR_TANDA):
+        tanda = faltan[i:i + _POR_TANDA]
+        system, user = _prompt_justificar(curso or "el curso", contexto, tanda)
+        textos = {}
+        for intento in range(3):
+            try:
+                crudo = ce._llamar_anthropic(system, user, max_tokens=2600)
+                m = re.search(r"\{.*\}", crudo or "", re.S)
+                d = json.loads(m.group(0)) if m else {}
+                for j in (d.get("justificaciones") or []):
+                    try:
+                        textos[int(j.get("n"))] = str(j.get("texto") or "").strip()[:600]
+                    except (TypeError, ValueError):
+                        continue
+                if textos:
+                    break
+            except Exception as e:  # noqa: BLE001
+                _LOG.warning("reto: justificar intento %d/3 falló: %s", intento + 1, str(e)[:140])
+        for n, p in enumerate(tanda, start=1):
+            t = (textos.get(n) or "").strip()
+            if t:
+                p.justificacion_ia = t; redactadas += 1
+            else:
+                vacias += 1     # el material no alcanzaba: se deja vacío antes que inventar
+        db.commit()
+    return {"ok": True, "redactadas": redactadas, "sin_material": vacias, "nada_que_hacer": False}
+
+
+def usar_justificacion(db: Session, pregunta_id, texto: str | None = None) -> dict:
+    """El docente acepta (o corrige) el borrador: recién ahí lo ve la estudiante."""
+    p = _buscar(db, pregunta_id)
+    final = (texto if texto is not None else (p.justificacion_ia or "")).strip()[:600]
+    if not final:
+        raise unprocessable("No hay texto que usar.")
+    p.justificacion = final
+    p.justificacion_ia = None
+    db.commit()
+    return {"ok": True, "pregunta": _dict(p, con_respuesta=True)}
+
+
+def usar_todas_las_justificaciones(db: Session, course_id) -> dict:
+    filas = db.query(RetoPregunta).filter(RetoPregunta.course_id == str(course_id)).all()
+    n = 0
+    for p in filas:
+        if (p.justificacion_ia or "").strip():
+            p.justificacion = p.justificacion_ia.strip()[:600]
+            p.justificacion_ia = None
+            n += 1
+    db.commit()
+    return {"ok": True, "aceptadas": n}
+
+
+def descartar_justificacion(db: Session, pregunta_id) -> dict:
+    p = _buscar(db, pregunta_id)
+    p.justificacion_ia = None
+    db.commit()
+    return {"ok": True}
+
+
 # ── revisión del docente ──────────────────────────────────────────────────────────────
 def _dict(p: RetoPregunta, con_respuesta: bool = False) -> dict:
     d = {"id": str(p.id), "tema": p.tema, "peso": p.peso, "enunciado": p.enunciado,
@@ -153,6 +262,8 @@ def _dict(p: RetoPregunta, con_respuesta: bool = False) -> dict:
     if con_respuesta:
         d["correcta"] = p.correcta
         d["justificacion"] = p.justificacion
+        # El borrador solo viaja al panel del docente, nunca a la app del alumno.
+        d["justificacion_ia"] = getattr(p, "justificacion_ia", None)
     return d
 
 

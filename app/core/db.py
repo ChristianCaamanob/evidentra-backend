@@ -560,6 +560,9 @@ _COLUMNAS_ADITIVAS = {
         "nombre": "VARCHAR(80)",
     },
     # Un aviso suele venir con algo que mirar: enlace o archivo pequeño.
+    "reto_preguntas": {
+        "justificacion_ia": "TEXT",
+    },
     "anuncios_curso": {
         "url": "TEXT",
         "archivo_nombre": "VARCHAR(200)",

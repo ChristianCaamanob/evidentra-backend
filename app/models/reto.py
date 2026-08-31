@@ -42,6 +42,10 @@ class RetoPregunta(UUIDMixin, Base):
     alternativas: Mapped[dict | None] = mapped_column(JSON, nullable=True)   # {"A": "...", "B": "..."}
     correcta: Mapped[str] = mapped_column(String(2), default="A")
     justificacion: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Borrador escrito por Runi. NO se le muestra a nadie hasta que el docente lo acepta y pasa a
+    # `justificacion`: una explicación equivocada de anatomía enseña algo falso, igual que la
+    # pregunta. La IA redacta; la firma sigue siendo del profesor.
+    justificacion_ia: Mapped[str | None] = mapped_column(Text, nullable=True)
     nivel: Mapped[str] = mapped_column(String(16), default="recordar")       # recordar|conectar|aplicar
     estado: Mapped[str] = mapped_column(String(16), default="propuesta", index=True)
     origen: Mapped[str] = mapped_column(String(12), default="ia")            # ia | docente

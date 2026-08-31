@@ -391,3 +391,96 @@ def test_eliminar_una_publicada_borra_tambien_sus_respuestas(db):
 def test_vaciar_un_estado_inventado_se_rechaza(db):
     with pytest.raises(Exception):
         rt.vaciar(db, CID, "loquesea")
+
+
+# ── los porqués: Runi redacta, el docente firma ──────────────────────────────────────
+def _runi_dice(monkeypatch, textos):
+    """Sustituye la llamada al modelo por una respuesta fija."""
+    import json as _j
+    from app.services import correccion_experta_service as ce
+    def fake(system, user, max_tokens=2600):
+        return _j.dumps({"justificaciones": [{"n": i + 1, "texto": t} for i, t in enumerate(textos)]})
+    monkeypatch.setattr(ce, "_llamar_anthropic", fake)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+
+
+def test_el_borrador_NO_lo_ve_la_estudiante(db, monkeypatch):
+    """Una explicación equivocada de anatomía enseña algo falso, igual que una pregunta mala."""
+    _sembrar(db, 2)
+    for p in db.query(RetoPregunta).all():
+        p.justificacion = None
+    db.commit()
+    _runi_dice(monkeypatch, ["Porque el sacro cierra por detrás.", "Porque el elevador sostiene."])
+    r = rt.justificar(db, CID, "material del curso", "Anatomía")
+    assert r["redactadas"] == 2
+    # La sesión del alumno no trae ni el borrador ni la justificación
+    for q in rt.sesion(db, CID, ANA)["preguntas"]:
+        assert "justificacion" not in q and "justificacion_ia" not in q
+    # Y al responder tampoco: todavía no hay justificación aceptada
+    p = db.query(RetoPregunta).first()
+    assert rt.responder(db, p.id, LUZ, "B")["justificacion"] is None
+
+
+def test_aceptar_el_borrador_lo_hace_visible(db, monkeypatch):
+    p = _sembrar(db, 1)[0]
+    p.justificacion = None; db.commit()
+    _runi_dice(monkeypatch, ["El sacro cierra la pelvis por detrás."])
+    rt.justificar(db, CID, "material", "Anatomía")
+    rt.usar_justificacion(db, p.id)
+    assert rt.responder(db, p.id, ANA, "B")["justificacion"] == "El sacro cierra la pelvis por detrás."
+    assert db.query(RetoPregunta).first().justificacion_ia is None
+
+
+def test_el_docente_puede_corregir_antes_de_aceptar(db, monkeypatch):
+    p = _sembrar(db, 1)[0]
+    p.justificacion = None; db.commit()
+    _runi_dice(monkeypatch, ["Texto flojo."])
+    rt.justificar(db, CID, "material")
+    rt.usar_justificacion(db, p.id, "Lo escribo yo mejor.")
+    assert db.query(RetoPregunta).first().justificacion == "Lo escribo yo mejor."
+
+
+def test_descartar_el_borrador_no_toca_la_pregunta(db, monkeypatch):
+    p = _sembrar(db, 1)[0]
+    p.justificacion = None; db.commit()
+    _runi_dice(monkeypatch, ["No me convence."])
+    rt.justificar(db, CID, "material")
+    rt.descartar_justificacion(db, p.id)
+    f = db.query(RetoPregunta).first()
+    assert f.justificacion_ia is None and f.justificacion is None and f.estado == "aprobada"
+
+
+def test_no_se_pisan_las_justificaciones_que_ya_tenia(db, monkeypatch):
+    """Las que el docente ya escribió no se tocan salvo que lo pida explícitamente."""
+    _sembrar(db, 2)          # nacen con justificación "Porque sí."
+    _runi_dice(monkeypatch, ["otra cosa", "otra cosa"])
+    r = rt.justificar(db, CID, "material")
+    assert r["nada_que_hacer"]
+    assert all(p.justificacion == "Porque sí." for p in db.query(RetoPregunta).all())
+
+
+def test_si_el_material_no_alcanza_se_deja_vacio_en_vez_de_inventar(db, monkeypatch):
+    ps = _sembrar(db, 2)
+    for p in ps:
+        p.justificacion = None
+    db.commit()
+    _runi_dice(monkeypatch, ["Una explicación buena.", ""])
+    r = rt.justificar(db, CID, "material")
+    assert r["redactadas"] == 1 and r["sin_material"] == 1
+
+
+def test_aceptar_todas_de_una_vez(db, monkeypatch):
+    ps = _sembrar(db, 3)
+    for p in ps:
+        p.justificacion = None
+    db.commit()
+    _runi_dice(monkeypatch, ["uno", "dos", "tres"])
+    rt.justificar(db, CID, "material")
+    assert rt.usar_todas_las_justificaciones(db, CID)["aceptadas"] == 3
+    assert all(p.justificacion and not p.justificacion_ia for p in db.query(RetoPregunta).all())
+
+
+def test_sin_material_no_se_redacta_nada(db):
+    _sembrar(db, 1)
+    with pytest.raises(Exception):
+        rt.justificar(db, CID, "")

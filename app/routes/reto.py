@@ -50,6 +50,31 @@ def reto_manual(course_id: UUID, payload: dict, db: Session = Depends(get_db)):
     return rt.crear_manual(db, course_id, payload or {}, (payload or {}).get("eval_id"))
 
 
+@router.post("/courses/{course_id}/reto/justificar", dependencies=[Depends(req_profesor)])
+@limit("4/minute")
+def reto_justificar(course_id: UUID, request: Request, payload: dict, db: Session = Depends(get_db)):
+    """Runi redacta los porqués que faltan. Quedan como BORRADOR: no los ve ninguna estudiante."""
+    a = sil.agente_de_curso(db, course_id)
+    if not a:
+        raise unprocessable("Este curso todavía no tiene agente de Runi con material cargado.")
+    return rt.justificar(db, course_id, a.contexto or "", curso=(a.nombre_curso or ""),
+                         rehacer=bool((payload or {}).get("rehacer")))
+
+
+@router.post("/reto/{pregunta_id}/justificacion", dependencies=[Depends(req_profesor)])
+def reto_usar_justificacion(pregunta_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    """Aceptar (o corregir) el borrador. Recién aquí lo ve la estudiante."""
+    p = payload or {}
+    if p.get("descartar"):
+        return rt.descartar_justificacion(db, pregunta_id)
+    return rt.usar_justificacion(db, pregunta_id, p.get("texto"))
+
+
+@router.post("/courses/{course_id}/reto/justificaciones/usar-todas", dependencies=[Depends(req_profesor)])
+def reto_usar_todas_justificaciones(course_id: UUID, db: Session = Depends(get_db)):
+    return rt.usar_todas_las_justificaciones(db, course_id)
+
+
 @router.post("/courses/{course_id}/reto/publicar-todas", dependencies=[Depends(req_profesor)])
 def reto_publicar_todas(course_id: UUID, db: Session = Depends(get_db)):
     """Publica el lote por revisar. Lo que no convenza se descarta antes, una por una."""
