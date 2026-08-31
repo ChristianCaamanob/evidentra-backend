@@ -36,7 +36,7 @@ CID = "3f2a1c44-8d21-4e6b-9a70-5c1e2d3f4a5b"
 import datetime as _dtt
 ABIERTA = _dtt.datetime(2026, 9, 1, 17, 10)          # 13:10 en Chile
 ABIERTA2 = _dtt.datetime(2026, 9, 1, 21, 10)         # 17:10 en Chile
-CERRADA = _dtt.datetime(2026, 9, 1, 15, 0)           # 11:00 en Chile, entre ventanas
+CERRADA = _dtt.datetime(2026, 9, 1, 16, 30)          # 12:30 en Chile, entre ventanas
 ANA, LUZ = "stu:ana", "stu:luz"
 
 
@@ -533,16 +533,31 @@ def test_la_siguiente_ventana_trae_mas(db):
     assert len(rt.sesion(db, CID, ANA, ahora=ABIERTA2)["preguntas"]) == 3
 
 
-def test_hay_cuatro_ventanas_y_ninguna_de_noche():
-    assert len(rt.VENTANAS) == 4
+def test_hay_una_ventana_cada_dos_horas_y_ninguna_de_noche():
+    assert list(rt.VENTANAS) == [9, 11, 13, 15, 17, 19, 21]
     assert min(rt.VENTANAS) >= 7 and max(rt.VENTANAS) <= 21
+    # Abierta 1 h de cada 2: si estuviera abierta más tiempo del que está cerrada, dejaría de ser
+    # un hallazgo y volvería a ser una lista de tareas siempre disponible.
+    assert rt.DURACION_MIN * 2 <= 120
+
+
+def test_no_se_avisa_en_todas_las_ventanas():
+    """Siete notificaciones diarias no crean el hábito: hacen que se silencie la app."""
+    assert set(rt.VENTANAS_CON_AVISO) < set(rt.VENTANAS)
+    assert len(rt.VENTANAS_CON_AVISO) == 4
+
+
+def test_una_ventana_sin_aviso_igual_sirve_preguntas(db):
+    _sembrar(db, 6)
+    once = _dtt.datetime(2026, 9, 1, 15, 10)        # 11:10 local: hay ventana, no hay aviso
+    assert len(rt.sesion(db, CID, ANA, ahora=once)["preguntas"]) == 3
 
 
 def test_la_ventana_dice_cuando_vuelve_a_abrir(db):
     v = rt.ventana_de(CERRADA)
-    assert not v["abierta"] and v["proxima_local"] == "13:00" and v["minutos_para_proxima"] == 120
+    assert not v["abierta"] and v["proxima_local"] == "13:00" and v["minutos_para_proxima"] == 30
     v2 = rt.ventana_de(ABIERTA)
-    assert v2["abierta"] and v2["cierra_local"] == "14:30"
+    assert v2["abierta"] and v2["cierra_local"] == "14:00"
 
 
 def test_pasadas_todas_las_ventanas_la_proxima_es_manana(db):
@@ -562,7 +577,7 @@ def test_el_aviso_solo_sale_al_abrirse_la_ventana(db, monkeypatch):
     monkeypatch.setattr(push_service, "enviar_a_owner", lambda *a, **k: 1)
     _sembrar(db, 5); _seguidor(db)
     assert rt.tick(db, ahora=CERRADA)["avisados"] == 0
-    tarde_en_ventana = _dtt.datetime(2026, 9, 1, 18, 40)   # 14:40 local: la ventana sigue abierta…
+    tarde_en_ventana = _dtt.datetime(2026, 9, 1, 17, 40)   # 13:40 local: la ventana sigue abierta…
     assert rt.tick(db, ahora=tarde_en_ventana)["avisados"] == 0   # …pero avisar ahora llega tarde
     assert rt.tick(db, ahora=ABIERTA)["avisados"] == 1
     assert rt.tick(db, ahora=ABIERTA)["avisados"] == 0            # una vez por ventana
@@ -578,4 +593,4 @@ def test_cada_ventana_avisa_una_vez(db, monkeypatch):
 
 def test_el_aviso_dice_hasta_cuando(db):
     p = rt.payload_push(20, rt.ventana_de(ABIERTA))
-    assert "14:30" in p["body"] and "Runi" in p["title"]
+    assert "14:00" in p["body"] and "Runi" in p["title"]

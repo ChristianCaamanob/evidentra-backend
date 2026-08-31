@@ -380,8 +380,14 @@ def eliminar(db: Session, pregunta_id) -> dict:
 #
 # Cuatro ventanas de 90 minutos en hora de Chile (UTC-4). Ninguna de noche.
 _TZ_CHILE = -4
-VENTANAS = (9, 13, 17, 21)          # 9:00 · 13:00 · 17:00 · 21:00 hora local
-DURACION_MIN = 90
+# Cada 2 horas de 9 a 21 (pedido del CEO: cuatro veces al día «no genera nada»). Ninguna de noche.
+VENTANAS = (9, 11, 13, 15, 17, 19, 21)
+# La ventana se acorta a 1 hora: con una apertura cada 2 h, 90 minutos dejaría el reto disponible
+# tres cuartas partes del día y se perdería justo lo que lo hace un hallazgo.
+DURACION_MIN = 60
+# Preguntas cada 2 h, pero AVISOS cuatro veces al día. Siete notificaciones diarias no crean el
+# hábito: hacen que se silencie la app, y con ella se pierden también los avisos del profesor.
+VENTANAS_CON_AVISO = (9, 13, 17, 21)
 
 
 def _local(ahora=None):
@@ -565,7 +571,7 @@ def tick(db: Session, ahora=None) -> dict:
     import datetime as _dt
     ahora = ahora or _dt.datetime.utcnow()
     v = ventana_de(ahora)
-    if not v["abierta"]:
+    if not v["abierta"] or v["hora"] not in VENTANAS_CON_AVISO:
         return {"ok": True, "fuera_de_hora": True, "avisados": 0}
     loc = _local(ahora)
     if loc.minute > _TOLERANCIA_MIN:
