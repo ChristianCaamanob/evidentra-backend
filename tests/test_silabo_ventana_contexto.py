@@ -85,3 +85,39 @@ def test_una_pregunta_fuera_del_silabo_sigue_siendo_del_silabo():
     """Al revés: ensanchar las señales no puede convertir cualquier error en «servicio caído»."""
     for f in ("KeyError: 'tema'", "list index out of range", ""):
         assert not sil._es_falla_de_servicio(Exception(f)), f
+
+
+# ── el rescate: una duda de CONTENIDO no se deriva al docente ────────────────────────
+def test_una_duda_de_anatomia_no_es_un_parametro_del_curso():
+    """Visto en el piloto: preguntas de contenido puro acabaron en la bandeja del docente.
+
+    `fuera_corpus` existe para un dato administrativo que el profesor no escribió (una fecha, una
+    ponderación). Derivar una duda de anatomía le roba tiempo al profesor, deja a la estudiante
+    esperando por algo que se sabe, y le ensucia el mapa de vacíos.
+    """
+    contenido = [
+        "el nervio frenico nace desde el plexo cervical, de que se encarga un 75% la vértebra C4?",
+        "Drenaje linfático de la mama nombra los linfos que existen",
+        "Drenaje linfático de la mama tipos de linfonodos",
+        "Que debo saber de la región axilar",
+        "Seno pericárdicoTrans",
+        "¿Qué músculo deprime los cartílagos costales?",
+    ]
+    for q in contenido:
+        assert not sil._pide_un_parametro(q), q
+
+
+def test_un_parametro_del_curso_si_se_reconoce():
+    """Y al revés: lo administrativo tiene que seguir yendo al docente cuando no está escrito."""
+    parametros = [
+        "¿Cuáles son las ponderaciones de mis pruebas?",
+        "¿Cuándo es el solemne?",
+        "¿En qué sala rendimos?",
+        "¿Hasta dónde entra en el certamen?",
+        "¿Qué pasa con mi asistencia si falto?",
+        "¿Cuánto vale la nota del taller?",
+        "¿Cuál es la fecha de entrega?",
+        "¿Cómo se evalúa el informe?",
+    ]
+    for q in parametros:
+        assert sil._pide_un_parametro(q), q

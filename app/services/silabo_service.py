@@ -999,6 +999,53 @@ def _ventana_contexto(contexto: str, pregunta: str, tope: int = _TOPE_CONTEXTO) 
     return "\n\n".join(salida)
 
 
+# Lo que de verdad convierte una pregunta en «parámetro del curso»: pregunta por un dato
+# administrativo, no por una estructura anatómica. Sin esta lista, el modelo mandaba al docente
+# cualquier cosa que no estuviera literal en el sílabo.
+_PARAMETRO_RE = re.compile(
+    r"\b(?:"
+    r"ponderaci|porcentaje|eximici|aprobaci|asistencia|inasistencia|recuperativ|recorrecci[oó]n|"
+    r"requisito|bibliograf|calendariz|"
+    r"cu[aá]ndo|cuando|fecha[s]?\b|plazo[s]?\b|entrega[rs]?\b|hora[s]?\b|horario|"
+    r"nota[s]?\b|sala[s]?\b|aula[s]?\b|"
+    r"qu[eé] d[ií]a|cu[aá]nto vale|vale (?:cu[aá]nto|el)|cu[aá]ntas preguntas|"
+    r"qu[eé] entra|entra en (?:el|la)|hasta d[oó]nde|c[oó]mo se eval[uú]a|justificar"
+    r")", re.I)
+
+
+def _pide_un_parametro(pregunta: str) -> bool:
+    return bool(_PARAMETRO_RE.search(pregunta or ""))
+
+
+def _responder_como_contenido(system: str, user: str, pregunta: str):
+    """Segunda pasada cuando el modelo derivó una duda de CONTENIDO por no estar en el sílabo.
+
+    No se reescribe la respuesta a mano: se le vuelve a preguntar prohibiendo explícitamente la
+    derivación. Cuesta una llamada extra, y solo en el caso que estaba fallando.
+    """
+    forzado = system + (
+        "\n\nCORRECCIÓN IMPORTANTE: esta consulta es de CONTENIDO del ámbito de la asignatura, NO un "
+        "parámetro administrativo. Tienes PROHIBIDO devolver 'fuera_corpus' o pedir al docente. "
+        "Respóndela tú con tu conocimiento del ámbito, con rigor, anclada al programa y sin "
+        "contradecir al profesor; cierra con 1-3 referencias verificables (autor, año, obra). "
+        "tipo='conceptual', necesita_docente=false, fuente='general'.")
+    try:
+        from app.services import correccion_experta_service as ce
+        for _ in range(2):
+            d = _json_robusto(ce._llamar_anthropic(forzado, user, max_tokens=1100))
+            resp = str((d or {}).get("respuesta", "")).strip()
+            if resp:
+                tema = (str(d.get("tema", "")).strip()[:120] or None)
+                ev = _evidencia(inferencia=str(d.get("inferencia", "")).strip(),
+                                recomendacion=str(d.get("recomendacion", "")).strip(),
+                                fuente="general", certeza_sug="moderada")
+                logger.info("silabo: rescatada como contenido una consulta derivada por error")
+                return ("conceptual", resp, "contenido", "baja", False, None, tema, "general", ev)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("silabo: el rescate de contenido falló: %s", str(e)[:120])
+    return None
+
+
 def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, material: str | None = None,
                             imagenes: list | None = None, historial: str | None = None,
                             vinculo: dict | None = None, db=None):
@@ -1178,6 +1225,16 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, m
                     _evidencia(decision="Salud, justificaciones y denuncias las atienden Secretaría Académica y Dirección.",
                                fuente="ninguna", certeza_sug="revision_docente"))
         if tipo in _TIPOS_A_DOCENTE:
+            # RESCATE. `fuera_corpus` existe para un PARÁMETRO del curso que el profesor no escribió
+            # (una fecha, una ponderación, una regla). No para una duda de anatomía. Visto en el
+            # piloto: «¿de qué se encarga la C4 en el nervio frénico?» y «drenaje linfático de la
+            # mama, nombra los linfonodos» acabaron en la bandeja del docente. Son contenido puro:
+            # Runi tiene que responderlas, y derivarlas le roba tiempo al profesor, deja a la
+            # estudiante esperando por algo que se sabe, y le ensucia el mapa de vacíos.
+            if tipo == "fuera_corpus" and not _pide_un_parametro(pregunta):
+                rescatada = _responder_como_contenido(system, user, pregunta)
+                if rescatada:
+                    return rescatada
             if not resp:
                 resp = ("Esto necesita a tu docente; se lo llevé y verás aquí su respuesta.")
             return (tipo, resp, cat, urg, True, None, tema, "ninguna",
