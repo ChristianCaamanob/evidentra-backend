@@ -125,12 +125,12 @@ def test_la_sesion_no_revela_la_respuesta(db):
         assert "correcta" not in q and "justificacion" not in q
 
 
-def test_quedarse_sin_preguntas_no_es_un_error(db):
+def test_dentro_de_la_misma_ventana_no_se_repite_ninguna(db):
+    """Repetir la misma pregunta a los cinco minutos no es repasar: es un bucle."""
     _sembrar(db, 2)
-    for q in rt.sesion(db, CID, ANA, ahora=ABIERTA)["preguntas"]:
-        rt.responder(db, q["id"], ANA, "B")
+    _responder_dentro(db, rt.sesion(db, CID, ANA, ahora=ABIERTA)["preguntas"], ANA, ABIERTA)
     s = rt.sesion(db, CID, ANA, ahora=ABIERTA)
-    assert s["ok"] and s["sin_pendientes"] and s["preguntas"] == []
+    assert s["ok"] and s["preguntas"] == []
 
 
 def test_dos_estudiantes_no_reciben_la_misma_lista_en_el_mismo_orden(db):
@@ -215,12 +215,14 @@ def test_mi_estado_cuenta_solo_lo_aprobado(db):
     assert e["banco"] == 4 and e["respondidos"] == 0 and e["hay_nuevos"]
 
 
-def test_cuando_respondio_todo_deja_de_haber_nuevos(db):
+def test_cuando_respondio_todo_entra_en_segunda_vuelta(db):
+    """El banco no se acaba: si se acabara, volvería a entrar y no encontraría nada."""
     ps = _sembrar(db, 2)
     for p in ps:
         rt.responder(db, p.id, ANA, "B")
     e = rt.mi_estado(db, CID, ANA, ahora=ABIERTA)
-    assert e["respondidos"] == 2 and not e["hay_nuevos"] and e["aciertos"] == 2
+    assert e["respondidos"] == 2 and e["aciertos"] == 2
+    assert e["hay_nuevos"] and e["en_repaso"]
 
 
 # ── la lectura de los temas que escribe el docente ───────────────────────────────────
@@ -594,3 +596,47 @@ def test_cada_ventana_avisa_una_vez(db, monkeypatch):
 def test_el_aviso_dice_hasta_cuando(db):
     p = rt.payload_push(20, rt.ventana_de(ABIERTA))
     assert "14:00" in p["body"] and "Runi" in p["title"]
+
+
+# ── segunda vuelta: el banco rota en vez de acabarse ─────────────────────────────────
+def test_agotado_el_banco_las_preguntas_vuelven(db):
+    _sembrar(db, 3)
+    _responder_dentro(db, rt.sesion(db, CID, ANA, ahora=ABIERTA)["preguntas"], ANA, ABIERTA)
+    s = rt.sesion(db, CID, ANA, ahora=ABIERTA2)          # otra ventana
+    assert s["repaso"] and len(s["preguntas"]) == 3
+
+
+def test_en_la_segunda_vuelta_lo_fallado_va_primero(db):
+    """Es lo que más conviene repasar, y además lo que la práctica espaciada recomienda."""
+    ps = _sembrar(db, 4)
+    rt.responder(db, ps[0].id, ANA, "A")                  # falla esta
+    for p in ps[1:]:
+        rt.responder(db, p.id, ANA, "B")                  # acierta el resto
+    from app.models.reto import RetoRespuesta
+    for r in db.query(RetoRespuesta).all():
+        r.created_at = ABIERTA
+    db.commit()
+    s = rt.sesion(db, CID, ANA, ahora=ABIERTA2)
+    assert s["preguntas"][0]["id"] == str(ps[0].id)
+
+
+def test_en_segunda_vuelta_se_puede_volver_a_responder(db):
+    p = _sembrar(db, 1)[0]
+    rt.responder(db, p.id, ANA, "A", ahora=ABIERTA)       # falla
+    from app.models.reto import RetoRespuesta
+    db.query(RetoRespuesta).first().created_at = ABIERTA
+    db.commit()
+    r = rt.responder(db, p.id, ANA, "B", ahora=ABIERTA2)  # acierta en la vuelta siguiente
+    assert r["acerto"] and r.get("repaso")
+    assert db.query(RetoRespuesta).count() == 1           # una fila por par, no historial inflado
+
+
+def test_en_la_misma_ventana_no_se_puede_reintentar(db):
+    """Si no, sería adivinar hasta acertar."""
+    p = _sembrar(db, 1)[0]
+    rt.responder(db, p.id, ANA, "A", ahora=ABIERTA)
+    from app.models.reto import RetoRespuesta
+    db.query(RetoRespuesta).first().created_at = ABIERTA
+    db.commit()
+    r = rt.responder(db, p.id, ANA, "B", ahora=ABIERTA)
+    assert r["ya_respondida"] and not r["acerto"]

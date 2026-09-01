@@ -27,7 +27,10 @@ from sqlalchemy.orm import Session
 from app.core.errors import conflict, not_found, unprocessable
 from app.models.reto import ESTADOS, RetoPregunta, RetoRespuesta
 
+import datetime as _dt
+
 _LOG = logging.getLogger("evalys")
+_EPOCA = _dt.datetime(1970, 1, 1)
 POR_SESION = 3            # tope duro: el CEO pidió 2 o 3, nunca una rueda infinita
 _MAX_BANCO = 400          # por curso; más que esto no lo revisa nadie
 NIVELES = ("recordar", "conectar", "aplicar")
@@ -440,6 +443,27 @@ def _prioridad(p: RetoPregunta, vacios: set, pseudo_id: str) -> tuple:
     return (es_vacio, -int(p.peso or 1), desempate)
 
 
+def _para_repaso(db: Session, pseudo_id: str, banco: list, v: dict) -> list:
+    """El orden de la segunda vuelta: primero lo que falló, después lo más antiguo.
+
+    Se excluye lo respondido DENTRO de esta misma ventana: repetir la misma pregunta a los cinco
+    minutos no es repasar, es un bucle.
+    """
+    previas = {r.pregunta_id: r for r in db.query(RetoRespuesta).filter(
+        RetoRespuesta.pseudo_id == pseudo_id).all()}
+    desde = v.get("desde_utc")
+    fuera = []
+    for p in banco:
+        r = previas.get(p.id)
+        if not r:
+            continue
+        if desde and r.created_at and r.created_at >= desde:
+            continue                       # ya la vio en esta ventana
+        fuera.append((0 if not r.correcta else 1, r.created_at or _EPOCA, p))
+    fuera.sort(key=lambda x: (x[0], x[1]))
+    return [x[2] for x in fuera]
+
+
 def _vacios_de(db: Session, pseudo_id: str) -> set:
     """Los temas donde esta persona se declaró con baja confianza o falló creyendo saber."""
     try:
@@ -473,23 +497,32 @@ def sesion(db: Session, course_id, pseudo_id: str, n: int = POR_SESION, ahora=No
     banco = db.query(RetoPregunta).filter(RetoPregunta.course_id == str(course_id),
                                           RetoPregunta.estado == "aprobada").all()
     pendientes = [p for p in banco if p.id not in respondidas]
+    repaso = False
     if not pendientes:
-        # Que se acabe el banco NO es un error: es que ya respondió todo lo que su profe aprobó.
-        return {"ok": True, "preguntas": [], "sin_pendientes": True, "ventana": v,
-                "banco": len(banco), "respondidas": len(respondidas)}
-    vacios = _vacios_de(db, pseudo_id)
-    pendientes.sort(key=lambda p: _prioridad(p, vacios, pseudo_id))
+        # SEGUNDA VUELTA. Que se acabe el banco no puede ser el final: la estudiante volvería a
+        # entrar y no encontraría nada, que es justo lo que este módulo existe para evitar. Se
+        # vuelve a servir lo ya respondido, empezando por lo que FALLÓ y por lo más antiguo — que es
+        # además lo que la práctica espaciada recomienda repasar.
+        pendientes = _para_repaso(db, pseudo_id, banco, v)
+        repaso = True
+        if not pendientes:
+            # Solo pasa si ya repasó todo el banco dentro de ESTA ventana.
+            return {"ok": True, "preguntas": [], "sin_pendientes": True, "ventana": v,
+                    "banco": len(banco), "respondidas": len(respondidas)}
+    if not repaso:
+        vacios = _vacios_de(db, pseudo_id)
+        pendientes.sort(key=lambda p: _prioridad(p, vacios, pseudo_id))
     elegidas = pendientes[:n]
     for p in elegidas:
         p.veces_servida = int(p.veces_servida or 0) + 1
     db.commit()
-    return {"ok": True, "sin_pendientes": False, "cerrado": False, "ventana": v,
+    return {"ok": True, "sin_pendientes": False, "cerrado": False, "ventana": v, "repaso": repaso,
             "preguntas": [_dict(p) for p in elegidas],      # sin la correcta: se revela al responder
             "banco": len(banco), "respondidas": len(respondidas),
             "quedan": len(pendientes) - len(elegidas)}
 
 
-def responder(db: Session, pregunta_id, pseudo_id: str, elegida: str, course_id=None) -> dict:
+def responder(db: Session, pregunta_id, pseudo_id: str, elegida: str, course_id=None, ahora=None) -> dict:
     """Registra la respuesta y devuelve el veredicto con su justificación. Idempotente."""
     p = _buscar(db, pregunta_id)
     if p.estado != "aprobada":
@@ -500,12 +533,25 @@ def responder(db: Session, pregunta_id, pseudo_id: str, elegida: str, course_id=
 
     ya = db.query(RetoRespuesta).filter(RetoRespuesta.pseudo_id == pseudo_id,
                                         RetoRespuesta.pregunta_id == p.id).first()
-    if ya:
-        return {"ok": True, "ya_respondida": True, "correcta": p.correcta,
-                "acerto": bool(ya.correcta), "elegida": ya.elegida,
-                "justificacion": p.justificacion}
-
+    v = ventana_de(ahora)
     acerto = (letra == p.correcta)
+    if ya:
+        # Dentro de la MISMA ventana no se puede cambiar la respuesta: sería adivinar hasta acertar.
+        if not v.get("desde_utc") or (ya.created_at and ya.created_at >= v["desde_utc"]):
+            return {"ok": True, "ya_respondida": True, "correcta": p.correcta,
+                    "acerto": bool(ya.correcta), "elegida": ya.elegida,
+                    "justificacion": p.justificacion}
+        # Segunda vuelta: se actualiza el intento. Una fila por par persona-pregunta, así «lo más
+        # antiguo primero» sigue significando algo y el historial no se infla.
+        ya.elegida = letra
+        ya.correcta = acerto
+        ya.created_at = _dt.datetime.utcnow()
+        if acerto:
+            p.aciertos = int(p.aciertos or 0) + 1
+        db.commit()
+        return {"ok": True, "acerto": acerto, "correcta": p.correcta, "elegida": letra,
+                "justificacion": p.justificacion, "repaso": True}
+
     db.add(RetoRespuesta(pregunta_id=p.id, pseudo_id=pseudo_id, elegida=letra, correcta=acerto))
     if acerto:
         p.aciertos = int(p.aciertos or 0) + 1
@@ -513,7 +559,7 @@ def responder(db: Session, pregunta_id, pseudo_id: str, elegida: str, course_id=
         db.commit()
     except Exception:  # noqa: BLE001 — dos pestañas a la vez; la unicidad ya nos protegió
         db.rollback()
-        return responder(db, pregunta_id, pseudo_id, elegida, course_id)
+        return responder(db, pregunta_id, pseudo_id, elegida, course_id, ahora)
 
     # El reto ALIMENTA la evidencia, no es un juego aparte: queda como episodio verificado con su
     # observación de confianza, así cuenta para la Cumbre igual que un repaso.
@@ -548,7 +594,9 @@ def mi_estado(db: Session, course_id, pseudo_id: str, ahora=None) -> dict:
             "aciertos": sum(1 for r in filas if r.correcta and r.pregunta_id in aprobadas),
             # `hay_nuevos` manda en la interfaz: solo hay algo que ofrecer si además la ventana
             # está abierta y le quedan preguntas en ella.
-            "hay_nuevos": (hechas < banco) and v["abierta"] and quedan_ventana > 0,
+            # Con la segunda vuelta ya no se acaba: mientras haya banco y ventana abierta, hay algo.
+            "hay_nuevos": banco > 0 and v["abierta"] and quedan_ventana > 0,
+            "en_repaso": banco > 0 and hechas >= banco,
             "quedan_en_banco": banco - hechas, "quedan_en_ventana": quedan_ventana,
             "ventana": v}
 
