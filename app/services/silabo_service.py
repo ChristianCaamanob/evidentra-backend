@@ -1046,6 +1046,31 @@ def _responder_como_contenido(system: str, user: str, pregunta: str):
     return None
 
 
+def _responder_directo(a: SilaboAgente, pregunta: str):
+    """Responder sin clasificar, en texto plano. El plan B cuando el JSON del clasificador falla.
+
+    No pide estructura ni evidencia: solo la respuesta. Menos que se le pueda pedir al modelo, y por
+    eso mucho más difícil de que falle — que es justo lo que se necesita en un último recurso.
+    """
+    curso = a.nombre_curso or "el curso"
+    system = (
+        f"Eres Runi, copiloto de aprendizaje del curso {curso}. Responde la duda de la estudiante con "
+        "rigor y claridad, tuteándola, anclada al ámbito de la asignatura y sin contradecir a su "
+        "profesor. Cierra con 1-3 referencias verificables (autor, año, obra o guía clínica). NO "
+        "digas que consulte a su docente ni que no puedes responder: esto es contenido y te toca a ti. "
+        "Responde en texto plano, sin JSON.")
+    user = "CONTEXTO DEL CURSO (referencia):\n" + _ventana_contexto(a.contexto or "", pregunta)[:8000] \
+        + "\n\nPREGUNTA:\n" + pregunta
+    from app.services import correccion_experta_service as ce
+    texto = str(ce._llamar_anthropic(system, user, max_tokens=1100) or "").strip()
+    if len(texto) < 40:
+        return None
+    logger.info("silabo: respondida en texto plano tras fallar la clasificación")
+    return ("conceptual", texto[:4000], "contenido", "baja", False, None, None, "general",
+            _evidencia(inferencia="Respuesta con mi conocimiento del ámbito.",
+                       fuente="general", certeza_sug="moderada"))
+
+
 def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, material: str | None = None,
                             imagenes: list | None = None, historial: str | None = None,
                             vinculo: dict | None = None, db=None):
@@ -1272,6 +1297,17 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, m
             return ("conceptual", _FALLBACK_ESTUDIO, "contenido", "baja", False, None, "estrategia de estudio", "general",
                     _evidencia(recomendacion="Divide por unidades, prioriza por ponderación y repasa con autoevaluación.",
                                fuente="general", certeza_sug="preliminar"))
+        # ÚLTIMO RECURSO. Si la clasificación se cayó pero la consulta es de CONTENIDO, pedirle a la
+        # estudiante que «reformule» una pregunta perfecta es lo peor que se puede hacer: la manda a
+        # repetir algo que estaba bien por un fallo que no es suyo. Se intenta responderla derecho,
+        # sin clasificar. Visto en producción con «nombra los grupos de linfonodos de la mama».
+        if not _pide_un_parametro(pregunta):
+            try:
+                directa = _responder_directo(a, pregunta)
+                if directa:
+                    return directa
+            except Exception:  # noqa: BLE001 — el último recurso jamás puede tumbar la respuesta
+                pass
         return ("fuera_corpus", "No pude resolver tu duda ahora mismo; reintento y, si sigue, la lleva tu docente. "
                 "Mientras tanto, ¿puedes reformularla o darme un poco más de detalle?",
                 "otro", "media", False, None, None, "ninguna",

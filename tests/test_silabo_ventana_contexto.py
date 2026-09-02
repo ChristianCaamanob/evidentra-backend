@@ -152,3 +152,37 @@ def test_una_conceptual_no_puede_necesitar_al_docente(monkeypatch):
     assert tipo == "conceptual" and not necesita
     assert "docente" not in resp.lower() and "axilares" in resp
     assert llamadas["n"] == 2          # una para clasificar, otra para el rescate
+
+
+def test_si_la_clasificacion_se_cae_una_duda_de_contenido_igual_se_responde(monkeypatch):
+    """Pedirle a la estudiante que «reformule» una pregunta perfecta es lo peor que se puede hacer:
+    la manda a repetir algo que estaba bien por un fallo que no es suyo."""
+    from app.services import correccion_experta_service as ce
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+
+    def fake(system, user, max_tokens=1000):
+        if "sin JSON" in system:                    # el plan B, en texto plano
+            return "Los grupos son axilares, paraesternales e infraclaviculares… (Moore, 2023)."
+        raise RuntimeError("boom: el clasificador se cayó")
+
+    monkeypatch.setattr(ce, "_llamar_anthropic", fake)
+
+    class A: pass
+    a = A(); a.nombre_curso = "Anatomía"; a.config = {}; a.contexto = "Unidad 3. Mama."; a.id = None
+    tipo, resp, _c, _u, necesita = sil._clasificar_y_responder(
+        a, "Nombra los grupos de linfonodos de la mama", db=None)[:5]
+    assert tipo == "conceptual" and not necesita and "axilares" in resp
+    assert "reformul" not in resp.lower()
+
+
+def test_un_parametro_caido_si_va_al_docente(monkeypatch):
+    """El plan B NO se aplica a parámetros: una fecha que no está escrita la decide el profesor."""
+    from app.services import correccion_experta_service as ce
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    monkeypatch.setattr(ce, "_llamar_anthropic",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    class A: pass
+    a = A(); a.nombre_curso = "Anatomía"; a.config = {}; a.contexto = "x"; a.id = None
+    tipo, resp = sil._clasificar_y_responder(a, "¿Cuándo es el solemne?", db=None)[:2]
+    assert tipo == "fuera_corpus" and "docente" in resp.lower()
