@@ -111,11 +111,11 @@ def test_lo_ya_respondido_no_vuelve_a_salir(db):
     _sembrar(db, 6)
     vistas = set()
     for cuando in (ABIERTA, ABIERTA2):          # una ventana da 3; hacen falta dos para las 6
-        s = rt.sesion(db, CID, ANA, ahora=cuando)
-        for q in s["preguntas"]:
+        preguntas = rt.sesion(db, CID, ANA, ahora=cuando)["preguntas"]
+        for q in preguntas:
             assert q["id"] not in vistas, "le salió de nuevo una que ya había respondido"
             vistas.add(q["id"])
-            rt.responder(db, q["id"], ANA, "B")
+        _responder_dentro(db, preguntas, ANA, cuando)
     assert len(vistas) == 6
 
 
@@ -511,14 +511,17 @@ def test_dentro_de_ventana_da_tres(db):
 
 
 def _responder_dentro(db, preguntas, quien, cuando):
-    """Responde y ancla la marca de tiempo DENTRO de la ventana: la base estampa la hora real, y los
-    tests usan una fecha fija."""
+    """Responde y ancla la marca de tiempo DENTRO de la ventana indicada.
+
+    La base estampa la hora REAL; los tests trabajan con una fecha fija. Anclar sin condiciones es
+    lo que los hace deterministas: la versión anterior solo ajustaba si la marca real era anterior,
+    y en cuanto el reloj pasó esa fecha los tests empezaron a fallar solos.
+    """
     from app.models.reto import RetoRespuesta
     for q in preguntas:
-        rt.responder(db, q["id"], quien, "B")
+        rt.responder(db, q["id"], quien, "B", ahora=cuando)
     for r in db.query(RetoRespuesta).filter(RetoRespuesta.pseudo_id == quien).all():
-        if r.created_at is None or r.created_at < cuando:
-            r.created_at = cuando
+        r.created_at = cuando
     db.commit()
 
 

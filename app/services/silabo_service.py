@@ -1239,7 +1239,16 @@ def _clasificar_y_responder(a: SilaboAgente, pregunta: str, intentos: int = 0, m
                 resp = ("Esto necesita a tu docente; se lo llevé y verás aquí su respuesta.")
             return (tipo, resp, cat, urg, True, None, tema, "ninguna",
                     _evidencia(inferencia=inferencia, necesita=True, fuente="ninguna"))
-        # administrativa / conceptual / otro: Runi responde
+        # administrativa / conceptual / otro: Runi responde.
+        # Y RESPONDE DE VERDAD. Visto en producción: el modelo esquivaba el rescate por otra puerta
+        # —devolvía tipo 'conceptual' pero con necesita_docente=true y el texto de derivación—, así
+        # que la estudiante quedaba igual esperando por una duda de anatomía. Si el tipo dice
+        # contenido, no puede necesitar al docente: eso es un parámetro, y esta pregunta no lo pide.
+        if necesita and not _pide_un_parametro(pregunta):
+            rescatada = _responder_como_contenido(system, user, pregunta)
+            if rescatada:
+                return rescatada
+            necesita = False        # sin rescate, igual se entrega lo que haya: no se deriva
         ev = _evidencia(hecho, inferencia, recomendacion, decision,
                         fuente=fuente, cita=cita, necesita=necesita, certeza_sug=certeza_sug)
         return (tipo or "conceptual", resp or "Déjame reintentar; reformula tu pregunta con un poco más de detalle.",

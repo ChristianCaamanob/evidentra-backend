@@ -121,3 +121,34 @@ def test_un_parametro_del_curso_si_se_reconoce():
     ]
     for q in parametros:
         assert sil._pide_un_parametro(q), q
+
+
+def test_una_conceptual_no_puede_necesitar_al_docente(monkeypatch):
+    """El modelo esquivaba el rescate por otra puerta: tipo 'conceptual' con necesita_docente=true
+    y el texto de derivación. La estudiante quedaba igual esperando por una duda de anatomía."""
+    import os
+    from app.services import correccion_experta_service as ce
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    llamadas = {"n": 0}
+
+    def fake(system, user, max_tokens=1000):
+        llamadas["n"] += 1
+        if "CORRECCIÓN IMPORTANTE" in system:      # la segunda pasada, sin derivación posible
+            return ('{"tipo":"conceptual","tema":"drenaje linfático","fuente":"general",'
+                    '"respuesta":"Los grupos son axilares y paraesternales…","cita":"",'
+                    '"categoria":"contenido","urgencia":"baja","necesita_docente":false,'
+                    '"hecho":"","inferencia":"x","recomendacion":"","decision_docente":"","certeza":"moderada"}')
+        return ('{"tipo":"conceptual","tema":"drenaje linfático","fuente":"ninguna",'
+                '"respuesta":"Prefiero no arriesgarme; se lo llevé a tu docente.","cita":"",'
+                '"categoria":"otro","urgencia":"media","necesita_docente":true,'
+                '"hecho":"","inferencia":"","recomendacion":"","decision_docente":"x","certeza":"insuficiente"}')
+
+    monkeypatch.setattr(ce, "_llamar_anthropic", fake)
+
+    class A: pass
+    a = A(); a.nombre_curso = "Anatomía"; a.config = {}; a.contexto = "Unidad 3. Mama."; a.id = None
+    r = sil._clasificar_y_responder(a, "Drenaje linfático de la mama nombra los linfonodos", db=None)
+    tipo, resp, _cat, _urg, necesita = r[0], r[1], r[2], r[3], r[4]
+    assert tipo == "conceptual" and not necesita
+    assert "docente" not in resp.lower() and "axilares" in resp
+    assert llamadas["n"] == 2          # una para clasificar, otra para el rescate
