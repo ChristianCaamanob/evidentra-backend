@@ -382,7 +382,8 @@ def eliminar(db: Session, pregunta_id) -> dict:
 # está en que aparezcan unos pocos, a ratos, y que si no los tomaste se hayan ido.
 #
 # Cuatro ventanas de 90 minutos en hora de Chile (UTC-4). Ninguna de noche.
-_TZ_CHILE = -4
+_TZ_CHILE = -4          # solo como respaldo si falta la base de zonas horarias
+_ZONA = "America/Santiago"
 # Cada 2 horas de 9 a 21 (pedido del CEO: cuatro veces al día «no genera nada»). Ninguna de noche.
 VENTANAS = (9, 11, 13, 15, 17, 19, 21)
 # La ventana se acorta a 1 hora: con una apertura cada 2 h, 90 minutos dejaría el reto disponible
@@ -393,9 +394,30 @@ DURACION_MIN = 60
 VENTANAS_CON_AVISO = (9, 13, 17, 21)
 
 
-def _local(ahora=None):
+def _a_utc(local):
+    """De hora de Chile a UTC, respetando el horario de verano vigente ese dia."""
     import datetime as _dt
-    return (ahora or _dt.datetime.utcnow()) + _dt.timedelta(hours=_TZ_CHILE)
+    try:
+        from zoneinfo import ZoneInfo
+        return local.replace(tzinfo=ZoneInfo(_ZONA)).astimezone(_dt.timezone.utc).replace(tzinfo=None)
+    except Exception:  # noqa: BLE001
+        return local - _dt.timedelta(hours=_TZ_CHILE)
+
+
+def _local(ahora=None):
+    """La hora de Chile de verdad, con su horario de verano.
+
+    Antes era `utcnow() + (-4)`. Un desfase fijo se rompe solo dos veces al ano: al entrar Chile en
+    horario de verano las ventanas quedaron corridas una hora y la de las 21:00 paso a abrirse a las
+    22:00 — que es de noche, justo lo que la regla prohibe. La zona la sabe el sistema.
+    """
+    import datetime as _dt
+    base = (ahora or _dt.datetime.utcnow()).replace(tzinfo=_dt.timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+        return base.astimezone(ZoneInfo(_ZONA)).replace(tzinfo=None)
+    except Exception:  # noqa: BLE001 — sin base de zonas, el desfase fijo es mejor que nada
+        return base.replace(tzinfo=None) + _dt.timedelta(hours=_TZ_CHILE)
 
 
 def ventana_de(ahora=None) -> dict:
@@ -416,7 +438,7 @@ def ventana_de(ahora=None) -> dict:
     if prox is None:                       # ya pasaron todas: la primera de mañana
         prox = (loc + _dt.timedelta(days=1)).replace(hour=VENTANAS[0], minute=0, second=0, microsecond=0)
     return {"abierta": abierta is not None, "hora": abierta,
-            "desde_utc": (desde - _dt.timedelta(hours=_TZ_CHILE)) if desde else None,
+            "desde_utc": _a_utc(desde) if desde else None,
             "cierra_local": (desde + _dt.timedelta(minutes=DURACION_MIN)).strftime("%H:%M") if desde else None,
             "proxima_local": prox.strftime("%H:%M"),
             "minutos_para_proxima": max(0, int((prox - loc).total_seconds() // 60))}

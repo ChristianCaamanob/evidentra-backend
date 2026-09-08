@@ -643,3 +643,30 @@ def test_en_la_misma_ventana_no_se_puede_reintentar(db):
     db.commit()
     r = rt.responder(db, p.id, ANA, "B", ahora=ABIERTA)
     assert r["ya_respondida"] and not r["acerto"]
+
+
+# ── horario de verano ────────────────────────────────────────────────────────────────
+def test_las_ventanas_siguen_la_hora_real_de_chile_en_verano_y_en_invierno():
+    """Un desfase fijo se rompe solo dos veces al año.
+
+    Visto en producción el 7-sep-2026: Chile había entrado en horario de verano y las ventanas
+    quedaron corridas una hora — la de las 21:00 se abría a las 22:00, que ES de noche, justo lo
+    que la regla prohíbe.
+    """
+    # 13:10 en Chile son las 17:10 UTC en invierno y las 16:10 UTC en verano.
+    assert rt._local(_dtt.datetime(2026, 7, 1, 17, 10)).strftime("%H:%M") == "13:10"
+    assert rt._local(_dtt.datetime(2026, 12, 1, 16, 10)).strftime("%H:%M") == "13:10"
+
+
+def test_ninguna_ventana_cae_de_noche_en_ninguna_epoca_del_ano():
+    for mes in range(1, 13):
+        for h in range(24):
+            v = rt.ventana_de(_dtt.datetime(2026, mes, 15, h, 30))
+            if v["abierta"]:
+                assert 9 <= v["hora"] <= 21, (mes, h, v["hora"])
+
+
+def test_el_inicio_de_la_ventana_vuelve_a_utc_con_la_zona_correcta():
+    """Si la vuelta a UTC usara el desfase fijo, «lo respondido en esta ventana» se contaría mal."""
+    v = rt.ventana_de(_dtt.datetime(2026, 12, 1, 16, 10))     # verano: 13:10 local
+    assert v["abierta"] and v["desde_utc"] == _dtt.datetime(2026, 12, 1, 16, 0)
