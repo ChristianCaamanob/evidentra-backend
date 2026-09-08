@@ -1376,10 +1376,24 @@ def _derivada_dict(m: MensajeSilabo) -> dict:
             "fecha": m.created_at.isoformat() if getattr(m, "created_at", None) else None}
 
 
+def _salud_ia() -> dict:
+    """El estado del motor, para avisarle al docente en su propio panel.
+
+    Tres veces en el piloto Runi dejó de responder a todo el curso y el profesor se enteró porque una
+    estudiante le mostró la pantalla. Aquí se entera él primero.
+    """
+    try:
+        from app.services import salud_ia_service as sia
+        return sia.estado()
+    except Exception:  # noqa: BLE001 — un diagnóstico caído no puede tumbar la bandeja
+        return {"ok": True, "estado": "desconocido"}
+
+
 def bandeja(db: Session, course_id, solo_pendientes: bool = False) -> dict:
     a = agente_de_curso(db, course_id)
     if not a:
-        return {"agente": None, "mensajes": [], "conteos": {}, "derivadas": [], "derivadas_conteo": {}}
+        return {"agente": None, "mensajes": [], "conteos": {}, "derivadas": [],
+                "derivadas_conteo": {}, "ia": _salud_ia()}
     _escalar_vencidos(db, a)                             # nivel-2 vencidos suben solos al profesor
     q = db.query(MensajeSilabo).filter(MensajeSilabo.agente_id == a.id)
     msgs = q.order_by(MensajeSilabo.created_at.desc()).limit(400).all()
@@ -1417,7 +1431,7 @@ def bandeja(db: Session, course_id, solo_pendientes: bool = False) -> dict:
         d["equivalentes_alias"] = [g.get("alias") for g in grupo if g.get("alias")]
         reps.append(d)
     return {"agente": _agente_dict(a), "mensajes": reps + otros, "conteos": conteos,
-            "derivadas": derivadas, "derivadas_conteo": der_conteo}
+            "derivadas": derivadas, "derivadas_conteo": der_conteo, "ia": _salud_ia()}
 
 
 # ── Mapa de confusión (trazabilidad): agrupa las consultas por TEMA, las jerarquiza por volumen y marca
