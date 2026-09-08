@@ -1163,3 +1163,87 @@ def cerrar_dia(db: Session, course_id, ahora=None) -> dict:
     return {"ok": True, "premiadas": premiadas, "dia": dia,
             "podio": [{"alias": alias_de(f["pseudo_id"]), "puesto": f["puesto"],
                        "puntos": f["puntos"]} for f in filas]}
+
+
+# ── ponerle tema a un banco que quedó todo bajo «General» ──────────────────────────────
+# Al importar la pauta, el campo «tema» iba vacío y las 56 preguntas quedaron con el relleno
+# «General». Eso no es cosmético: el reto prioriza por tema, el panel agrupa por tema y la escalera
+# de repaso construye su consigna con el tema. Con todo en un saco, la estudiante acabó leyendo
+# «Sin mirar apuntes, explica con tus palabras: General», que no significa nada.
+TEMAS_RELLENO = ("", "general", "sin clasificar", "tu tema", "otro", "varios", "n/a")
+_CLASIFICAR_POR_TANDA = 10
+
+
+def es_tema_relleno(tema: str) -> bool:
+    return str(tema or "").strip().lower() in TEMAS_RELLENO
+
+
+def clasificar_temas(db: Session, course_id, contexto: str, curso: str = "",
+                     temas_txt: str = "", solo_relleno: bool = True) -> dict:
+    """Le pone a cada pregunta el tema que le corresponde, leyéndolo del enunciado.
+
+    Toca SOLO el campo `tema`. No reescribe enunciados, ni alternativas, ni cuál es la correcta:
+    la pregunta que el profesor aprobó sigue siendo exactamente la que aprobó.
+    """
+    import json
+    import os
+    import re
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise conflict("El motor de IA no está disponible ahora mismo.")
+
+    todas = db.query(RetoPregunta).filter(RetoPregunta.course_id == str(course_id)).all()
+    pendientes = [p for p in todas if not solo_relleno or es_tema_relleno(p.tema)]
+    if not pendientes:
+        raise unprocessable("Todas tus preguntas ya tienen un tema propio.")
+
+    # Si el docente escribió su lista de temas, se usa esa y no una inventada: son los temas de SU
+    # tabla de especificaciones, los que después tiene que poder reconocer en el panel.
+    sugeridos = [t["tema"] for t in _temas_desde(temas_txt)]
+    if not sugeridos:
+        sugeridos = sorted({p.tema for p in todas if not es_tema_relleno(p.tema)})
+
+    from app.services import correccion_experta_service as ce
+    system = (
+        f"Clasificas preguntas de {curso or 'un curso universitario'} por tema.\n"
+        + (("Usa EXCLUSIVAMENTE estos temas:\n- " + "\n- ".join(sugeridos) + "\n")
+           if sugeridos else
+           "Propon un tema corto (2 a 5 palabras) para cada pregunta, del contenido del curso.\n")
+        + "Un tema nombra una estructura o un contenido concreto ('Drenaje linfático de la mama'), "
+        "nunca una categoría vacía como 'General', 'Varios' u 'Otro'.\n"
+        'Devuelve SOLO JSON: {"temas":[{"n":1,"tema":"…"}]} usando el número que acompaña a cada pregunta.')
+
+    cambiadas, sin_clasificar = 0, 0
+    for i in range(0, len(pendientes), _CLASIFICAR_POR_TANDA):
+        tanda = pendientes[i:i + _CLASIFICAR_POR_TANDA]
+        user = ("MATERIAL DEL CURSO (para ubicar los temas):\n" + (contexto or "")[:12000]
+                + "\n\nPREGUNTAS:\n"
+                + "\n".join(f"{k + 1}. {(p.enunciado or '')[:400]}" for k, p in enumerate(tanda)))
+        try:
+            txt = ce._llamar_anthropic(system, user, max_tokens=2000)
+            m = re.search(r"\{.*\}", txt or "", re.S)
+            filas = (json.loads(m.group(0)) if m else {}).get("temas") or []
+        except Exception as e:  # noqa: BLE001 — una tanda caída no arrastra a las demás
+            _LOG.warning("clasificar_temas: tanda %d falló: %s", i, str(e)[:140])
+            sin_clasificar += len(tanda)
+            continue
+        vistos = set()
+        for fila in filas:
+            try:
+                k = int(fila.get("n", 0)) - 1
+            except (TypeError, ValueError):
+                continue
+            tema = str(fila.get("tema") or "").strip()[:160]
+            # Un tema de relleno devuelto por el modelo se descarta: preferimos dejarla como estaba
+            # antes que cambiar «General» por «Varios» y llamar a eso un arreglo.
+            if not (0 <= k < len(tanda)) or es_tema_relleno(tema) or k in vistos:
+                continue
+            vistos.add(k)
+            tanda[k].tema = tema
+            cambiadas += 1
+        sin_clasificar += len(tanda) - len(vistos)
+    db.commit()
+    resumen: dict = {}
+    for p in db.query(RetoPregunta).filter(RetoPregunta.course_id == str(course_id)).all():
+        resumen[p.tema] = resumen.get(p.tema, 0) + 1
+    return {"ok": True, "clasificadas": cambiadas, "sin_clasificar": sin_clasificar,
+            "temas": sorted(resumen.items(), key=lambda kv: -kv[1])}

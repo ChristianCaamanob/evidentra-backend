@@ -1023,3 +1023,97 @@ def test_un_curso_sin_respuestas_no_revienta_al_cerrar(db):
     _sembrar(db, 2)
     assert rt.cerrar_dia(db, CID, ahora=ABIERTA)["premiadas"] == 0
     assert rt.tabla(db, CID, ANA)["tabla"] == []
+
+
+# ── ponerle tema a un banco que quedó todo bajo «General» ─────────────────────────────
+# Visto en el piloto: la pauta se importó con el campo «tema» vacío, las 56 preguntas quedaron con
+# el relleno «General», y la escalera de repaso le pidió a una estudiante «Sin mirar apuntes,
+# explica con tus palabras: General». No es cosmético: el reto prioriza por tema, el panel agrupa
+# por tema y la consigna del repaso se ARMA con el tema.
+def _runi_temas(monkeypatch, mapa):
+    """Un Runi de mentira que devuelve el tema que le digamos para cada número."""
+    import json
+    from app.services import correccion_experta_service as ce
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    monkeypatch.setattr(ce, "_llamar_anthropic", lambda *a, **k: json.dumps(
+        {"temas": [{"n": n, "tema": t} for n, t in mapa.items()]}))
+
+
+def test_general_es_relleno_y_un_tema_de_verdad_no():
+    for t in ("General", "  general ", "", "Sin clasificar", "Varios", "tu tema"):
+        assert rt.es_tema_relleno(t), t
+    for t in ("Pelvis ósea", "Drenaje linfático de la mama", "Periné"):
+        assert not rt.es_tema_relleno(t), t
+
+
+def test_runi_le_pone_tema_a_las_que_quedaron_en_general(db, monkeypatch):
+    _sembrar(db, 2, tema="General")
+    _runi_temas(monkeypatch, {1: "Pelvis ósea", 2: "Periné"})
+    r = rt.clasificar_temas(db, CID, "Material del curso", curso="Anatomía")
+    assert r["clasificadas"] == 2
+    assert {p.tema for p in db.query(RetoPregunta).all()} == {"Pelvis ósea", "Periné"}
+
+
+def test_no_se_toca_lo_que_ya_tenia_tema(db, monkeypatch):
+    """El profesor pudo haber clasificado a mano: reescribirle eso sería pasarle por encima."""
+    _sembrar(db, 1, tema="Pelvis ósea")
+    _sembrar(db, 1, tema="General")
+    _runi_temas(monkeypatch, {1: "Periné"})
+    rt.clasificar_temas(db, CID, "Material", curso="Anatomía")
+    assert {p.tema for p in db.query(RetoPregunta).all()} == {"Pelvis ósea", "Periné"}
+
+
+def test_solo_cambia_el_tema_y_nada_mas(db, monkeypatch):
+    """La pregunta que el docente aprobó tiene que seguir siendo exactamente la que aprobó."""
+    p = _sembrar(db, 1, tema="General")[0]
+    antes = (p.enunciado, dict(p.alternativas), p.correcta, p.estado, p.justificacion)
+    _runi_temas(monkeypatch, {1: "Pelvis ósea"})
+    rt.clasificar_temas(db, CID, "Material", curso="Anatomía")
+    q = db.query(RetoPregunta).one()
+    assert (q.enunciado, dict(q.alternativas), q.correcta, q.estado, q.justificacion) == antes
+    assert q.tema == "Pelvis ósea"
+
+
+def test_si_runi_devuelve_otro_relleno_se_descarta(db, monkeypatch):
+    """Cambiar «General» por «Varios» y llamar a eso un arreglo sería peor: parecería resuelto."""
+    _sembrar(db, 1, tema="General")
+    _runi_temas(monkeypatch, {1: "Varios"})
+    r = rt.clasificar_temas(db, CID, "Material", curso="Anatomía")
+    assert r["clasificadas"] == 0 and r["sin_clasificar"] == 1
+    assert db.query(RetoPregunta).one().tema == "General"
+
+
+def test_se_respetan_los_temas_de_la_tabla_de_especificaciones(db, monkeypatch):
+    """Si el docente escribió su lista, el prompt usa ESA: son los temas que él reconoce."""
+    _sembrar(db, 1, tema="General")
+    capturado = {}
+    from app.services import correccion_experta_service as ce
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+
+    def espia(system, user, max_tokens=2000):
+        capturado["system"] = system
+        return '{"temas":[{"n":1,"tema":"Pelvis ósea"}]}'
+
+    monkeypatch.setattr(ce, "_llamar_anthropic", espia)
+    rt.clasificar_temas(db, CID, "Material", curso="Anatomía",
+                        temas_txt="Pelvis ósea 30%\nPeriné 20%")
+    assert "Pelvis ósea" in capturado["system"] and "Periné" in capturado["system"]
+
+
+def test_si_ya_estan_todas_clasificadas_lo_dice(db, monkeypatch):
+    _sembrar(db, 2, tema="Pelvis ósea")
+    _runi_temas(monkeypatch, {})
+    with pytest.raises(Exception):
+        rt.clasificar_temas(db, CID, "Material", curso="Anatomía")
+
+
+def test_una_tanda_caida_no_arrastra_al_resto(db, monkeypatch):
+    """Si el modelo falla, las preguntas quedan como estaban: nunca a medio clasificar."""
+    _sembrar(db, 3, tema="General")
+    from app.services import correccion_experta_service as ce
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    monkeypatch.setattr(ce, "_llamar_anthropic",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("caído")))
+    r = rt.clasificar_temas(db, CID, "Material", curso="Anatomía")
+    assert r["clasificadas"] == 0 and r["sin_clasificar"] == 3
+    assert {p.tema for p in db.query(RetoPregunta).all()} == {"General"}

@@ -73,6 +73,22 @@ def reto_variantes(course_id: UUID, request: Request, payload: dict, db: Session
                         solo_del_docente=bool((payload or {}).get("solo_del_docente", True)))
 
 
+@router.post("/courses/{course_id}/reto/temas", dependencies=[Depends(req_profesor)])
+@limit("3/minute")
+def reto_temas(course_id: UUID, request: Request, payload: dict, db: Session = Depends(get_db)):
+    """Le pone tema propio a las preguntas que quedaron bajo un relleno como 'General'.
+
+    Toca SOLO el campo tema: el enunciado, las alternativas y la correcta quedan intactos.
+    """
+    a = sil.agente_de_curso(db, course_id)
+    if not a:
+        raise unprocessable("Este curso todavia no tiene agente de Runi con material cargado.")
+    p = payload or {}
+    return rt.clasificar_temas(db, course_id, a.contexto or "", curso=(a.nombre_curso or ""),
+                               temas_txt=str(p.get("temas") or ""),
+                               solo_relleno=bool(p.get("solo_relleno", True)))
+
+
 @router.post("/courses/{course_id}/reto/justificar", dependencies=[Depends(req_profesor)])
 @limit("4/minute")
 def reto_justificar(course_id: UUID, request: Request, payload: dict, db: Session = Depends(get_db)):
