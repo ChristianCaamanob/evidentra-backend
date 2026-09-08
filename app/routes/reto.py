@@ -50,6 +50,17 @@ def reto_manual(course_id: UUID, payload: dict, db: Session = Depends(get_db)):
     return rt.crear_manual(db, course_id, payload or {}, (payload or {}).get("eval_id"))
 
 
+@router.post("/courses/{course_id}/reto/variantes", dependencies=[Depends(req_profesor)])
+@limit("3/minute")
+def reto_variantes(course_id: UUID, request: Request, payload: dict, db: Session = Depends(get_db)):
+    """Una variante de cada pregunta del profesor: mismo nucleo, correcta distinta. Van a revision."""
+    a = sil.agente_de_curso(db, course_id)
+    if not a:
+        raise unprocessable("Este curso todavia no tiene agente de Runi con material cargado.")
+    return rt.variantes(db, course_id, a.contexto or "", curso=(a.nombre_curso or ""),
+                        solo_del_docente=bool((payload or {}).get("solo_del_docente", True)))
+
+
 @router.post("/courses/{course_id}/reto/justificar", dependencies=[Depends(req_profesor)])
 @limit("4/minute")
 def reto_justificar(course_id: UUID, request: Request, payload: dict, db: Session = Depends(get_db)):

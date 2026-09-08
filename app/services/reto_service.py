@@ -148,6 +148,113 @@ def _normalizar(q: dict, pesos: dict) -> dict | None:
             "nivel": nivel if nivel in NIVELES else "recordar", "estado": "propuesta", "origen": "ia"}
 
 
+# ── variantes: más munición sin volver a escribirlo todo ──────────────────────────────
+# El criterio lo puso el propio CEO en su pauta: «cada ítem evalúa el MISMO núcleo temático de la
+# pregunta de origen, pero posee una respuesta correcta DISTINTA». No es parafrasear: es rotar cuál
+# alternativa es la buena, que es lo que impide memorizar la letra en vez del contenido.
+_VARIANTES_POR_TANDA = 6      # más por llamada = variantes flojas y JSON que se corta
+
+
+def _prompt_variantes(curso: str, contexto: str, originales: list) -> tuple:
+    system = (
+        f"Preparas variantes de preguntas para el curso {curso}. Para cada pregunta original te doy "
+        "el enunciado, sus alternativas y cuál es la correcta.\n"
+        "Escribe UNA variante de cada una con esta regla, que es la del propio banco del profesor:\n"
+        "  · MISMO núcleo temático que la original (la misma estructura, el mismo concepto);\n"
+        "  · pero la respuesta correcta debe ser DISTINTA — no la misma idea con otras palabras.\n"
+        "Así rota cuál es la buena y no se puede memorizar la letra en vez del contenido.\n"
+        "Cuatro alternativas, una sola correcta, y distractores plausibles: errores que un estudiante "
+        "comete de verdad, no absurdos evidentes.\n"
+        "Incluye la justificación: por qué la correcta lo es, en una o dos frases, en segunda persona "
+        "y sin condescendencia; si hay un distractor que se confunde mucho, di qué lo distingue.\n"
+        "Trabaja SOLO con el material del profesor y con el contenido de la original: no inventes "
+        "temas que no estén. Si de alguna no puedes hacer una variante honesta, OMÍTELA — es mejor "
+        "devolver menos que rellenar.\n"
+        'Devuelve SOLO JSON: {"variantes":[{"n":1,"tema":"…","nivel":"recordar|conectar|aplicar",'
+        '"enunciado":"…","alternativas":{"A":"…","B":"…","C":"…","D":"…"},"correcta":"B",'
+        '"justificacion":"…"}]} con la misma numeración que las originales.'
+    )
+    lineas = []
+    for i, p in enumerate(originales, start=1):
+        alts = "; ".join(f"{k}) {v}" for k, v in sorted((p.alternativas or {}).items()))
+        lineas.append(f"{i}. [{p.tema}] {p.enunciado}\n   {alts}\n   CORRECTA: {p.correcta}")
+    user = ("MATERIAL DEL PROFESOR:\n" + (contexto or "")[:12000]
+            + "\n\nPREGUNTAS ORIGINALES:\n" + "\n\n".join(lineas))
+    return system, user
+
+
+def variantes(db: Session, course_id, contexto: str, curso: str = "",
+              solo_del_docente: bool = True) -> dict:
+    """Genera una variante de cada pregunta del banco. Quedan en 'propuesta': las revisa el docente.
+
+    Por defecto parte SOLO de las preguntas escritas por el profesor. Hacer variantes de variantes
+    aleja cada ronda un poco más del original y termina en preguntas que ya no son suyas.
+    """
+    import json
+    import os
+    import re
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise conflict("El motor de IA no está disponible ahora mismo.")
+
+    q = db.query(RetoPregunta).filter(RetoPregunta.course_id == str(course_id),
+                                      RetoPregunta.estado == "aprobada")
+    if solo_del_docente:
+        q = q.filter(RetoPregunta.origen == "docente")
+    originales = q.all()
+    if not originales:
+        raise unprocessable(
+            "No hay preguntas tuyas de las que partir. Sube tu pauta o escribe alguna primero.")
+
+    existentes = {(p.enunciado or "").strip().lower()
+                  for p in db.query(RetoPregunta).filter(
+                      RetoPregunta.course_id == str(course_id)).all()}
+    ya = len(existentes)
+    from app.services import correccion_experta_service as ce
+    nuevas, omitidas = [], 0
+    for i in range(0, len(originales), _VARIANTES_POR_TANDA):
+        tanda = originales[i:i + _VARIANTES_POR_TANDA]
+        system, user = _prompt_variantes(curso or "el curso", contexto, tanda)
+        crudas = []
+        for intento in range(3):
+            try:
+                txt = ce._llamar_anthropic(system, user, max_tokens=5000)
+                m = re.search(r"\{.*\}", txt or "", re.S)
+                crudas = (json.loads(m.group(0)) if m else {}).get("variantes") or []
+                if crudas:
+                    break
+            except Exception as e:  # noqa: BLE001
+                _LOG.warning("reto: variantes intento %d/3 falló: %s", intento + 1, str(e)[:140])
+        if not crudas:
+            omitidas += len(tanda)
+            continue
+        por_n = {}
+        for v in crudas:
+            try:
+                por_n[int(v.get("n"))] = v
+            except (TypeError, ValueError):
+                continue
+        for n, orig in enumerate(tanda, start=1):
+            v = por_n.get(n)
+            if not v:
+                omitidas += 1
+                continue
+            datos = _normalizar(v, {})
+            if not datos or ya + len(nuevas) >= _MAX_BANCO:
+                omitidas += 1
+                continue
+            if datos["enunciado"].strip().lower() in existentes:
+                omitidas += 1          # salió igual que una que ya existe: no aporta nada
+                continue
+            existentes.add(datos["enunciado"].strip().lower())
+            datos["tema"] = (str(v.get("tema") or orig.tema or "General"))[:160]
+            datos["peso"] = orig.peso or 1
+            nuevas.append(RetoPregunta(course_id=str(course_id), eval_id=orig.eval_id, **datos))
+        db.commit()
+    if nuevas:
+        db.add_all(nuevas); db.commit()
+    return {"ok": True, "creadas": len(nuevas), "originales": len(originales), "omitidas": omitidas}
+
+
 # ── los «porqués»: Runi redacta, el docente firma ─────────────────────────────────────
 # Una pauta trae la respuesta correcta, no la explicación. Sin ella el reto solo CORRIGE; con ella
 # ENSEÑA, que es la diferencia entre marcar un error y cerrar un vacío. Pero una explicación

@@ -670,3 +670,91 @@ def test_el_inicio_de_la_ventana_vuelve_a_utc_con_la_zona_correcta():
     """Si la vuelta a UTC usara el desfase fijo, «lo respondido en esta ventana» se contaría mal."""
     v = rt.ventana_de(_dtt.datetime(2026, 12, 1, 16, 10))     # verano: 13:10 local
     assert v["abierta"] and v["desde_utc"] == _dtt.datetime(2026, 12, 1, 16, 0)
+
+
+# ── variantes: más munición sin volver a escribirlo todo ─────────────────────────────
+def _runi_variantes(monkeypatch, n_por_tanda=6, correcta="C", omitir=()):
+    """Sustituye el modelo por variantes fabricadas, con la correcta rotada."""
+    import json as _j
+    from app.services import correccion_experta_service as ce
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+
+    def fake(system, user, max_tokens=5000):
+        vs = []
+        for i in range(1, n_por_tanda + 1):
+            if i in omitir:
+                continue
+            vs.append({"n": i, "tema": "Pelvis ósea", "nivel": "recordar",
+                       "enunciado": f"Variante {i} · {hash(user) % 9999}",
+                       "alternativas": {"A": "uno", "B": "dos", "C": "tres", "D": "cuatro"},
+                       "correcta": correcta, "justificacion": "Porque el sacro cierra por detrás."})
+        return _j.dumps({"variantes": vs})
+
+    monkeypatch.setattr(ce, "_llamar_anthropic", fake)
+
+
+def test_las_variantes_nacen_para_revision_no_publicadas(db, monkeypatch):
+    """Las escribe la IA: la firma sigue siendo del profesor."""
+    _sembrar(db, 3)
+    for p in db.query(RetoPregunta).all():
+        p.origen = "docente"
+    db.commit()
+    _runi_variantes(monkeypatch, n_por_tanda=3)
+    r = rt.variantes(db, CID, "material del curso", "Anatomía")
+    assert r["creadas"] == 3
+    nuevas = db.query(RetoPregunta).filter(RetoPregunta.estado == "propuesta").all()
+    assert len(nuevas) == 3 and all(p.origen == "ia" for p in nuevas)
+    # Y no le llegan a nadie hasta que se aprueben.
+    assert len(rt.sesion(db, CID, ANA, ahora=ABIERTA)["preguntas"]) == 3   # solo las 3 originales
+
+
+def test_la_variante_lleva_su_porque_desde_el_principio(db, monkeypatch):
+    _sembrar(db, 1)
+    db.query(RetoPregunta).first().origen = "docente"; db.commit()
+    _runi_variantes(monkeypatch, n_por_tanda=1)
+    rt.variantes(db, CID, "material", "Anatomía")
+    v = db.query(RetoPregunta).filter(RetoPregunta.estado == "propuesta").first()
+    assert v.justificacion and "sacro" in v.justificacion
+
+
+def test_no_se_hacen_variantes_de_variantes(db, monkeypatch):
+    """Cada ronda sobre una variante aleja un poco más del original: dejan de ser preguntas suyas."""
+    _sembrar(db, 2)
+    for p in db.query(RetoPregunta).all():
+        p.origen = "ia"          # ninguna es del docente
+    db.commit()
+    _runi_variantes(monkeypatch, n_por_tanda=2)
+    with pytest.raises(Exception):
+        rt.variantes(db, CID, "material", "Anatomía")
+
+
+def test_una_variante_repetida_no_entra(db, monkeypatch):
+    """Si sale igual que una que ya existe, no aporta nada."""
+    import json as _j
+    from app.services import correccion_experta_service as ce
+    p = _sembrar(db, 1)[0]
+    p.origen = "docente"; db.commit()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    monkeypatch.setattr(ce, "_llamar_anthropic", lambda *a, **k: _j.dumps({"variantes": [
+        {"n": 1, "tema": "Pelvis ósea", "enunciado": p.enunciado,     # idéntica a la original
+         "alternativas": {"A": "u", "B": "d", "C": "t", "D": "c"}, "correcta": "C",
+         "justificacion": "x"}]}))
+    r = rt.variantes(db, CID, "material", "Anatomía")
+    assert r["creadas"] == 0 and r["omitidas"] == 1
+
+
+def test_si_el_modelo_omite_alguna_se_dice_cuantas(db, monkeypatch):
+    """«Es mejor devolver menos que rellenar»: hay que saber cuántas quedaron fuera."""
+    _sembrar(db, 3)
+    for p in db.query(RetoPregunta).all():
+        p.origen = "docente"
+    db.commit()
+    _runi_variantes(monkeypatch, n_por_tanda=3, omitir=(2,))
+    r = rt.variantes(db, CID, "material", "Anatomía")
+    assert r["creadas"] == 2 and r["omitidas"] == 1 and r["originales"] == 3
+
+
+def test_sin_preguntas_del_docente_lo_dice_claro(db, monkeypatch):
+    _runi_variantes(monkeypatch)
+    with pytest.raises(Exception):
+        rt.variantes(db, CID, "material", "Anatomía")
