@@ -25,7 +25,7 @@ import uuid as _uuid
 from sqlalchemy.orm import Session
 
 from app.core.errors import conflict, not_found, unprocessable
-from app.models.reto import ESTADOS, RetoPregunta, RetoRespuesta
+from app.models.reto import ESTADOS, RetoIntento, RetoPregunta, RetoRespuesta
 
 import datetime as _dt
 
@@ -651,6 +651,23 @@ def sesion(db: Session, course_id, pseudo_id: str, n: int = POR_SESION, ahora=No
             "quedan": len(pendientes) - len(elegidas)}
 
 
+def _anotar_intento(db: Session, p: RetoPregunta, pseudo_id: str, letra: str, acerto: bool,
+                    course_id=None) -> None:
+    """Deja el acta del intento. Nunca hace commit: viaja con la transacción de `responder`.
+
+    Si esto falla, la respuesta de la estudiante NO se cae: perder una fila de auditoría es malo,
+    pero mucho menos malo que dejarla mirando un error por haber contestado bien.
+    """
+    try:
+        previos = db.query(RetoIntento).filter(RetoIntento.pseudo_id == pseudo_id,
+                                               RetoIntento.pregunta_id == p.id).count()
+        db.add(RetoIntento(course_id=str(course_id or p.course_id or ""), pregunta_id=p.id,
+                           pseudo_id=pseudo_id, elegida=letra, correcta=acerto,
+                           vuelta=int(previos) + 1))
+    except Exception:  # noqa: BLE001
+        _LOG.warning("No se pudo anotar el intento del reto", exc_info=True)
+
+
 def responder(db: Session, pregunta_id, pseudo_id: str, elegida: str, course_id=None, ahora=None) -> dict:
     """Registra la respuesta y devuelve el veredicto con su justificación. Idempotente."""
     p = _buscar(db, pregunta_id)
@@ -670,18 +687,21 @@ def responder(db: Session, pregunta_id, pseudo_id: str, elegida: str, course_id=
             return {"ok": True, "ya_respondida": True, "correcta": p.correcta,
                     "acerto": bool(ya.correcta), "elegida": ya.elegida,
                     "justificacion": p.justificacion}
-        # Segunda vuelta: se actualiza el intento. Una fila por par persona-pregunta, así «lo más
-        # antiguo primero» sigue significando algo y el historial no se infla.
+        # Segunda vuelta: se actualiza el ESTADO. Una fila por par persona-pregunta, así «lo más
+        # antiguo primero» sigue significando algo y el estado no se infla. La historia no se
+        # pierde: el intento anterior ya quedó en `reto_intentos`, que solo crece.
         ya.elegida = letra
         ya.correcta = acerto
         ya.created_at = _dt.datetime.utcnow()
         if acerto:
             p.aciertos = int(p.aciertos or 0) + 1
+        _anotar_intento(db, p, pseudo_id, letra, acerto, course_id)
         db.commit()
         return {"ok": True, "acerto": acerto, "correcta": p.correcta, "elegida": letra,
                 "justificacion": p.justificacion, "repaso": True}
 
     db.add(RetoRespuesta(pregunta_id=p.id, pseudo_id=pseudo_id, elegida=letra, correcta=acerto))
+    _anotar_intento(db, p, pseudo_id, letra, acerto, course_id)
     if acerto:
         p.aciertos = int(p.aciertos or 0) + 1
     try:
@@ -915,3 +935,83 @@ def _contar_enunciados(datos: bytes) -> int:
         return sum(1 for t, _m in _docx_parrafos(datos) if re_en.match(t))
     except Exception:  # noqa: BLE001
         return 0
+
+
+# ── trazabilidad: qué pasó con cada pregunta ──────────────────────────────────────────
+# El CEO preguntó si había trazabilidad de las respuestas. La había en la base y no la veía nadie:
+# `reto_respuestas` solo se consultaba filtrando por `pseudo_id`, es decir, cada alumna mirando lo
+# suyo. Esto es lo que faltaba, y va deliberadamente SIN NOMBRES: al docente le sirve saber que una
+# pregunta la falla el 70% y que se van a la C, no quién se fue a la C. Su regla, no la mía.
+_MIN_PARA_MOSTRAR = 3     # bajo esto, un porcentaje es ruido disfrazado de dato
+
+
+def analisis(db: Session, course_id) -> dict:
+    """Por pregunta: cuántas la respondieron, cuántas acertaron y a qué distractor se fueron.
+
+    Se lee de `reto_intentos` (el acta) y no de `reto_respuestas` (el estado), porque el estado se
+    sobreescribe en la segunda vuelta: contando ahí, un error corregido después desaparece y la
+    pregunta parece más fácil de lo que fue.
+    """
+    cid = str(course_id)
+    preguntas = {p.id: p for p in db.query(RetoPregunta).filter(RetoPregunta.course_id == cid).all()}
+    if not preguntas:
+        return {"ok": True, "preguntas": [], "resumen": {"intentos": 0, "personas": 0}}
+
+    filas = (db.query(RetoIntento).filter(RetoIntento.pregunta_id.in_(list(preguntas.keys())))
+             .order_by(RetoIntento.created_at.asc()).all())
+
+    por_pregunta: dict = {}
+    personas, corregidos, reincidentes = set(), 0, 0
+    # Para «falló y después acertó» hace falta mirar los intentos de cada par en orden.
+    trayecto: dict = {}
+    for r in filas:
+        personas.add(r.pseudo_id)
+        d = por_pregunta.setdefault(r.pregunta_id, {"intentos": 0, "aciertos": 0, "elecciones": {},
+                                                    "personas": set(), "ultimo": None})
+        d["intentos"] += 1
+        d["personas"].add(r.pseudo_id)
+        if r.correcta:
+            d["aciertos"] += 1
+        letra = (r.elegida or "?").upper()
+        d["elecciones"][letra] = d["elecciones"].get(letra, 0) + 1
+        if r.created_at:
+            d["ultimo"] = r.created_at.isoformat()
+        t = trayecto.setdefault((r.pseudo_id, r.pregunta_id), [])
+        t.append(bool(r.correcta))
+
+    for pasos in trayecto.values():
+        if len(pasos) > 1 and not pasos[0]:
+            corregidos += 1 if pasos[-1] else 0
+            reincidentes += 0 if pasos[-1] else 1
+
+    salida = []
+    for pid, p in preguntas.items():
+        d = por_pregunta.get(pid)
+        n = d["intentos"] if d else 0
+        aciertos = d["aciertos"] if d else 0
+        elec = d["elecciones"] if d else {}
+        # El distractor que más arrastra: la alternativa incorrecta más elegida. Es el dato que
+        # dice QUÉ entendieron mal, no solo que fallaron.
+        malas = {k: v for k, v in elec.items() if k != p.correcta}
+        top = max(malas.items(), key=lambda kv: kv[1]) if malas else None
+        salida.append({
+            "id": str(pid), "tema": p.tema, "nivel": p.nivel, "estado": p.estado, "origen": p.origen,
+            "enunciado": p.enunciado, "alternativas": p.alternativas or {}, "correcta": p.correcta,
+            "intentos": n, "personas": len(d["personas"]) if d else 0, "aciertos": aciertos,
+            # `None` en vez de 0: «nadie la ha respondido» y «la falla todo el mundo» no son lo
+            # mismo, y pintar 0% en una pregunta sin datos sería mentirle al profesor.
+            "acierto_pct": round(100 * aciertos / n) if n >= _MIN_PARA_MOSTRAR else None,
+            "suficiente": n >= _MIN_PARA_MOSTRAR,
+            "elecciones": elec,
+            "distractor": ({"letra": top[0], "texto": (p.alternativas or {}).get(top[0], ""),
+                            "n": top[1], "pct": round(100 * top[1] / n)} if top and n else None),
+            "ultimo": d["ultimo"] if d else None,
+        })
+    # Lo más fallado primero: es la lista de lo que hay que repasar antes de la prueba. Las que
+    # nadie respondió van al final, no arriba fingiendo ser un problema.
+    salida.sort(key=lambda q: (q["acierto_pct"] is None, q["acierto_pct"] if q["acierto_pct"] is not None else 101))
+    return {"ok": True, "preguntas": salida,
+            "resumen": {"intentos": len(filas), "personas": len(personas),
+                        "preguntas_con_datos": sum(1 for q in salida if q["suficiente"]),
+                        "corregidos": corregidos, "reincidentes": reincidentes,
+                        "minimo": _MIN_PARA_MOSTRAR}}

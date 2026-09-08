@@ -65,3 +65,28 @@ class RetoRespuesta(UUIDMixin, Base):
     elegida: Mapped[str] = mapped_column(String(2), default="")
     correcta: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class RetoIntento(UUIDMixin, Base):
+    """CADA intento, uno por fila, sin borrar nunca.
+
+    `RetoRespuesta` guarda el ESTADO (lo último que contestó) y se sobreescribe en la segunda
+    vuelta, porque de eso depende que «lo más antiguo primero» siga significando algo. Pero
+    sobreescribir borraba la historia: «falló el 3-sep y acertó el 6-sep» no existía en ninguna
+    parte, y ese es justo el dato que dice si alguien aprendió algo. Esta tabla es el libro de
+    actas: solo se agrega, nunca se actualiza ni se borra.
+
+    `course_id` va desnormalizado a propósito: sin él, mirar un curso obliga a cruzar con las
+    preguntas, y las preguntas borradas se llevaban los intentos por delante (CASCADE).
+    """
+    __tablename__ = "reto_intentos"
+
+    course_id: Mapped[str] = mapped_column(String(64), index=True, default="")
+    pregunta_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    pseudo_id: Mapped[str] = mapped_column(String(80), index=True)
+    elegida: Mapped[str] = mapped_column(String(2), default="")
+    correcta: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 1 en la primera vuelta, 2 en el repaso, 3 en el siguiente… lo que permite preguntar
+    # «¿cuántos que fallaron en el intento 1 acertaron en el 2?».
+    vuelta: Mapped[int] = mapped_column(Integer, default=1, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)

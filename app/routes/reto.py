@@ -39,6 +39,12 @@ def reto_listar(course_id: UUID, estado: str = "", db: Session = Depends(get_db)
     return rt.listar_docente(db, course_id, estado)
 
 
+@router.get("/courses/{course_id}/reto/analisis", dependencies=[Depends(req_profesor)])
+def reto_analisis(course_id: UUID, db: Session = Depends(get_db)):
+    """Cómo le fue al curso, pregunta por pregunta. AGREGADO: sin nombres ni pseudónimos."""
+    return rt.analisis(db, course_id)
+
+
 @router.post("/reto/{pregunta_id}/revisar", dependencies=[Depends(req_profesor)])
 def reto_revisar(pregunta_id: UUID, payload: dict, db: Session = Depends(get_db)):
     p = payload or {}

@@ -758,3 +758,117 @@ def test_sin_preguntas_del_docente_lo_dice_claro(db, monkeypatch):
     _runi_variantes(monkeypatch)
     with pytest.raises(Exception):
         rt.variantes(db, CID, "material", "Anatomía")
+
+
+# ── trazabilidad: el acta de intentos y el análisis por pregunta ──────────────────────
+# El CEO preguntó si teníamos trazabilidad de lo que responden las estudiantes. El dato estaba en
+# la base y no lo veía nadie; y peor, la segunda vuelta SOBREESCRIBÍA el intento anterior, así que
+# «falló el martes y acertó el viernes» —justo lo que dice si alguien aprendió— no existía.
+from app.models.reto import RetoIntento
+
+
+def _resp(db, pregunta_id, quien, letra, cuando):
+    """Responde anclando la marca de tiempo, como `_responder_dentro`.
+
+    La base estampa la hora REAL; sin anclar, la segunda vuelta se lee como «la misma ventana» y
+    el test dependería del día en que se corre.
+    """
+    from app.models.reto import RetoRespuesta
+    r = rt.responder(db, pregunta_id, quien, letra, CID, ahora=cuando)
+    for fila in db.query(RetoRespuesta).filter(RetoRespuesta.pseudo_id == quien,
+                                               RetoRespuesta.pregunta_id == pregunta_id).all():
+        fila.created_at = cuando
+    db.commit()
+    return r
+
+
+def test_el_intento_queda_registrado_con_la_letra_que_eligio(db):
+    """Saber que falló no sirve; saber que se fue a la C dice QUÉ entendió mal."""
+    p = _sembrar(db, 1)[0]
+    rt.responder(db, p.id, ANA, "C", CID, ahora=ABIERTA)
+    i = db.query(RetoIntento).filter(RetoIntento.pseudo_id == ANA).one()
+    assert i.elegida == "C" and not i.correcta and i.vuelta == 1
+    assert i.course_id == CID          # desnormalizado: sobrevive al borrado de la pregunta
+
+
+def test_la_segunda_vuelta_ya_no_borra_la_primera(db):
+    """El corazón del asunto: antes se actualizaba la fila y el error se perdía."""
+    p = _sembrar(db, 1)[0]
+    _resp(db, p.id, ANA, "A", ABIERTA)      # falla
+    _resp(db, p.id, ANA, "B", ABIERTA2)     # acierta en el repaso
+    actas = db.query(RetoIntento).filter(RetoIntento.pseudo_id == ANA).order_by(
+        RetoIntento.vuelta.asc()).all()
+    assert [(a.elegida, a.correcta, a.vuelta) for a in actas] == [("A", False, 1), ("B", True, 2)]
+
+
+def test_repetir_en_la_misma_ventana_no_infla_el_acta(db):
+    """Dentro de la ventana no se puede cambiar la respuesta: tampoco debe anotarse un intento."""
+    p = _sembrar(db, 1)[0]
+    rt.responder(db, p.id, ANA, "A", CID, ahora=ABIERTA)
+    rt.responder(db, p.id, ANA, "B", CID, ahora=ABIERTA)
+    assert db.query(RetoIntento).count() == 1
+
+
+def test_el_analisis_muestra_el_distractor_que_mas_arrastra(db):
+    p = _sembrar(db, 1)[0]
+    for quien, letra in (("stu:1", "C"), ("stu:2", "C"), ("stu:3", "C"), ("stu:4", "B")):
+        rt.responder(db, p.id, quien, letra, CID, ahora=ABIERTA)
+    q = rt.analisis(db, CID)["preguntas"][0]
+    assert q["intentos"] == 4 and q["aciertos"] == 1 and q["acierto_pct"] == 25
+    assert q["distractor"]["letra"] == "C" and q["distractor"]["n"] == 3
+    assert q["distractor"]["texto"] == "tres"       # el texto, no solo la letra
+
+
+def test_el_analisis_no_lleva_nombres_ni_pseudonimos(db):
+    """Regla del CEO: el profesor solo tiene acceso a chat. Esta vista es agregada, y punto."""
+    p = _sembrar(db, 1)[0]
+    rt.responder(db, p.id, ANA, "C", CID, ahora=ABIERTA)
+    crudo = repr(rt.analisis(db, CID))
+    assert ANA not in crudo and "stu:" not in crudo
+
+
+def test_una_pregunta_con_pocos_datos_no_finge_un_porcentaje(db):
+    """3 de 3 no es «100% de acierto»: con dos respuestas un porcentaje es ruido disfrazado."""
+    p = _sembrar(db, 1)[0]
+    rt.responder(db, p.id, ANA, "B", CID, ahora=ABIERTA)
+    q = rt.analisis(db, CID)["preguntas"][0]
+    assert q["acierto_pct"] is None and not q["suficiente"] and q["intentos"] == 1
+
+
+def test_una_pregunta_sin_responder_no_encabeza_la_lista_de_lo_fallado(db):
+    """Ordenar por «peor primero» pondría arriba lo que nadie tocó: un problema inventado."""
+    a, b = _sembrar(db, 2)
+    for quien in ("stu:1", "stu:2", "stu:3"):
+        rt.responder(db, a.id, quien, "A", CID, ahora=ABIERTA)   # todos fallan la primera
+    orden = [q["id"] for q in rt.analisis(db, CID)["preguntas"]]
+    assert orden[0] == str(a.id) and orden[-1] == str(b.id)
+
+
+def test_el_analisis_cuenta_quien_se_corrigio(db):
+    """La medida de que el repaso sirve: falló y en la vuelta siguiente acertó."""
+    p = _sembrar(db, 1)[0]
+    _resp(db, p.id, ANA, "A", ABIERTA); _resp(db, p.id, ANA, "B", ABIERTA2)
+    _resp(db, p.id, LUZ, "A", ABIERTA); _resp(db, p.id, LUZ, "C", ABIERTA2)
+    r = rt.analisis(db, CID)["resumen"]
+    assert r["corregidos"] == 1 and r["reincidentes"] == 1 and r["personas"] == 2
+
+
+def test_el_analisis_cuenta_los_intentos_y_no_el_ultimo_estado(db):
+    """Contando el estado, un error corregido después desaparece y la pregunta parece más fácil."""
+    p = _sembrar(db, 1)[0]
+    _resp(db, p.id, ANA, "A", ABIERTA)
+    _resp(db, p.id, ANA, "B", ABIERTA2)
+    q = rt.analisis(db, CID)["preguntas"][0]
+    assert q["intentos"] == 2 and q["aciertos"] == 1 and q["personas"] == 1
+
+
+def test_un_curso_sin_banco_no_revienta(db):
+    assert rt.analisis(db, CID) == {"ok": True, "preguntas": [], "resumen": {"intentos": 0, "personas": 0}}
+
+
+def test_borrar_una_pregunta_no_borra_su_acta(db):
+    """El acta es libro de actas: sobrevive a que el docente limpie el banco."""
+    p = _sembrar(db, 1)[0]
+    rt.responder(db, p.id, ANA, "C", CID, ahora=ABIERTA)
+    rt.eliminar(db, p.id)
+    assert db.query(RetoIntento).count() == 1
