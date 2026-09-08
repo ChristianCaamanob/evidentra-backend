@@ -202,8 +202,20 @@ def variantes(db: Session, course_id, contexto: str, curso: str = "",
         q = q.filter(RetoPregunta.origen == "docente")
     originales = q.all()
     if not originales:
+        # El mensaje anterior decía «sube tu pauta o escribe alguna» incluso cuando la pauta estaba
+        # subida: mandaba a hacer de nuevo algo ya hecho y escondía la causa. Ahora dice qué hay.
+        todas = db.query(RetoPregunta).filter(RetoPregunta.course_id == str(course_id)).all()
+        aprobadas = [p for p in todas if p.estado == "aprobada"]
+        if not todas:
+            raise unprocessable(
+                "Este curso no tiene ninguna pregunta todavía. Sube tu pauta o escribe alguna primero.")
+        if not aprobadas:
+            raise unprocessable(
+                f"Tienes {len(todas)} preguntas, pero ninguna publicada. Publícalas primero: las "
+                "variantes parten de las que ya están en juego.")
         raise unprocessable(
-            "No hay preguntas tuyas de las que partir. Sube tu pauta o escribe alguna primero.")
+            f"Ninguna de tus {len(aprobadas)} preguntas publicadas figura como escrita por ti "
+            "(están marcadas como generadas por Runi). Puedes hacer variantes de todas igual.")
 
     existentes = {(p.enunciado or "").strip().lower()
                   for p in db.query(RetoPregunta).filter(
