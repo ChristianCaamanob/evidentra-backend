@@ -39,6 +39,12 @@ def reto_listar(course_id: UUID, estado: str = "", db: Session = Depends(get_db)
     return rt.listar_docente(db, course_id, estado)
 
 
+@router.get("/courses/{course_id}/reto/tabla", dependencies=[Depends(req_profesor)])
+def reto_tabla_docente(course_id: UUID, hoy: int = 0, db: Session = Depends(get_db)):
+    """Lo mismo para el docente, con mas puestos. Sigue sin nombres: los premios no los reparte el."""
+    return rt.tabla(db, course_id, "", tope=30, hoy=bool(hoy))
+
+
 @router.get("/courses/{course_id}/reto/analisis", dependencies=[Depends(req_profesor)])
 def reto_analisis(course_id: UUID, db: Session = Depends(get_db)):
     """Cómo le fue al curso, pregunta por pregunta. AGREGADO: sin nombres ni pseudónimos."""
@@ -126,6 +132,12 @@ def _curso_de(db: Session, codigo: str):
 def reto_sesion(codigo: str, pseudo_id: str = "", n: int = rt.POR_SESION,
                 db: Session = Depends(get_db)):
     return rt.sesion(db, _curso_de(db, codigo), pseudo_id, n)
+
+
+@router.get("/silabo/{codigo}/reto/tabla")
+def reto_tabla(codigo: str, pseudo_id: str = "", hoy: int = 0, db: Session = Depends(get_db)):
+    """La tabla de posiciones del curso. Va con ALIAS derivados del pseudonimo: nunca nombres."""
+    return rt.tabla(db, _curso_de(db, codigo), pseudo_id, hoy=bool(hoy))
 
 
 @router.get("/silabo/{codigo}/reto/estado")

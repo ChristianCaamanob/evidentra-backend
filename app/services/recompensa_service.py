@@ -59,10 +59,13 @@ _GARANTIA = {"cofre-expedicion": None, "cofre-glaciar": "rare",
 _ORDEN_RAREZA = {"common": 0, "rare": 1, "epic": 2, "legendary": 3}
 
 # Fuentes de Lumis (spec/ECONOMY_AND_FAIRNESS.md), sin las de ranking.
-LUMIS = {"actividad_dia": 10, "medalla": 40, "meta_semanal": 60, "colaboracion": 20}
+LUMIS = {"actividad_dia": 10, "medalla": 40, "meta_semanal": 60, "colaboracion": 20,
+         "reto": 5, "podio": 50}
 _TOPE_DIARIO = 100          # solo para lo repetible; un hito permanente no se puede farmear
 _TOPE_SEMANAL = 500
-_MOTIVOS_CON_TOPE = ("actividad_dia", "colaboracion")
+# 'reto' entra al tope: es repetible y sin él, un banco grande se convertiría en una máquina de
+# Lumis. 'podio' NO: lo liquida el servidor una vez al día por curso, no hay forma de repetirlo.
+_MOTIVOS_CON_TOPE = ("actividad_dia", "colaboracion", "reto")
 _CONSUELO = 0.4             # si ya no queda nada nuevo, el cofre paga el 40% del valor medio
 
 

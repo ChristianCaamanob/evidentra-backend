@@ -36,7 +36,10 @@ CID = "3f2a1c44-8d21-4e6b-9a70-5c1e2d3f4a5b"
 import datetime as _dtt
 ABIERTA = _dtt.datetime(2026, 9, 1, 17, 10)          # 13:10 en Chile
 ABIERTA2 = _dtt.datetime(2026, 9, 1, 21, 10)         # 17:10 en Chile
-CERRADA = _dtt.datetime(2026, 9, 1, 16, 30)          # 12:30 en Chile, entre ventanas
+CERRADA = _dtt.datetime(2026, 9, 2, 2, 30)           # 22:30 en Chile: ya cerró la última ventana
+# Las ventanas con AVISO son (9, 12, 15, 18): estas dos caen al abrirse dos de ellas.
+AVISO1 = _dtt.datetime(2026, 9, 1, 16, 5)            # 12:05 en Chile
+AVISO2 = _dtt.datetime(2026, 9, 1, 19, 5)            # 15:05 en Chile
 ANA, LUZ = "stu:ana", "stu:luz"
 
 
@@ -244,8 +247,8 @@ import datetime as _dt
 
 
 def _tarde():
-    """Una hora dentro de la ventana permitida (UTC), para no depender de cuándo corran los tests."""
-    return _dt.datetime(2026, 8, 30, 21, 0)
+    """Al ABRIRSE una ventana con aviso (UTC), para no depender de cuándo corran los tests."""
+    return _dt.datetime(2026, 8, 30, 16, 5)      # 12:05 en Chile: ventana 12, de las que avisan
 
 
 def _seguidor(db, owner="dev:ana"):
@@ -501,7 +504,7 @@ def test_fuera_de_ventana_no_hay_retos(db):
     _sembrar(db, 10)
     s = rt.sesion(db, CID, ANA, ahora=CERRADA)
     assert s["ok"] and s["cerrado"] and s["preguntas"] == []
-    assert s["ventana"]["proxima_local"] == "13:00"
+    assert s["ventana"]["proxima_local"] == "08:00"      # mañana, al abrir
 
 
 def test_dentro_de_ventana_da_tres(db):
@@ -538,12 +541,15 @@ def test_la_siguiente_ventana_trae_mas(db):
     assert len(rt.sesion(db, CID, ANA, ahora=ABIERTA2)["preguntas"]) == 3
 
 
-def test_hay_una_ventana_cada_dos_horas_y_ninguna_de_noche():
-    assert list(rt.VENTANAS) == [9, 11, 13, 15, 17, 19, 21]
+def test_hay_una_tanda_por_hora_y_ninguna_de_noche():
+    """El CEO pasó de «cada 2 horas» a «cada hora, de 08:00 a 19:00».
+
+    Con ventanas seguidas la dosificación ya no la da el hueco entre ellas: la da `POR_SESION`.
+    Son 3 y hasta la hora siguiente no hay más, aunque la app esté abierta todo el día.
+    """
+    assert list(rt.VENTANAS) == list(range(8, 20))
     assert min(rt.VENTANAS) >= 7 and max(rt.VENTANAS) <= 21
-    # Abierta 1 h de cada 2: si estuviera abierta más tiempo del que está cerrada, dejaría de ser
-    # un hallazgo y volvería a ser una lista de tareas siempre disponible.
-    assert rt.DURACION_MIN * 2 <= 120
+    assert rt.POR_SESION == 3
 
 
 def test_no_se_avisa_en_todas_las_ventanas():
@@ -560,14 +566,14 @@ def test_una_ventana_sin_aviso_igual_sirve_preguntas(db):
 
 def test_la_ventana_dice_cuando_vuelve_a_abrir(db):
     v = rt.ventana_de(CERRADA)
-    assert not v["abierta"] and v["proxima_local"] == "13:00" and v["minutos_para_proxima"] == 30
+    assert not v["abierta"] and v["proxima_local"] == "08:00" and v["minutos_para_proxima"] == 570
     v2 = rt.ventana_de(ABIERTA)
     assert v2["abierta"] and v2["cierra_local"] == "14:00"
 
 
 def test_pasadas_todas_las_ventanas_la_proxima_es_manana(db):
     tarde = _dtt.datetime(2026, 9, 2, 3, 0)      # 23:00 en Chile
-    assert rt.ventana_de(tarde)["proxima_local"] == "09:00"
+    assert rt.ventana_de(tarde)["proxima_local"] == "08:00"
 
 
 def test_el_estado_de_inicio_no_ofrece_nada_fuera_de_ventana(db):
@@ -582,18 +588,18 @@ def test_el_aviso_solo_sale_al_abrirse_la_ventana(db, monkeypatch):
     monkeypatch.setattr(push_service, "enviar_a_owner", lambda *a, **k: 1)
     _sembrar(db, 5); _seguidor(db)
     assert rt.tick(db, ahora=CERRADA)["avisados"] == 0
-    tarde_en_ventana = _dtt.datetime(2026, 9, 1, 17, 40)   # 13:40 local: la ventana sigue abierta…
+    tarde_en_ventana = _dtt.datetime(2026, 9, 1, 16, 40)   # 12:40 local: la ventana sigue abierta…
     assert rt.tick(db, ahora=tarde_en_ventana)["avisados"] == 0   # …pero avisar ahora llega tarde
-    assert rt.tick(db, ahora=ABIERTA)["avisados"] == 1
-    assert rt.tick(db, ahora=ABIERTA)["avisados"] == 0            # una vez por ventana
+    assert rt.tick(db, ahora=AVISO1)["avisados"] == 1
+    assert rt.tick(db, ahora=AVISO1)["avisados"] == 0            # una vez por ventana
 
 
 def test_cada_ventana_avisa_una_vez(db, monkeypatch):
     from app.services import push_service
     monkeypatch.setattr(push_service, "enviar_a_owner", lambda *a, **k: 1)
     _sembrar(db, 5); _seguidor(db)
-    assert rt.tick(db, ahora=ABIERTA)["avisados"] == 1
-    assert rt.tick(db, ahora=ABIERTA2)["avisados"] == 1
+    assert rt.tick(db, ahora=AVISO1)["avisados"] == 1
+    assert rt.tick(db, ahora=AVISO2)["avisados"] == 1
 
 
 def test_el_aviso_dice_hasta_cuando(db):
@@ -663,7 +669,7 @@ def test_ninguna_ventana_cae_de_noche_en_ninguna_epoca_del_ano():
         for h in range(24):
             v = rt.ventana_de(_dtt.datetime(2026, mes, 15, h, 30))
             if v["abierta"]:
-                assert 9 <= v["hora"] <= 21, (mes, h, v["hora"])
+                assert 8 <= v["hora"] <= 19, (mes, h, v["hora"])
 
 
 def test_el_inicio_de_la_ventana_vuelve_a_utc_con_la_zona_correcta():
@@ -872,3 +878,148 @@ def test_borrar_una_pregunta_no_borra_su_acta(db):
     rt.responder(db, p.id, ANA, "C", CID, ahora=ABIERTA)
     rt.eliminar(db, p.id)
     assert db.query(RetoIntento).count() == 1
+
+
+# ── ventanas cada hora, 08 a 19 ───────────────────────────────────────────────────────
+def test_las_ventanas_van_de_ocho_a_diecinueve_una_por_hora():
+    """Pedido del CEO: 3 preguntas cada hora entre las 08:00 y las 19:00."""
+    assert rt.VENTANAS == tuple(range(8, 20))
+    assert rt.POR_SESION == 3
+
+
+def test_ninguna_ventana_cae_de_noche():
+    """La última abre a las 19:00 y cierra a las 20:00. Un reto a las 2 AM no se negocia."""
+    assert min(rt.VENTANAS) >= 7
+    assert max(rt.VENTANAS) + (rt.DURACION_MIN / 60) <= 21
+
+
+def test_los_avisos_son_cuatro_y_caen_en_ventanas_reales():
+    """Doce notificaciones al día hacen que se silencie la app, y con ella los avisos del profesor."""
+    assert len(rt.VENTANAS_CON_AVISO) == 4
+    assert set(rt.VENTANAS_CON_AVISO) <= set(rt.VENTANAS)
+
+
+def test_a_las_ocho_de_la_manana_ya_hay_reto(db):
+    _sembrar(db, 5)
+    ocho = _dtt.datetime(2026, 9, 10, 11, 5)          # 08:05 en Chile (ya con horario de verano)
+    assert rt.ventana_de(ocho)["abierta"] and rt.ventana_de(ocho)["hora"] == 8
+
+
+def test_a_las_nueve_de_la_noche_ya_no(db):
+    nueve = _dtt.datetime(2026, 9, 10, 0, 30)         # 21:30 del día anterior en Chile
+    assert not rt.ventana_de(nueve)["abierta"]
+
+
+# ── puntaje, tabla y premios ─────────────────────────────────────────────────────────
+def test_la_tabla_nunca_lleva_un_nombre_ni_el_pseudonimo(db):
+    """La regla del CEO fue «sin ranking». La tabla existe con una condición que es código, no
+    promesa: el alias se DERIVA del pseudónimo, no se lee de ningún campo que alguien rellene."""
+    p = _sembrar(db, 1)[0]
+    rt.responder(db, p.id, ANA, "B", CID, ahora=ABIERTA)
+    crudo = repr(rt.tabla(db, CID, ANA))
+    assert ANA not in crudo and "stu:" not in crudo
+
+
+def test_el_alias_es_estable_y_distinto_por_persona(db):
+    assert rt.alias_de(ANA) == rt.alias_de(ANA)
+    assert rt.alias_de(ANA) != rt.alias_de(LUZ)
+
+
+def test_gana_quien_mas_acierta(db):
+    a, b = _sembrar(db, 2)
+    rt.responder(db, a.id, ANA, "B", CID, ahora=ABIERTA)     # acierta
+    rt.responder(db, b.id, ANA, "B", CID, ahora=ABIERTA)     # acierta
+    rt.responder(db, a.id, LUZ, "C", CID, ahora=ABIERTA)     # falla
+    t = rt.tabla(db, CID, LUZ)
+    assert t["tabla"][0]["puntos"] == 20 and t["tabla"][0]["alias"] == rt.alias_de(ANA)
+    assert t["yo"]["puesto"] == 2 and t["yo"]["yo"] is True
+
+
+def test_a_igualdad_de_puntos_gana_quien_fallo_menos(db):
+    """Si no, insistir rindiera igual que saber, y el premio dejaría de medir lo que dice medir."""
+    a, b, c = _sembrar(db, 3)
+    rt.responder(db, a.id, ANA, "B", CID, ahora=ABIERTA)     # 1 de 1
+    rt.responder(db, b.id, LUZ, "B", CID, ahora=ABIERTA)     # 1 de 2
+    rt.responder(db, c.id, LUZ, "A", CID, ahora=ABIERTA)
+    t = rt.tabla(db, CID)["tabla"]
+    assert t[0]["alias"] == rt.alias_de(ANA) and t[0]["respondidas"] == 1
+    assert t[1]["alias"] == rt.alias_de(LUZ)
+
+
+def test_el_repaso_no_sube_el_puntaje(db):
+    """Bastaría con fallar a propósito y volver a acertar para escalar sin límite."""
+    p = _sembrar(db, 1)[0]
+    _resp(db, p.id, ANA, "A", ABIERTA)      # falla en la primera
+    _resp(db, p.id, ANA, "B", ABIERTA2)     # acierta en el repaso
+    assert rt.tabla(db, CID, ANA)["yo"]["puntos"] == 0
+
+
+def test_siempre_se_ve_la_propia_fila_aunque_no_este_en_el_podio(db):
+    """Una tabla donde no te encuentras desmotiva justo a quien más necesita verse avanzar."""
+    ps = _sembrar(db, 1)[0]
+    for i in range(12):
+        rt.responder(db, ps.id, "stu:x%d" % i, "B", CID, ahora=ABIERTA)
+    otra = _sembrar(db, 1)[0]
+    rt.responder(db, otra.id, ANA, "A", CID, ahora=ABIERTA)      # falla: 0 puntos, último
+    t = rt.tabla(db, CID, ANA, tope=5)
+    assert len(t["tabla"]) == 5 and t["yo"] and t["yo"]["puntos"] == 0
+
+
+def test_acertar_paga_lumis_una_sola_vez(db):
+    from app.services import recompensa_service as rc
+    p = _sembrar(db, 1)[0]
+    r = rt.responder(db, p.id, ANA, "B", CID, ahora=ABIERTA)
+    assert r["lumis"] == rt.LUMIS_ACIERTO and rc.saldo(db, ANA) == rt.LUMIS_ACIERTO
+    rt.responder(db, p.id, ANA, "B", CID, ahora=ABIERTA)         # reintento en la misma ventana
+    assert rc.saldo(db, ANA) == rt.LUMIS_ACIERTO
+
+
+def test_fallar_no_paga(db):
+    from app.services import recompensa_service as rc
+    p = _sembrar(db, 1)[0]
+    assert rt.responder(db, p.id, ANA, "C", CID, ahora=ABIERTA)["lumis"] == 0
+    assert rc.saldo(db, ANA) == 0
+
+
+def test_el_repaso_tampoco_paga_lumis(db):
+    from app.services import recompensa_service as rc
+    p = _sembrar(db, 1)[0]
+    _resp(db, p.id, ANA, "A", ABIERTA)
+    _resp(db, p.id, ANA, "B", ABIERTA2)
+    assert rc.saldo(db, ANA) == 0
+
+
+def test_el_podio_del_dia_paga_a_las_tres_mejores(db):
+    from app.services import recompensa_service as rc
+    qs = _sembrar(db, 3)
+    rt.responder(db, qs[0].id, ANA, "B", CID, ahora=ABIERTA)
+    rt.responder(db, qs[1].id, ANA, "B", CID, ahora=ABIERTA)
+    rt.responder(db, qs[0].id, LUZ, "B", CID, ahora=ABIERTA)
+    r = rt.cerrar_dia(db, CID, ahora=ABIERTA)
+    assert r["premiadas"] == 2 and r["podio"][0]["alias"] == rt.alias_de(ANA)
+    assert rc.saldo(db, ANA) == 2 * rt.LUMIS_ACIERTO + rt.LUMIS_PODIO[0]
+    assert rc.saldo(db, LUZ) == rt.LUMIS_ACIERTO + rt.LUMIS_PODIO[1]
+
+
+def test_cerrar_el_dia_dos_veces_no_paga_dos_veces(db):
+    """El barrido corre cada diez minutos: sin esto, el podio se cobraría seis veces por hora."""
+    from app.services import recompensa_service as rc
+    p = _sembrar(db, 1)[0]
+    rt.responder(db, p.id, ANA, "B", CID, ahora=ABIERTA)
+    rt.cerrar_dia(db, CID, ahora=ABIERTA)
+    antes = rc.saldo(db, ANA)
+    rt.cerrar_dia(db, CID, ahora=ABIERTA)
+    assert rc.saldo(db, ANA) == antes
+
+
+def test_quien_no_sumo_nada_no_entra_al_podio(db):
+    """Premiar 0 puntos por ser la única que abrió la app vacía el premio de significado."""
+    p = _sembrar(db, 1)[0]
+    rt.responder(db, p.id, ANA, "C", CID, ahora=ABIERTA)      # falla
+    assert rt.cerrar_dia(db, CID, ahora=ABIERTA)["premiadas"] == 0
+
+
+def test_un_curso_sin_respuestas_no_revienta_al_cerrar(db):
+    _sembrar(db, 2)
+    assert rt.cerrar_dia(db, CID, ahora=ABIERTA)["premiadas"] == 0
+    assert rt.tabla(db, CID, ANA)["tabla"] == []

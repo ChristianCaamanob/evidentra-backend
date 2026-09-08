@@ -500,17 +500,20 @@ def eliminar(db: Session, pregunta_id) -> dict:
 # está disponible siempre, se convierte en una lista de tareas y se acaba en una sentada; la magia
 # está en que aparezcan unos pocos, a ratos, y que si no los tomaste se hayan ido.
 #
-# Cuatro ventanas de 90 minutos en hora de Chile (UTC-4). Ninguna de noche.
+# Ventanas en hora de Chile. Ninguna de noche.
 _TZ_CHILE = -4          # solo como respaldo si falta la base de zonas horarias
 _ZONA = "America/Santiago"
-# Cada 2 horas de 9 a 21 (pedido del CEO: cuatro veces al día «no genera nada»). Ninguna de noche.
-VENTANAS = (9, 11, 13, 15, 17, 19, 21)
-# La ventana se acorta a 1 hora: con una apertura cada 2 h, 90 minutos dejaría el reto disponible
-# tres cuartas partes del día y se perdería justo lo que lo hace un hallazgo.
+# Una tanda por HORA, de 08:00 a 19:00 (pedido del CEO). Ninguna de noche: la última abre a las
+# 19:00 y cierra a las 20:00.
+VENTANAS = tuple(range(8, 20))
 DURACION_MIN = 60
-# Preguntas cada 2 h, pero AVISOS cuatro veces al día. Siete notificaciones diarias no crean el
-# hábito: hacen que se silencie la app, y con ella se pierden también los avisos del profesor.
-VENTANAS_CON_AVISO = (9, 13, 17, 21)
+# La dosificación ya NO la da el hueco entre ventanas —ahora son seguidas—, la da `POR_SESION`:
+# son 3 preguntas y hasta la hora siguiente no hay más. Se responden en dos minutos y el resto de
+# la hora no hay nada que hacer, que es justo lo que evita que se convierta en una lista de tareas.
+#
+# AVISOS cuatro veces al día, no doce. Doce notificaciones diarias no crean el hábito: hacen que se
+# silencie la app, y con ella se pierden también los avisos del profesor.
+VENTANAS_CON_AVISO = (9, 12, 15, 18)
 
 
 def _a_utc(local):
@@ -736,8 +739,20 @@ def responder(db: Session, pregunta_id, pseudo_id: str, elegida: str, course_id=
     except Exception:  # noqa: BLE001 — el reto ya quedó respondido; la evidencia es lo accesorio
         db.rollback()
 
+    # Premio inmediato por acertar, solo en la primera vuelta. El repaso NO paga: si pagara, bastaría
+    # con fallar a propósito y volver a acertar. `ref` incluye la pregunta, así que reintentar por un
+    # error de red tampoco cobra dos veces.
+    lumis = 0
+    if acerto:
+        try:
+            from app.services import recompensa_service as rc
+            lumis = int(rc.acreditar(db, pseudo_id, "reto", f"reto:{p.id}",
+                                     detalle=f"Reto de {p.tema}").get("acreditado") or 0)
+        except Exception:  # noqa: BLE001 — la respuesta ya está registrada; el premio es lo accesorio
+            _LOG.warning("No se pudo acreditar el Lumin del reto", exc_info=True)
+
     return {"ok": True, "acerto": acerto, "correcta": p.correcta, "elegida": letra,
-            "justificacion": p.justificacion}
+            "justificacion": p.justificacion, "lumis": lumis, "puntos": PUNTOS_ACIERTO if acerto else 0}
 
 
 def mi_estado(db: Session, course_id, pseudo_id: str, ahora=None) -> dict:
@@ -771,6 +786,26 @@ def mi_estado(db: Session, course_id, pseudo_id: str, ahora=None) -> dict:
 _TOLERANCIA_MIN = 25
 
 
+def _liquidar_podios(db: Session, ahora) -> int:
+    """Cierra el día y paga el podio de cada curso, en la hora siguiente a la última ventana.
+
+    Corre en el barrido que ya existe (cada 10 min) en vez de en un cron propio: un trabajo
+    programado más es una cosa más que puede quedarse callada sin que nadie se entere. Se ejecuta
+    varias veces dentro de esa hora a propósito —si un barrido falla, el siguiente cobra— y no paga
+    dos veces porque la `ref` del movimiento lleva curso y fecha.
+    """
+    try:
+        loc = _local(ahora)
+        if loc.hour != VENTANAS[-1] + 1:      # justo después de que cierra la última ventana
+            return 0
+        cursos = {p.course_id for p in db.query(RetoPregunta).filter(
+            RetoPregunta.estado == "aprobada").all()}
+        return sum(cerrar_dia(db, cid, ahora).get("premiadas", 0) for cid in cursos)
+    except Exception:  # noqa: BLE001 — el reparto no puede tumbar los avisos del profesor
+        _LOG.warning("No se pudieron liquidar los podios del reto", exc_info=True)
+        return 0
+
+
 def tick(db: Session, ahora=None) -> dict:
     """Un aviso al día por curso, con las preguntas nuevas que esperan. Idempotente por día.
 
@@ -779,13 +814,14 @@ def tick(db: Session, ahora=None) -> dict:
     """
     import datetime as _dt
     ahora = ahora or _dt.datetime.utcnow()
+    premiadas = _liquidar_podios(db, ahora)
     v = ventana_de(ahora)
     if not v["abierta"] or v["hora"] not in VENTANAS_CON_AVISO:
-        return {"ok": True, "fuera_de_hora": True, "avisados": 0}
+        return {"ok": True, "fuera_de_hora": True, "avisados": 0, "premiadas": premiadas}
     loc = _local(ahora)
     if loc.minute > _TOLERANCIA_MIN:
         # Ya pasó el momento del aviso: avisar a mitad de ventana llega tarde y molesta.
-        return {"ok": True, "fuera_de_hora": True, "avisados": 0}
+        return {"ok": True, "fuera_de_hora": True, "avisados": 0, "premiadas": premiadas}
     hoy = f"{loc.date().isoformat()}#{v['hora']}"      # una vez por VENTANA, no por día
 
     from app.models.push import PushSent, StudentCourseFollow
@@ -1027,3 +1063,103 @@ def analisis(db: Session, course_id) -> dict:
                         "preguntas_con_datos": sum(1 for q in salida if q["suficiente"]),
                         "corregidos": corregidos, "reincidentes": reincidentes,
                         "minimo": _MIN_PARA_MOSTRAR}}
+
+
+# ── puntaje, tabla y premios ──────────────────────────────────────────────────────────
+# El CEO pidió premios «de acuerdo a las mejores puntuaciones». Eso es comparar estudiantes, y su
+# propia regla del sistema de recompensas fue «sin ranking, solo meta personal». La tabla existe,
+# entonces, bajo una condición que aquí es código y no promesa: **nunca sale un nombre ni un RUT**.
+# El alias se DERIVA del pseudónimo con un hash; no se lee de ningún campo que una persona pueda
+# rellenar, así que no hay forma de que se cuele un dato real por descuido de nadie.
+PUNTOS_ACIERTO = 10
+LUMIS_ACIERTO = 5                 # premio inmediato: todas ganan algo por acertar
+LUMIS_PODIO = (50, 30, 20)        # premio del día a las tres mejores
+_ANIMALES = ("Zorro", "Puma", "Cóndor", "Nutria", "Alpaca", "Chinchilla", "Pudú", "Guanaco",
+             "Flamenco", "Quirquincho", "Coipo", "Huemul", "Tucúquere", "Vizcacha", "Degú", "Loica")
+
+
+def alias_de(pseudo_id: str) -> str:
+    """Un apodo estable y sin PII. Determinista: la misma persona es siempre el mismo animal."""
+    h = hashlib.sha256(("alias|" + str(pseudo_id or "")).encode()).hexdigest()
+    return f"{_ANIMALES[int(h[:4], 16) % len(_ANIMALES)]} {int(h[4:8], 16) % 90 + 10}"
+
+
+def _puntos(db: Session, course_id, desde=None) -> dict:
+    """Puntos por persona. Solo cuenta el PRIMER intento de cada pregunta.
+
+    Si contara el repaso, bastaría con fallar a propósito y volver a acertar para subir sin límite,
+    y la tabla premiaría la insistencia en vez de saber. Con la primera vuelta cada pregunta paga
+    una sola vez y el puntaje mide lo que dice medir.
+    """
+    ids = {p.id for p in db.query(RetoPregunta).filter(
+        RetoPregunta.course_id == str(course_id), RetoPregunta.estado == "aprobada").all()}
+    if not ids:
+        return {}
+    q = db.query(RetoIntento).filter(RetoIntento.pregunta_id.in_(list(ids)), RetoIntento.vuelta == 1)
+    if desde is not None:
+        q = q.filter(RetoIntento.created_at >= desde)
+    out: dict = {}
+    for r in q.all():
+        d = out.setdefault(r.pseudo_id, {"puntos": 0, "aciertos": 0, "respondidas": 0, "ultimo": None})
+        d["respondidas"] += 1
+        if r.correcta:
+            d["aciertos"] += 1
+            d["puntos"] += PUNTOS_ACIERTO
+        if r.created_at and (d["ultimo"] is None or r.created_at > d["ultimo"]):
+            d["ultimo"] = r.created_at
+    return out
+
+
+def _ordenar(puntos: dict) -> list:
+    """Más puntos primero. A igualdad gana quien lo logró con menos intentos (más precisión), y si
+    persiste el empate, quien llegó antes: nunca al azar, porque de esto cuelga un premio."""
+    filas = [{"pseudo_id": k, **v} for k, v in puntos.items()]
+    filas.sort(key=lambda f: (-f["puntos"], f["respondidas"],
+                              f["ultimo"] or _dt.datetime.max))
+    for i, f in enumerate(filas):
+        f["puesto"] = i + 1
+    return filas
+
+
+def tabla(db: Session, course_id, pseudo_id: str = "", tope: int = 10, hoy: bool = False,
+          ahora=None) -> dict:
+    """La tabla de posiciones, con alias. `pseudo_id` marca cuál fila es la de quien pregunta."""
+    desde = None
+    if hoy:
+        loc = _local(ahora or _dt.datetime.utcnow())
+        desde = _a_utc(loc.replace(hour=0, minute=0, second=0, microsecond=0))
+    filas = _ordenar(_puntos(db, course_id, desde))
+    def _fila(f):
+        return {"puesto": f["puesto"], "alias": alias_de(f["pseudo_id"]), "puntos": f["puntos"],
+                "aciertos": f["aciertos"], "respondidas": f["respondidas"],
+                "yo": bool(pseudo_id) and f["pseudo_id"] == pseudo_id}
+    top = [_fila(f) for f in filas[:max(1, min(int(tope or 10), 50))]]
+    # Su propia fila SIEMPRE viaja, esté o no en el podio: una tabla donde no te encuentras
+    # desmotiva justo a quien más necesita ver que va avanzando.
+    yo = next((_fila(f) for f in filas if f["pseudo_id"] == pseudo_id), None) if pseudo_id else None
+    return {"ok": True, "tabla": top, "yo": yo, "participantes": len(filas),
+            "premios": list(LUMIS_PODIO), "por_acierto": LUMIS_ACIERTO}
+
+
+def cerrar_dia(db: Session, course_id, ahora=None) -> dict:
+    """Reparte el premio del día a las tres mejores. Idempotente: `ref` lleva curso y fecha.
+
+    Se liquida en el SERVIDOR y no al abrir una pantalla: si el premio dependiera de que alguien
+    mire la tabla, quien no la abre no cobra, y eso no es un premio sino una trampa.
+    """
+    loc = _local(ahora or _dt.datetime.utcnow())
+    dia = loc.date().isoformat()
+    desde = _a_utc(loc.replace(hour=0, minute=0, second=0, microsecond=0))
+    filas = [f for f in _ordenar(_puntos(db, course_id, desde)) if f["puntos"] > 0][:len(LUMIS_PODIO)]
+    if not filas:
+        return {"ok": True, "premiadas": 0, "dia": dia}
+    from app.services import recompensa_service as rc
+    premiadas = 0
+    for f in filas:
+        r = rc.acreditar(db, f["pseudo_id"], "podio", f"podio:{course_id}:{dia}:{f['puesto']}",
+                         monto=LUMIS_PODIO[f["puesto"] - 1],
+                         detalle=f"Puesto {f['puesto']} del reto · {dia}")
+        premiadas += 1 if r.get("acreditado") else 0
+    return {"ok": True, "premiadas": premiadas, "dia": dia,
+            "podio": [{"alias": alias_de(f["pseudo_id"]), "puesto": f["puesto"],
+                       "puntos": f["puntos"]} for f in filas]}
