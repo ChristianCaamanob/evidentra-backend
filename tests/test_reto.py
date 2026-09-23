@@ -246,9 +246,9 @@ def test_generar_sin_temas_o_sin_material_falla_claro(db):
 import datetime as _dt
 
 
-def _tarde():
-    """Al ABRIRSE una ventana con aviso (UTC), para no depender de cuándo corran los tests."""
-    return _dt.datetime(2026, 8, 30, 16, 5)      # 12:05 en Chile: ventana 12, de las que avisan
+def _tarde(h=16, m=5, dia=30):
+    """Dentro de una ventana abierta (UTC), para no depender de cuándo corran los tests."""
+    return _dt.datetime(2026, 8, dia, h, m)      # 16:05 UTC = 12:05 en Chile
 
 
 def _seguidor(db, owner="dev:ana"):
@@ -264,13 +264,13 @@ def test_de_noche_no_se_avisa(db):
     assert r["fuera_de_hora"] and r["avisados"] == 0
 
 
-def test_se_avisa_una_sola_vez_al_dia(db, monkeypatch):
+def test_dos_barridos_seguidos_no_avisan_dos_veces(db, monkeypatch):
     from app.services import push_service
     monkeypatch.setattr(push_service, "enviar_a_owner", lambda *a, **k: 1)
     _sembrar(db, 3); _seguidor(db)
     assert rt.tick(db, ahora=_tarde())["avisados"] == 1
-    for _ in range(4):                      # el barrido corre cada diez minutos
-        assert rt.tick(db, ahora=_tarde())["avisados"] == 0
+    for k in range(4):                      # barridos seguidos, dentro de la separación
+        assert rt.tick(db, ahora=_tarde(m=6 + k))["avisados"] == 0
 
 
 def test_sin_banco_aprobado_no_se_avisa(db, monkeypatch):
@@ -553,9 +553,9 @@ def test_hay_una_tanda_por_hora_y_ninguna_de_noche():
 
 
 def test_no_se_avisa_en_todas_las_ventanas():
-    """Siete notificaciones diarias no crean el hábito: hacen que se silencie la app."""
-    assert set(rt.VENTANAS_CON_AVISO) < set(rt.VENTANAS)
-    assert len(rt.VENTANAS_CON_AVISO) == 4
+    """Doce notificaciones diarias no crean el hábito: hacen que se silencie la app, y con ella
+    se pierden también los avisos del profesor. Hay doce ventanas y como mucho cuatro avisos."""
+    assert rt.AVISOS_POR_DIA == 4 and rt.AVISOS_POR_DIA < len(rt.VENTANAS)
 
 
 def test_una_ventana_sin_aviso_igual_sirve_preguntas(db):
@@ -583,15 +583,19 @@ def test_el_estado_de_inicio_no_ofrece_nada_fuera_de_ventana(db):
     assert rt.mi_estado(db, CID, ANA, ahora=ABIERTA)["hay_nuevos"]
 
 
-def test_el_aviso_solo_sale_al_abrirse_la_ventana(db, monkeypatch):
+def test_un_barrido_atrasado_ya_no_se_pierde_el_aviso(db, monkeypatch):
+    """Este es el caso que estaba roto en producción.
+
+    Antes solo se avisaba en los primeros 25 minutos de cuatro horas exactas. Como el barrido llega
+    cuando GitHub quiere —medido: cada ~3,5 h—, casi nunca caía dentro y el reto pasaba el día
+    abierto sin que nadie se enterara. A mitad de ventana el reto SIGUE abierto: avisar entonces no
+    llega tarde, llega."""
     from app.services import push_service
     monkeypatch.setattr(push_service, "enviar_a_owner", lambda *a, **k: 1)
     _sembrar(db, 5); _seguidor(db)
-    assert rt.tick(db, ahora=CERRADA)["avisados"] == 0
-    tarde_en_ventana = _dtt.datetime(2026, 9, 1, 16, 40)   # 12:40 local: la ventana sigue abierta…
-    assert rt.tick(db, ahora=tarde_en_ventana)["avisados"] == 0   # …pero avisar ahora llega tarde
-    assert rt.tick(db, ahora=AVISO1)["avisados"] == 1
-    assert rt.tick(db, ahora=AVISO1)["avisados"] == 0            # una vez por ventana
+    assert rt.tick(db, ahora=CERRADA)["avisados"] == 0           # de noche, no
+    tarde_en_ventana = _dtt.datetime(2026, 9, 1, 16, 47)         # 12:47 local: ventana abierta
+    assert rt.tick(db, ahora=tarde_en_ventana)["avisados"] == 1  # antes esto era 0
 
 
 def test_cada_ventana_avisa_una_vez(db, monkeypatch):
@@ -893,10 +897,10 @@ def test_ninguna_ventana_cae_de_noche():
     assert max(rt.VENTANAS) + (rt.DURACION_MIN / 60) <= 21
 
 
-def test_los_avisos_son_cuatro_y_caen_en_ventanas_reales():
-    """Doce notificaciones al día hacen que se silencie la app, y con ella los avisos del profesor."""
-    assert len(rt.VENTANAS_CON_AVISO) == 4
-    assert set(rt.VENTANAS_CON_AVISO) <= set(rt.VENTANAS)
+def test_los_avisos_van_separados_entre_si():
+    """Si el barrido se atrasa y luego corre dos veces seguidas, los avisos no pueden salir en
+    ráfaga: cuatro seguidos en diez minutos es exactamente lo que hace que se silencie la app."""
+    assert rt.SEPARACION_MIN >= 120
 
 
 def test_a_las_ocho_de_la_manana_ya_hay_reto(db):
@@ -1117,3 +1121,71 @@ def test_una_tanda_caida_no_arrastra_al_resto(db, monkeypatch):
     r = rt.clasificar_temas(db, CID, "Material", curso="Anatomía")
     assert r["clasificadas"] == 0 and r["sin_clasificar"] == 3
     assert {p.tema for p in db.query(RetoPregunta).all()} == {"General"}
+
+
+# ── el aviso, contra los barridos REALES ──────────────────────────────────────────────
+# El CEO preguntó si Runi estaba mandando las preguntas cada hora. No lo estaba: el barrido lo
+# dispara un workflow de GitHub con `cron: */10`, y GitHub ignora esa frecuencia. Medido sobre los
+# 60 barridos de 10 días: mediana 214 min entre uno y otro, máximo 409. Con la regla vieja —cuatro
+# horas exactas, primeros 25 minutos— solo 8 de 60 servían para algo.
+_BARRIDOS_REALES = [      # marcas UTC tal como las devolvió `gh run list`, del 13 al 22 de sept.
+    "2026-09-22T22:18", "2026-09-22T19:16", "2026-09-22T15:42", "2026-09-22T11:39",
+    "2026-09-22T06:09", "2026-09-22T01:02", "2026-09-21T22:20", "2026-09-21T18:48",
+    "2026-09-21T13:19", "2026-09-21T06:30", "2026-09-20T23:12", "2026-09-20T21:04",
+    "2026-09-20T18:44", "2026-09-20T16:00", "2026-09-20T12:05", "2026-09-20T06:51",
+    "2026-09-19T23:22", "2026-09-19T21:25", "2026-09-19T18:59", "2026-09-19T16:41",
+    "2026-09-19T13:23", "2026-09-19T09:35",
+]
+
+
+def test_con_los_barridos_reales_de_github_ahora_si_se_avisa(db, monkeypatch):
+    """La prueba de que el arreglo sirve: los mismos disparos, otro resultado.
+
+    No se simula un barrido puntual que no existe. Se usan las marcas que GitHub produjo de verdad.
+    """
+    from app.services import push_service
+    monkeypatch.setattr(push_service, "enviar_a_owner", lambda *a, **k: 1)
+    _sembrar(db, 20); _seguidor(db)
+    avisados = 0
+    for marca in sorted(_BARRIDOS_REALES):
+        avisados += rt.tick(db, ahora=_dtt.datetime.fromisoformat(marca))["avisados"]
+    # Con la regla vieja, estos mismos 22 barridos daban 3 avisos en 10 días.
+    assert avisados >= 8, avisados
+
+
+def test_ni_aun_asi_se_pasa_del_tope_diario(db, monkeypatch):
+    """Arreglar el silencio no puede convertirse en lo contrario: cuatro al día, y no más."""
+    from app.services import push_service
+    monkeypatch.setattr(push_service, "enviar_a_owner", lambda *a, **k: 1)
+    _sembrar(db, 20); _seguidor(db)
+    dia = _dtt.datetime(2026, 9, 21, 11, 5)          # 08:05 en Chile
+    total = 0
+    for k in range(60):                              # un barrido cada 12 min, todo el día
+        total += rt.tick(db, ahora=dia + _dtt.timedelta(minutes=12 * k))["avisados"]
+    assert total == rt.AVISOS_POR_DIA
+
+
+def test_el_dia_siguiente_vuelve_a_empezar(db, monkeypatch):
+    from app.services import push_service
+    monkeypatch.setattr(push_service, "enviar_a_owner", lambda *a, **k: 1)
+    _sembrar(db, 20); _seguidor(db)
+    for k in range(60):
+        rt.tick(db, ahora=_dtt.datetime(2026, 9, 21, 11, 5) + _dtt.timedelta(minutes=12 * k))
+    assert rt.tick(db, ahora=_dtt.datetime(2026, 9, 22, 11, 5))["avisados"] == 1
+
+
+def test_el_aviso_no_depende_de_los_creditos_de_ia(db, monkeypatch):
+    """Runi se quedó sin saldo. El reto no lo usa: las preguntas ya están escritas en la base."""
+    import os
+    from app.services import correccion_experta_service as ce
+    from app.services import push_service
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(ce, "_llamar_anthropic",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("el reto NO debe llamar a la IA")))
+    monkeypatch.setattr(push_service, "enviar_a_owner", lambda *a, **k: 1)
+    ps = _sembrar(db, 5); _seguidor(db)
+    assert rt.tick(db, ahora=_tarde())["avisados"] == 1
+    s = rt.sesion(db, CID, ANA, ahora=ABIERTA)
+    assert len(s["preguntas"]) == rt.POR_SESION
+    r = rt.responder(db, ps[0].id, ANA, "B", CID, ahora=ABIERTA)
+    assert r["acerto"] and r["justificacion"]        # el porqué también estaba guardado

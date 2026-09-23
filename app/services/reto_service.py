@@ -511,9 +511,10 @@ DURACION_MIN = 60
 # son 3 preguntas y hasta la hora siguiente no hay más. Se responden en dos minutos y el resto de
 # la hora no hay nada que hacer, que es justo lo que evita que se convierta en una lista de tareas.
 #
-# AVISOS cuatro veces al día, no doce. Doce notificaciones diarias no crean el hábito: hacen que se
-# silencie la app, y con ella se pierden también los avisos del profesor.
-VENTANAS_CON_AVISO = (9, 12, 15, 18)
+# AVISOS cuatro veces al día, no doce: doce notificaciones diarias no crean el hábito, hacen que se
+# silencie la app y con ella se pierden también los avisos del profesor. El tope y la separación
+# viven en `AVISOS_POR_DIA` y `SEPARACION_MIN`, junto al barrido que los aplica; atarlos a horas
+# fijas exigía una puntualidad que el disparador no tiene (ver `tick`).
 
 
 def _a_utc(local):
@@ -783,7 +784,6 @@ def mi_estado(db: Session, course_id, pseudo_id: str, ahora=None) -> dict:
 # no ayuda a nadie a aprender, solo entrena a silenciar la app.
 # El aviso se manda al ABRIRSE cada ventana (ver VENTANAS). Se tolera un retraso: el barrido corre
 # cada diez minutos y no siempre cae en el minuto exacto.
-_TOLERANCIA_MIN = 25
 
 
 def _liquidar_podios(db: Session, ahora) -> int:
@@ -806,23 +806,47 @@ def _liquidar_podios(db: Session, ahora) -> int:
         return 0
 
 
-def tick(db: Session, ahora=None) -> dict:
-    """Un aviso al día por curso, con las preguntas nuevas que esperan. Idempotente por día.
+AVISOS_POR_DIA = 4          # tope: más que esto y se silencia la app, con los avisos del profesor dentro
+SEPARACION_MIN = 140        # ~2 h 20 entre avisos, para que no lleguen en ráfaga si el barrido se atrasa
 
-    Se apoya en `PushSent` (única por eval_id+owner+hito) para no mandar el mismo aviso dos veces
-    aunque el barrido corra cada diez minutos.
+
+def _avisos_de_hoy(db, ref: str, owner_key: str, dia: str) -> list:
+    """Las marcas de aviso de hoy para esa persona en ese curso, en orden."""
+    from app.models.push import PushSent
+    filas = db.query(PushSent).filter(PushSent.eval_id == ref, PushSent.owner_key == owner_key,
+                                      PushSent.hito.like(dia + "#%")).all()
+    out = []
+    for r in filas:
+        try:
+            out.append(_dt.datetime.fromisoformat(str(r.hito).split("#", 1)[1]))
+        except (ValueError, IndexError):
+            continue
+    return sorted(out)
+
+
+def tick(db: Session, ahora=None) -> dict:
+    """Avisa de los retos abiertos. Hasta `AVISOS_POR_DIA`, separados entre sí.
+
+    ANTES esto exigía que el barrido cayera en una de cuatro horas exactas y dentro de sus primeros
+    25 minutos. Medido sobre 60 barridos reales de 10 días: GitHub, que es quien los dispara, ignora
+    el `*/10` y corre cada ~3,5 horas (hasta 6,8). Solo 8 de 60 cayeron a tiempo — menos de un aviso
+    al día en vez de cuatro. El reto estaba abierto cada hora y nadie se enteraba.
+    
+    La corrección no es pedirle puntualidad al disparador: es dejar de depender de ella. Ahora avisa
+    cuando el barrido pase y haya una ventana abierta, siempre que hayan pasado `SEPARACION_MIN`
+    desde el aviso anterior y no se haya llegado al tope del día. El límite lo pone el reloj del
+    último aviso, no el del barrido. Como efecto lateral deja de importar el horario de verano, que
+    con horas fijas en UTC corría los avisos una hora dos veces al año.
     """
     import datetime as _dt
     ahora = ahora or _dt.datetime.utcnow()
     premiadas = _liquidar_podios(db, ahora)
     v = ventana_de(ahora)
-    if not v["abierta"] or v["hora"] not in VENTANAS_CON_AVISO:
+    if not v["abierta"]:
         return {"ok": True, "fuera_de_hora": True, "avisados": 0, "premiadas": premiadas}
     loc = _local(ahora)
-    if loc.minute > _TOLERANCIA_MIN:
-        # Ya pasó el momento del aviso: avisar a mitad de ventana llega tarde y molesta.
-        return {"ok": True, "fuera_de_hora": True, "avisados": 0, "premiadas": premiadas}
-    hoy = f"{loc.date().isoformat()}#{v['hora']}"      # una vez por VENTANA, no por día
+    dia = loc.date().isoformat()
+    hoy = f"{dia}#{loc.replace(microsecond=0).isoformat()}"    # la marca lleva la hora REAL del aviso
 
     from app.models.push import PushSent, StudentCourseFollow
     from app.services import push_service as ps
@@ -844,8 +868,11 @@ def tick(db: Session, ahora=None) -> dict:
             continue
         for f in seguidores:
             ref = f"reto:{cid}"
-            if db.query(PushSent).filter(PushSent.eval_id == ref, PushSent.owner_key == f.owner_key,
-                                         PushSent.hito == hoy).first():
+            previos = _avisos_de_hoy(db, ref, f.owner_key, dia)
+            if len(previos) >= AVISOS_POR_DIA:
+                continue
+            if previos and (loc.replace(tzinfo=None) - previos[-1].replace(tzinfo=None)) \
+                    < _dt.timedelta(minutes=SEPARACION_MIN):
                 continue
             db.add(PushSent(eval_id=ref, owner_key=f.owner_key, hito=hoy))
             db.commit()
@@ -853,7 +880,7 @@ def tick(db: Session, ahora=None) -> dict:
                 avisados += ps.enviar_a_owner(db, f.owner_key, payload_push(len(banco), v))
             except Exception:  # noqa: BLE001 — un push caído no deja el barrido a medias
                 pass
-    return {"ok": True, "avisados": avisados}
+    return {"ok": True, "avisados": avisados, "premiadas": premiadas}
 
 
 def payload_push(n_banco: int, v: dict | None = None) -> dict:
