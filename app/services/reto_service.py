@@ -810,15 +810,23 @@ AVISOS_POR_DIA = 4          # tope: más que esto y se silencia la app, con los 
 SEPARACION_MIN = 140        # ~2 h 20 entre avisos, para que no lleguen en ráfaga si el barrido se atrasa
 
 
+def _marca(dia: str, loc) -> str:
+    """La marca del aviso: «2026-09-22#1205». Son 15 caracteres a propósito — `PushSent.hito` es
+    VARCHAR(20), y un ISO completo (36) lo desborda: Postgres lo rechaza y SQLite lo recorta en
+    silencio, que es peor porque los tests pasarían igual."""
+    return f"{dia}#{loc:%H%M}"
+
+
 def _avisos_de_hoy(db, ref: str, owner_key: str, dia: str) -> list:
-    """Las marcas de aviso de hoy para esa persona en ese curso, en orden."""
+    """Las horas a las que ya se avisó hoy a esa persona en ese curso, en orden."""
     from app.models.push import PushSent
     filas = db.query(PushSent).filter(PushSent.eval_id == ref, PushSent.owner_key == owner_key,
                                       PushSent.hito.like(dia + "#%")).all()
     out = []
     for r in filas:
         try:
-            out.append(_dt.datetime.fromisoformat(str(r.hito).split("#", 1)[1]))
+            hhmm = str(r.hito).split("#", 1)[1]
+            out.append(_dt.datetime.strptime(f"{dia} {hhmm}", "%Y-%m-%d %H%M"))
         except (ValueError, IndexError):
             continue
     return sorted(out)
@@ -846,7 +854,7 @@ def tick(db: Session, ahora=None) -> dict:
         return {"ok": True, "fuera_de_hora": True, "avisados": 0, "premiadas": premiadas}
     loc = _local(ahora)
     dia = loc.date().isoformat()
-    hoy = f"{dia}#{loc.replace(microsecond=0).isoformat()}"    # la marca lleva la hora REAL del aviso
+    hoy = _marca(dia, loc)              # la marca lleva la hora REAL del aviso, no la de la ventana
 
     from app.models.push import PushSent, StudentCourseFollow
     from app.services import push_service as ps
@@ -871,8 +879,7 @@ def tick(db: Session, ahora=None) -> dict:
             previos = _avisos_de_hoy(db, ref, f.owner_key, dia)
             if len(previos) >= AVISOS_POR_DIA:
                 continue
-            if previos and (loc.replace(tzinfo=None) - previos[-1].replace(tzinfo=None)) \
-                    < _dt.timedelta(minutes=SEPARACION_MIN):
+            if previos and (loc.replace(tzinfo=None) - previos[-1]) < _dt.timedelta(minutes=SEPARACION_MIN):
                 continue
             db.add(PushSent(eval_id=ref, owner_key=f.owner_key, hito=hoy))
             db.commit()
@@ -1274,3 +1281,60 @@ def clasificar_temas(db: Session, course_id, contexto: str, curso: str = "",
         resumen[p.tema] = resumen.get(p.tema, 0) + 1
     return {"ok": True, "clasificadas": cambiadas, "sin_clasificar": sin_clasificar,
             "temas": sorted(resumen.items(), key=lambda kv: -kv[1])}
+
+
+def salud_avisos(db: Session, course_id, ahora=None) -> dict:
+    """¿Está llegando el reto a alguien? Pensado para responderlo SIN preguntarle a nadie.
+
+    El CEO preguntó «¿Runi está enviando las preguntas?» y no había forma de comprobarlo desde la
+    plataforma: había que leer el código y los registros de GitHub. Esto lo contesta de una mirada,
+    y separa las tres cosas que pueden fallar, que son distintas y se arreglan distinto:
+      1. no hay banco publicado          → el docente aprueba preguntas
+      2. nadie activó las notificaciones → la alumna toca «Que Runi te avise»
+      3. el barrido no está pasando      → el disparador (GitHub) dejó de correr
+    """
+    from app.models.push import PushSent, PushSubscription, StudentCourseFollow
+    ahora = ahora or _dt.datetime.utcnow()
+    loc = _local(ahora)
+    cid = str(course_id)
+    banco = db.query(RetoPregunta).filter(RetoPregunta.course_id == cid,
+                                          RetoPregunta.estado == "aprobada").count()
+    try:
+        seguidores = db.query(StudentCourseFollow).filter(
+            StudentCourseFollow.course_id == _uuid.UUID(cid)).all()
+    except (ValueError, TypeError, AttributeError):
+        seguidores = []
+    owners = {f.owner_key for f in seguidores}
+    con_push = {s.owner_key for s in db.query(PushSubscription).filter(
+        PushSubscription.owner_key.in_(list(owners) or [""])).all()} if owners else set()
+
+    ref = f"reto:{cid}"
+    enviados = db.query(PushSent).filter(PushSent.eval_id == ref).all()
+    hoy = loc.date().isoformat()
+    de_hoy = [e for e in enviados if str(e.hito).startswith(hoy + "#")]
+    ultimo = max((e.created_at for e in enviados if e.created_at), default=None)
+
+    v = ventana_de(ahora)
+    if not banco:
+        estado, que_hacer = "sin_banco", "Publica preguntas: sin banco aprobado no hay nada que enviar."
+    elif not owners:
+        estado, que_hacer = "sin_seguidores", "Nadie ha abierto el curso todavía desde su enlace."
+    elif not con_push:
+        estado, que_hacer = ("sin_permiso",
+                             "Tus estudiantes siguen el curso pero ninguna activó las notificaciones. "
+                             "Se activan desde la app, en «Que Runi te avise».")
+    elif not enviados:
+        estado, que_hacer = ("nunca_enviado",
+                             "Todo está listo y aún no ha salido ningún aviso. Si sigue así mañana, "
+                             "el barrido no está pasando.")
+    else:
+        estado, que_hacer = "enviando", ""
+    return {"ok": True, "estado": estado, "que_hacer": que_hacer,
+            "banco": banco, "seguidores": len(owners), "con_notificaciones": len(con_push),
+            "avisos_hoy": len(de_hoy), "avisos_total": len(enviados),
+            "ultimo_aviso": ultimo.isoformat() if ultimo else None,
+            "tope_diario": AVISOS_POR_DIA, "separacion_min": SEPARACION_MIN,
+            "ahora_local": loc.strftime("%Y-%m-%d %H:%M"), "ventana": v,
+            "por_sesion": POR_SESION,
+            # La IA no entra aquí: las preguntas ya están escritas en la base.
+            "necesita_ia": False}

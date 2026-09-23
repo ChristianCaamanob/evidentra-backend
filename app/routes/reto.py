@@ -45,6 +45,12 @@ def reto_tabla_docente(course_id: UUID, hoy: int = 0, db: Session = Depends(get_
     return rt.tabla(db, course_id, "", tope=30, hoy=bool(hoy))
 
 
+@router.get("/courses/{course_id}/reto/avisos", dependencies=[Depends(req_profesor)])
+def reto_avisos(course_id: UUID, db: Session = Depends(get_db)):
+    """Diagnostico: esta llegando el reto a alguien, y si no, por que."""
+    return rt.salud_avisos(db, course_id)
+
+
 @router.get("/courses/{course_id}/reto/analisis", dependencies=[Depends(req_profesor)])
 def reto_analisis(course_id: UUID, db: Session = Depends(get_db)):
     """Cómo le fue al curso, pregunta por pregunta. AGREGADO: sin nombres ni pseudónimos."""

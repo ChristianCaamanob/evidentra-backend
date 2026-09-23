@@ -1189,3 +1189,64 @@ def test_el_aviso_no_depende_de_los_creditos_de_ia(db, monkeypatch):
     assert len(s["preguntas"]) == rt.POR_SESION
     r = rt.responder(db, ps[0].id, ANA, "B", CID, ahora=ABIERTA)
     assert r["acerto"] and r["justificacion"]        # el porqué también estaba guardado
+
+
+def test_la_marca_del_aviso_cabe_en_su_columna(db, monkeypatch):
+    """Casi se escapa: la primera versión guardaba un ISO completo (36 caracteres) en `hito`, que
+    es VARCHAR(20). SQLite lo recorta callado y los tests habrían pasado; Postgres —que es lo que
+    hay en producción— lo rechaza, y el aviso se habría caído justo en el piloto."""
+    from app.models.push import PushSent
+    from app.services import push_service
+    monkeypatch.setattr(push_service, "enviar_a_owner", lambda *a, **k: 1)
+    _sembrar(db, 3); _seguidor(db)
+    rt.tick(db, ahora=_tarde())
+    largo = PushSent.__table__.c.hito.type.length
+    for fila in db.query(PushSent).all():
+        assert len(fila.hito) <= largo, (fila.hito, largo)
+
+
+# ── «¿está llegando esto a alguien?», sin tener que leer el código ────────────────────
+def _con_push(db, owner="dev:ana"):
+    from app.models.push import PushSubscription
+    db.add(PushSubscription(owner_key=owner, endpoint="https://x/" + owner,
+                            endpoint_hash="h" + owner, p256dh="k", auth="a")); db.commit()
+
+
+def test_sin_banco_lo_dice_y_dice_que_hacer(db):
+    r = rt.salud_avisos(db, CID)
+    assert r["estado"] == "sin_banco" and "Publica preguntas" in r["que_hacer"]
+
+
+def test_con_banco_pero_sin_nadie_siguiendo(db):
+    _sembrar(db, 5)
+    assert rt.salud_avisos(db, CID)["estado"] == "sin_seguidores"
+
+
+def test_el_caso_silencioso_que_nadie_ve(db):
+    """El peor de todos: todo montado y ninguna activó las notificaciones. No falla nada, no hay
+    error en ninguna parte, y sencillamente no llega. Sin esto no había forma de enterarse."""
+    _sembrar(db, 5); _seguidor(db)
+    r = rt.salud_avisos(db, CID)
+    assert r["estado"] == "sin_permiso" and r["seguidores"] == 1 and r["con_notificaciones"] == 0
+    assert "Que Runi te avise" in r["que_hacer"]
+
+
+def test_todo_listo_y_todavia_sin_enviar(db):
+    _sembrar(db, 5); _seguidor(db); _con_push(db)
+    r = rt.salud_avisos(db, CID)
+    assert r["estado"] == "nunca_enviado" and r["con_notificaciones"] == 1
+
+
+def test_cuando_ya_esta_enviando_lo_confirma(db, monkeypatch):
+    from app.services import push_service
+    monkeypatch.setattr(push_service, "enviar_a_owner", lambda *a, **k: 1)
+    _sembrar(db, 5); _seguidor(db); _con_push(db)
+    rt.tick(db, ahora=_tarde())
+    r = rt.salud_avisos(db, CID, ahora=_tarde())
+    assert r["estado"] == "enviando" and r["avisos_hoy"] == 1 and not r["que_hacer"]
+
+
+def test_el_diagnostico_deja_claro_que_no_hace_falta_la_ia(db):
+    """Runi se quedó sin créditos. Lo primero que hay que poder descartar es que el reto dependa
+    de eso, porque no depende."""
+    assert rt.salud_avisos(db, CID)["necesita_ia"] is False
