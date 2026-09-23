@@ -1404,8 +1404,11 @@ def test_deja_de_poder_adivinarse_por_la_letra(db):
     assert rt.reparto_de_claves(db, CID)["sesgado"]
     rt.barajar(db, CID)
     r = rt.reparto_de_claves(db, CID)
-    assert not r["sesgado"] and r["mejor_pct"] <= 30, r
+    # Lo que importa no es un reparto perfecto —con 32 preguntas y 4 letras no lo va a ser— sino
+    # que la letra deje de ser una pista y que ninguna quede abandonada.
+    assert not r["sesgado"] and r["mejor_pct"] <= 35, r
     assert set(r["reparto"]) == {"A", "B", "C", "D"}
+    assert min(r["reparto"].values()) >= r["total"] // 8, r
 
 
 def test_las_respuestas_ya_dadas_se_reescriben(db):

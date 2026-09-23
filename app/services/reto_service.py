@@ -1449,15 +1449,23 @@ def barajar(db: Session, course_id) -> dict:
         # A la correcta le toca la letra menos usada; a igualdad, al azar, para no crear otro patrón.
         destino = min(letras, key=lambda L: (usos.get(L, 0), random.random()))
         otras = [L for L in letras if L != destino]
-        textos = [alts[L] for L in letras if L != p.correcta]
-        random.shuffle(textos)
+        # Se barajan las LETRAS de origen, no los textos. Barajar los textos y después emparejar
+        # las letras por su orden original daba un mapa equivocado en cuanto la permutación movía
+        # algo: el texto acababa donde tocaba, pero «old → new» apuntaba a otra parte y las
+        # respuestas ya dadas se reescribían mal. Un solo recorrido construye las dos cosas a la
+        # vez, así no pueden discrepar.
+        fuentes = [L for L in letras if L != p.correcta]
+        random.shuffle(fuentes)
 
         nuevo = {destino: alts[p.correcta]}
-        nuevo.update(dict(zip(otras, textos)))
-        # old → new: para reescribir las respuestas ya registradas.
-        mapa = {p.correcta: destino}
-        mapa.update({L: N for L, N in zip([L for L in letras if L != p.correcta], otras)})
+        mapa = {p.correcta: destino}                 # old → new, para las respuestas ya registradas
+        for origen, llega_a in zip(fuentes, otras):
+            nuevo[llega_a] = alts[origen]
+            mapa[origen] = llega_a
         if nuevo == alts and destino == p.correcta:
+            # Le tocó el orden que ya tenía. No hay nada que reescribir, pero esa letra SÍ queda
+            # ocupada: si no se cuenta, el reparto de las siguientes se calcula con datos viejos.
+            usos[destino] = usos.get(destino, 0) + 1
             intactas += 1
             continue
 
