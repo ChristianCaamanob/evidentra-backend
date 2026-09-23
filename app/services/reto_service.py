@@ -908,8 +908,33 @@ def payload_push(n_banco: int, v: dict | None = None) -> dict:
 # El profesor ya tiene sus variantes escritas y con la correcta RESALTADA EN AMARILLO. Pedirle que
 # las vuelva a escribir en un formulario sería tirar a la basura su trabajo; y transcribirlas a mano
 # es justo donde se cuelan los errores. Se lee su archivo tal como está.
+# Formas de marcar la respuesta correcta en Word, en orden de intención. El docente marca como
+# sabe: unos con el resaltador, otros pintando la letra de verde, otros subrayando o poniendo en
+# negrita. Antes solo se leía el resaltador y una pauta marcada en verde se rechazaba entera con
+# «no encontré preguntas con su alternativa marcada» — lo que es literalmente falso: estaban todas
+# marcadas, solo que de otra manera.
+_SENALES = ("resaltado", "color", "subrayado", "negrita")
+
+
+def _senales_de(p: str) -> set:
+    """Qué marcas de formato lleva este párrafo."""
+    import re as _re
+    out = set()
+    if _re.search(r'w:highlight[^>]*w:val="(?!none)', p):
+        out.add("resaltado")
+    # El negro y el "automático" no son una marca: son el color por defecto del documento.
+    for c in _re.findall(r'<w:color w:val="([0-9A-Fa-f]{6}|auto)"', p):
+        if c.lower() not in ("auto", "000000"):
+            out.add("color")
+    if _re.search(r'<w:u [^>]*w:val="(?!none)', p):
+        out.add("subrayado")
+    if _re.search(r"<w:b[ /]", p) and not _re.search(r'<w:b w:val="(0|false)', p):
+        out.add("negrita")
+    return out
+
+
 def _docx_parrafos(datos: bytes) -> list:
-    """(texto, ¿resaltado?) por párrafo del .docx."""
+    """(texto, marcas) por párrafo del .docx."""
     import io
     import re as _re
     import zipfile
@@ -920,10 +945,23 @@ def _docx_parrafos(datos: bytes) -> list:
     for p in _re.findall(r"<w:p\b.*?</w:p>", xml, _re.S):
         texto = unescape(_re.sub(r"<[^>]+>", "", p)).strip()
         if texto:
-            # Cualquier resaltado sirve menos el explícito "none": no todos los docentes usan amarillo.
-            marcado = bool(_re.search(r'w:highlight[^>]*w:val="(?!none)', p))
-            out.append((texto, marcado))
+            out.append((texto, _senales_de(p)))
     return out
+
+
+def _cual_esta_marcada(alts: list) -> str | None:
+    """De las alternativas de UNA pregunta, cuál está marcada distinto de sus hermanas.
+
+    La clave es «distinto de sus hermanas», no «tiene tal formato». Si el docente pone en negrita
+    las cuatro alternativas, la negrita no señala nada; si pone una sola en verde, esa es. Mirar el
+    grupo y no el párrafo suelto es lo que permite aceptar cualquier convención sin inventarse una
+    respuesta cuando no hay ninguna marca real.
+    """
+    for senal in _SENALES:
+        con = [letra for letra, _txt, marcas in alts if senal in marcas]
+        if len(con) == 1:
+            return con[0]
+    return None
 
 
 _RE_ENUNCIADO = None
@@ -940,29 +978,38 @@ def _regex():
 
 
 def parsear_docx(datos: bytes, tema_defecto: str = "General") -> list:
-    """Lee «1. enunciado / a) … b) …» con la correcta resaltada. Devuelve preguntas listas."""
+    """Lee «1. enunciado / a) … b) …» con la correcta marcada. Devuelve preguntas listas.
+
+    Qué cuenta como «marcada» no se decide por párrafo sino comparando las alternativas de cada
+    pregunta entre sí: la que va distinta de sus hermanas es la respuesta, se haya marcado con el
+    resaltador, con color de letra, subrayando o en negrita.
+    """
     re_en, re_alt = _regex()
-    parrafos = _docx_parrafos(datos)
     preguntas, actual = [], None
-    for texto, marcado in parrafos:
+
+    def _cerrar(q):
+        if not q or len(q["alts"]) < 2:
+            return
+        letra = _cual_esta_marcada(q["alts"])
+        if not letra:
+            return
+        preguntas.append({"enunciado": q["enunciado"], "tema": q["tema"], "correcta": letra,
+                          "alternativas": {L: t for L, t, _m in q["alts"]}})
+
+    for texto, marcas in _docx_parrafos(datos):
         m = re_alt.match(texto)
         if m and actual is not None:
             letra = m.group(1).upper()
             # Si esa letra YA existe, empezó otro bloque que no se reconoció como enunciado:
             # sobrescribirla corrompería en silencio la pregunta anterior. Se ignora.
-            if letra not in actual["alternativas"]:
-                actual["alternativas"][letra] = m.group(2).strip()[:300]
-                if marcado:
-                    actual["correcta"] = letra
+            if letra not in {L for L, _t, _m in actual["alts"]}:
+                actual["alts"].append((letra, m.group(2).strip()[:300], marcas))
             continue
         m = re_en.match(texto)
         if m:
-            if actual and len(actual["alternativas"]) >= 2 and actual.get("correcta"):
-                preguntas.append(actual)
-            actual = {"enunciado": m.group(2).strip()[:1200], "alternativas": {},
-                      "correcta": None, "tema": tema_defecto}
-    if actual and len(actual["alternativas"]) >= 2 and actual.get("correcta"):
-        preguntas.append(actual)
+            _cerrar(actual)
+            actual = {"enunciado": m.group(2).strip()[:1200], "alts": [], "tema": tema_defecto}
+    _cerrar(actual)
     return preguntas
 
 
@@ -985,9 +1032,19 @@ def importar_docx(db: Session, course_id, datos_b64: str, tema: str = "General",
     except Exception:  # noqa: BLE001
         raise unprocessable("Ese archivo no parece un .docx de Word.")
     if not preguntas:
+        # El mensaje anterior decía lo mismo para dos problemas distintos —no reconocí el formato
+        # / lo reconocí pero no hay nada marcado— y mandaba a «resaltar», que es solo una de las
+        # cuatro formas válidas. Con 32 enunciados leídos y cero marcas, decir «no encontré
+        # preguntas» es directamente falso y deja al docente sin saber qué tocar.
+        n = _contar_enunciados(datos)
+        if not n:
+            raise unprocessable(
+                "No reconocí ninguna pregunta. Cada una tiene que empezar por su número —«1.» o "
+                "«1)»— y debajo las alternativas, una por línea, empezando por «A.», «a)» o similar.")
         raise unprocessable(
-            "No encontré preguntas con su alternativa marcada. El formato esperado es «1. enunciado» "
-            "y debajo «a) …», con la correcta resaltada en el documento.")
+            f"Leí {n} preguntas, pero en ninguna hay una alternativa marcada distinto de las otras. "
+            "Marca la correcta como prefieras —resaltada, en negrita, subrayada o de otro color—; "
+            "lo único que importa es que vaya distinta de sus compañeras de esa misma pregunta.")
 
     ya = db.query(RetoPregunta).filter(RetoPregunta.course_id == str(course_id)).count()
     # No se importa dos veces el mismo enunciado: reimportar un archivo corregido es lo normal.

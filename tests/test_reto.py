@@ -1250,3 +1250,120 @@ def test_el_diagnostico_deja_claro_que_no_hace_falta_la_ia(db):
     """Runi se quedó sin créditos. Lo primero que hay que poder descartar es que el reto dependa
     de eso, porque no depende."""
     assert rt.salud_avisos(db, CID)["necesita_ia"] is False
+
+
+# ── el docente marca como sabe, no como espera el importador ──────────────────────────
+# El CEO subió una pauta de 32 preguntas y el importador la rechazó entera con «no encontré
+# preguntas con su alternativa marcada». Era falso: estaban las 32 marcadas, pero en VERDE y
+# negrita en vez de con el resaltador, que era lo único que el código sabía leer.
+def _docx_fmt(parrafos):
+    """Un .docx mínimo donde cada párrafo lleva las marcas que se le pidan.
+
+    `parrafos` = [(texto, {"color": "006100"} | {"negrita": True} | {"resaltado": True} | ...)]
+    """
+    import io, zipfile
+    def p(t, m):
+        m = m or {}
+        r = ""
+        if m.get("resaltado"): r += '<w:highlight w:val="yellow"/>'
+        if m.get("color"):     r += f'<w:color w:val="{m["color"]}"/>'
+        if m.get("subrayado"): r += '<w:u w:val="single"/>'
+        if m.get("negrita"):   r += '<w:b/>'
+        rpr = f"<w:rPr>{r}</w:rPr>" if r else ""
+        return f'<w:p><w:r>{rpr}<w:t>{t}</w:t></w:r></w:p>'
+    doc = ('<?xml version="1.0"?><w:document xmlns:w="x"><w:body>'
+           + "".join(p(t, m) for t, m in parrafos) + '</w:body></w:document>')
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("word/document.xml", doc)
+    return buf.getvalue()
+
+
+def _una_pregunta(marcas_por_letra, enunciado_marcas=None):
+    base = [("1. ¿Qué hueso forma el estrecho superior?", enunciado_marcas)]
+    for L, t in (("A", "El fémur"), ("B", "El sacro"), ("C", "La escápula"), ("D", "El húmero")):
+        base.append((f"{L}. {t}", marcas_por_letra.get(L)))
+    return _docx_fmt(base)
+
+
+def test_la_correcta_en_verde_ahora_se_lee():
+    """El caso exacto del CEO: color de letra 006100 y negrita, sin resaltador."""
+    d = _una_pregunta({"B": {"color": "006100", "negrita": True}})
+    qs = rt.parsear_docx(d)
+    assert len(qs) == 1 and qs[0]["correcta"] == "B"
+
+
+def test_tambien_subrayada(): 
+    assert rt.parsear_docx(_una_pregunta({"C": {"subrayado": True}}))[0]["correcta"] == "C"
+
+
+def test_tambien_solo_en_negrita():
+    assert rt.parsear_docx(_una_pregunta({"D": {"negrita": True}}))[0]["correcta"] == "D"
+
+
+def test_el_resaltador_de_siempre_sigue_funcionando():
+    assert rt.parsear_docx(_una_pregunta({"A": {"resaltado": True}}))[0]["correcta"] == "A"
+
+
+def test_un_enunciado_en_negrita_no_contagia_a_sus_alternativas():
+    """En la pauta del CEO TODOS los enunciados van en negrita. Eso no marca ninguna respuesta."""
+    d = _una_pregunta({"B": {"color": "006100", "negrita": True}}, enunciado_marcas={"negrita": True})
+    assert rt.parsear_docx(d)[0]["correcta"] == "B"
+
+
+def test_si_todas_van_iguales_no_se_inventa_una_respuesta():
+    """Lo importante es ir DISTINTO de las hermanas. Cuatro en negrita no señalan nada, y elegir
+    una al azar sería enseñarle algo falso a quien la responda."""
+    todas = {L: {"negrita": True} for L in "ABCD"}
+    assert rt.parsear_docx(_una_pregunta(todas)) == []
+
+
+def test_sin_ninguna_marca_tampoco():
+    assert rt.parsear_docx(_una_pregunta({})) == []
+
+
+def test_el_resaltador_gana_al_resto():
+    """Si el docente resaltó una y además hay negritas sueltas, manda el resaltador: es la marca
+    más deliberada de las cuatro."""
+    d = _una_pregunta({"A": {"resaltado": True}, "C": {"negrita": True}})
+    assert rt.parsear_docx(d)[0]["correcta"] == "A"
+
+
+def test_el_negro_y_el_automatico_no_son_una_marca():
+    """Un documento con el color escrito explícitamente en negro no tiene ninguna respuesta marcada."""
+    d = _una_pregunta({L: {"color": "000000"} for L in "ABCD"})
+    assert rt.parsear_docx(d) == []
+    d2 = _una_pregunta({"A": {"color": "auto"}, "B": {"color": "006100"}})
+    assert rt.parsear_docx(d2)[0]["correcta"] == "B"
+
+
+def test_la_pauta_real_del_ceo_entra_entera():
+    """Contra el archivo de verdad, no contra uno de mentira: 32 preguntas, 32 con su clave."""
+    import pathlib
+    p = pathlib.Path("/Users/christianeduardocaamanobinimelis/Downloads"
+                     "/Preguntas_entrenamiento_Anatomia_Aplicada_2026_con_claves.docx")
+    if not p.exists():
+        pytest.skip("el .docx del CEO no está en esta máquina")
+    qs = rt.parsear_docx(p.read_bytes(), "Mama y abdomen")
+    assert len(qs) == 32
+    assert qs[0]["correcta"] == "B" and "axilares pectorales" in qs[0]["alternativas"]["B"]
+    assert all(len(q["alternativas"]) == 4 for q in qs)
+
+
+def test_el_error_dice_cuantas_leyo_y_que_falta(db):
+    """«No encontré preguntas» con 32 preguntas leídas es falso y no dice qué tocar."""
+    d = _una_pregunta({})           # bien formada, sin ninguna marca
+    import base64
+    with pytest.raises(Exception) as e:
+        rt.importar_docx(db, CID, base64.b64encode(d).decode())
+    msg = str(getattr(e.value, "detail", e.value))
+    assert "Leí 1 pregunta" in msg and "negrita" in msg and "subrayada" in msg
+
+
+def test_si_el_formato_no_se_reconoce_lo_dice_distinto(db):
+    import base64
+    d = _docx_fmt([("Un párrafo suelto sin numerar", None), ("Otro más", None)])
+    with pytest.raises(Exception) as e:
+        rt.importar_docx(db, CID, base64.b64encode(d).decode())
+    msg = str(getattr(e.value, "detail", e.value))
+    assert "No reconocí ninguna pregunta" in msg
