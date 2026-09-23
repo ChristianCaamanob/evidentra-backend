@@ -1395,3 +1395,102 @@ def salud_avisos(db: Session, course_id, ahora=None) -> dict:
             "por_sesion": POR_SESION,
             # La IA no entra aquí: las preguntas ya están escritas en la base.
             "necesita_ia": False}
+
+
+# ── barajar las alternativas ──────────────────────────────────────────────────────────
+# En la pauta del CEO el 87% de las claves caían en A o B, y solo una en D. Quien marque siempre
+# «B» sin leer saca 43%. Eso no mide anatomía, mide haber notado el patrón.
+#
+# Dos trampas que no se ven a simple vista:
+#  1. Una alternativa como «todas las anteriores» depende del ORDEN. Barajarla la rompe, así que
+#     esas preguntas se dejan intactas.
+#  2. `RetoRespuesta.elegida` y `RetoIntento.elegida` guardan una LETRA. Si se baraja sin más, cada
+#     respuesta ya registrada pasa a apuntar a otro texto: el acta de intentos, el porcentaje de
+#     acierto y el distractor más votado quedan mintiendo, en silencio y sin arreglo posible. Por
+#     eso se reescriben con el mismo mapeo.
+_re_ref = None
+
+
+def _es_referencial(texto: str) -> bool:
+    """¿Esta alternativa habla de las OTRAS? Entonces su sitio en la lista es parte del enunciado."""
+    global _re_ref
+    if _re_ref is None:
+        import re as _re
+        _re_ref = _re.compile(
+            r"(todas|ninguna|ambas|algunas)\s+(de\s+)?(las|los)?\s*(anteriores|opciones|alternativas)"
+            r"|\b[a-e]\s+y\s+[a-e]\b|son correctas|es correcta", _re.I)
+    return bool(_re_ref.search(str(texto or "")))
+
+
+def barajar(db: Session, course_id) -> dict:
+    """Redistribuye las alternativas para que la correcta no se concentre en una letra.
+
+    No sortea a ciegas: reparte a propósito. A cada pregunta le toca, de las letras que tiene, la
+    que menos veces lleva usada como correcta hasta ese momento. Un barajado al azar volvería a
+    amontonarlas por pura suerte, que es justo el problema que se viene a resolver.
+    """
+    import random
+    filas = db.query(RetoPregunta).filter(RetoPregunta.course_id == str(course_id)).all()
+    if not filas:
+        raise unprocessable("Este curso no tiene preguntas que barajar.")
+
+    usos: dict = {}
+    barajadas, intactas, respuestas_movidas = 0, 0, 0
+    for p in filas:
+        alts = dict(p.alternativas or {})
+        if len(alts) < 2 or p.correcta not in alts:
+            intactas += 1
+            continue
+        if any(_es_referencial(t) for t in alts.values()):
+            intactas += 1          # su orden es parte de lo que preguntan
+            continue
+
+        letras = sorted(alts)
+        # A la correcta le toca la letra menos usada; a igualdad, al azar, para no crear otro patrón.
+        destino = min(letras, key=lambda L: (usos.get(L, 0), random.random()))
+        otras = [L for L in letras if L != destino]
+        textos = [alts[L] for L in letras if L != p.correcta]
+        random.shuffle(textos)
+
+        nuevo = {destino: alts[p.correcta]}
+        nuevo.update(dict(zip(otras, textos)))
+        # old → new: para reescribir las respuestas ya registradas.
+        mapa = {p.correcta: destino}
+        mapa.update({L: N for L, N in zip([L for L in letras if L != p.correcta], otras)})
+        if nuevo == alts and destino == p.correcta:
+            intactas += 1
+            continue
+
+        p.alternativas = nuevo
+        p.correcta = destino
+        usos[destino] = usos.get(destino, 0) + 1
+        barajadas += 1
+        for modelo in (RetoRespuesta, RetoIntento):
+            for r in db.query(modelo).filter(modelo.pregunta_id == p.id).all():
+                if r.elegida in mapa:
+                    r.elegida = mapa[r.elegida]
+                    respuestas_movidas += 1
+    db.commit()
+
+    reparto: dict = {}
+    for p in db.query(RetoPregunta).filter(RetoPregunta.course_id == str(course_id),
+                                           RetoPregunta.estado == "aprobada").all():
+        reparto[p.correcta] = reparto.get(p.correcta, 0) + 1
+    return {"ok": True, "barajadas": barajadas, "intactas": intactas,
+            "respuestas_actualizadas": respuestas_movidas,
+            "reparto": dict(sorted(reparto.items()))}
+
+
+def reparto_de_claves(db: Session, course_id) -> dict:
+    """Cuántas correctas caen en cada letra, y si eso se puede adivinar sin leer."""
+    filas = db.query(RetoPregunta).filter(RetoPregunta.course_id == str(course_id),
+                                          RetoPregunta.estado == "aprobada").all()
+    reparto: dict = {}
+    for p in filas:
+        reparto[p.correcta] = reparto.get(p.correcta, 0) + 1
+    n = len(filas)
+    top = max(reparto.values()) if reparto else 0
+    # Con 4 alternativas el azar da 25%. Por encima de 40% la letra ya es una pista.
+    return {"reparto": dict(sorted(reparto.items())), "total": n,
+            "mejor_pct": round(100 * top / n) if n else 0,
+            "sesgado": bool(n >= 8 and top / n > 0.40)}

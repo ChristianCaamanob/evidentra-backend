@@ -45,6 +45,16 @@ def reto_tabla_docente(course_id: UUID, hoy: int = 0, db: Session = Depends(get_
     return rt.tabla(db, course_id, "", tope=30, hoy=bool(hoy))
 
 
+@router.post("/courses/{course_id}/reto/barajar", dependencies=[Depends(req_profesor)])
+@limit("6/minute")
+def reto_barajar(course_id: UUID, request: Request, db: Session = Depends(get_db)):
+    """Redistribuye las alternativas para que la correcta no se concentre en una letra.
+
+    Reescribe tambien las respuestas ya registradas, que guardan la LETRA y no el texto.
+    """
+    return rt.barajar(db, course_id)
+
+
 @router.get("/courses/{course_id}/reto/avisos", dependencies=[Depends(req_profesor)])
 def reto_avisos(course_id: UUID, db: Session = Depends(get_db)):
     """Diagnostico: esta llegando el reto a alguien, y si no, por que."""

@@ -1367,3 +1367,110 @@ def test_si_el_formato_no_se_reconoce_lo_dice_distinto(db):
         rt.importar_docx(db, CID, base64.b64encode(d).decode())
     msg = str(getattr(e.value, "detail", e.value))
     assert "No reconocí ninguna pregunta" in msg
+
+
+# ── barajar sin romper nada ───────────────────────────────────────────────────────────
+# En la pauta del CEO el 87% de las claves caían en A o B. Marcar siempre «B» sacaba 43%: eso no
+# mide anatomía, mide haber notado el patrón.
+def _preg(db, alts, correcta, estado="aprobada"):
+    p = RetoPregunta(course_id=CID, tema="T", enunciado="¿?", alternativas=alts,
+                     correcta=correcta, estado=estado, origen="docente")
+    db.add(p); db.commit(); return p
+
+
+def test_la_correcta_sigue_siendo_el_mismo_texto(db):
+    """Lo único que no puede cambiar. Si cambiara, el banco entero pasaría a enseñar algo falso."""
+    for _ in range(12):
+        _preg(db, {"A": "uno", "B": "DOS-buena", "C": "tres", "D": "cuatro"}, "B")
+    rt.barajar(db, CID)
+    for p in db.query(RetoPregunta).all():
+        assert p.alternativas[p.correcta] == "DOS-buena"
+
+
+def test_no_se_pierde_ni_se_duplica_ninguna_alternativa(db):
+    p = _preg(db, {"A": "uno", "B": "dos", "C": "tres", "D": "cuatro"}, "B")
+    rt.barajar(db, CID)
+    q = db.query(RetoPregunta).one()
+    assert sorted(q.alternativas.values()) == ["cuatro", "dos", "tres", "uno"]
+    assert sorted(q.alternativas) == ["A", "B", "C", "D"]
+
+
+def test_deja_de_poder_adivinarse_por_la_letra(db):
+    """El caso del CEO: 32 preguntas con la correcta casi siempre en A o B."""
+    for _ in range(16):
+        _preg(db, {"A": "a", "B": "b-buena", "C": "c", "D": "d"}, "B")
+    for _ in range(16):
+        _preg(db, {"A": "a-buena", "B": "b", "C": "c", "D": "d"}, "A")
+    assert rt.reparto_de_claves(db, CID)["sesgado"]
+    rt.barajar(db, CID)
+    r = rt.reparto_de_claves(db, CID)
+    assert not r["sesgado"] and r["mejor_pct"] <= 30, r
+    assert set(r["reparto"]) == {"A", "B", "C", "D"}
+
+
+def test_las_respuestas_ya_dadas_se_reescriben(db):
+    """LA trampa. `elegida` guarda una LETRA: al barajar, cada respuesta registrada pasaría a
+    apuntar a otro texto y el acta, el % de acierto y el distractor más votado mentirían para
+    siempre, sin error y sin arreglo."""
+    p = _preg(db, {"A": "a", "B": "b-buena", "C": "c-distractor", "D": "d"}, "B")
+    rt.responder(db, p.id, ANA, "C", CID, ahora=ABIERTA)      # falla, eligiendo el distractor
+    rt.responder(db, p.id, LUZ, "B", CID, ahora=ABIERTA)      # acierta
+    rt.barajar(db, CID)
+    q = db.query(RetoPregunta).one()
+    from app.models.reto import RetoIntento, RetoRespuesta
+    ana = db.query(RetoRespuesta).filter(RetoRespuesta.pseudo_id == ANA).one()
+    luz = db.query(RetoRespuesta).filter(RetoRespuesta.pseudo_id == LUZ).one()
+    # Lo que eligió cada una sigue apuntando al MISMO texto que eligió de verdad.
+    assert q.alternativas[ana.elegida] == "c-distractor" and not ana.correcta
+    assert q.alternativas[luz.elegida] == "b-buena" and luz.correcta
+    assert luz.elegida == q.correcta
+    for i in db.query(RetoIntento).all():
+        assert i.elegida in q.alternativas
+
+
+def test_el_analisis_sigue_diciendo_la_verdad_despues_de_barajar(db):
+    """La prueba de arriba, vista desde donde el docente la mira."""
+    p = _preg(db, {"A": "a", "B": "b-buena", "C": "c-distractor", "D": "d"}, "B")
+    for quien in ("stu:1", "stu:2", "stu:3"):
+        rt.responder(db, p.id, quien, "C", CID, ahora=ABIERTA)
+    antes = rt.analisis(db, CID)["preguntas"][0]["distractor"]
+    rt.barajar(db, CID)
+    despues = rt.analisis(db, CID)["preguntas"][0]["distractor"]
+    assert antes["texto"] == despues["texto"] == "c-distractor"
+    assert antes["n"] == despues["n"] == 3
+
+
+def test_todas_las_anteriores_se_deja_en_paz(db):
+    """Su sitio en la lista es parte de lo que pregunta: barajarla la rompe."""
+    _preg(db, {"A": "uno", "B": "dos", "C": "tres", "D": "Todas las anteriores"}, "D")
+    r = rt.barajar(db, CID)
+    assert r["barajadas"] == 0 and r["intactas"] == 1
+    assert db.query(RetoPregunta).one().alternativas["D"] == "Todas las anteriores"
+
+
+def test_tambien_ninguna_de_las_anteriores_y_a_y_b(db):
+    for alts in ({"A": "x", "B": "y", "C": "Ninguna de las anteriores"},
+                 {"A": "x", "B": "y", "C": "A y B son correctas"}):
+        db.query(RetoPregunta).delete(); db.commit()
+        _preg(db, alts, "A")
+        assert rt.barajar(db, CID)["intactas"] == 1
+
+
+def test_una_pregunta_rota_no_tumba_el_barajado(db):
+    _preg(db, {"A": "sola"}, "A")                                    # una sola alternativa
+    _preg(db, {"A": "a", "B": "b", "C": "c", "D": "d"}, "Z")         # correcta que no existe
+    _preg(db, {"A": "a", "B": "b-buena", "C": "c", "D": "d"}, "B")   # sana
+    r = rt.barajar(db, CID)
+    assert r["barajadas"] == 1 and r["intactas"] == 2
+
+
+def test_un_curso_sin_preguntas_lo_dice(db):
+    with pytest.raises(Exception):
+        rt.barajar(db, CID)
+
+
+def test_con_pocas_preguntas_no_se_grita_sesgo(db):
+    """Con 4 preguntas, que 3 sean «B» puede ser casualidad. Avisar ahí sería ruido."""
+    for L in ("B", "B", "B", "A"):
+        _preg(db, {"A": "a", "B": "b", "C": "c", "D": "d"}, L)
+    assert not rt.reparto_de_claves(db, CID)["sesgado"]
