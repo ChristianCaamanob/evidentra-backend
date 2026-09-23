@@ -3,7 +3,13 @@ name: keep-alive
 # Corre en los servidores de GitHub (no depende del computador del CEO).
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    # Una vez por hora, con la hora ESCRITA. Antes decía '*/10' y GitHub simplemente lo ignoraba:
+    # medido sobre 60 ejecuciones reales de 10 días, la separación mediana fue de 214 minutos y la
+    # máxima de 409 — o sea, cada ~3,5 h en vez de cada 10 min. Las programaciones con hora explícita
+    # se atienden bastante mejor que las de alta frecuencia, y 13 al día caben de sobra en los
+    # minutos gratis (≈390 al mes de los 2000 que hay).
+    # 11:00–23:00 UTC cubre las 08:00–20:00 de Chile todo el año (el país cambia entre UTC-3 y -4).
+    - cron: '0 11-23 * * *'
   workflow_dispatch: {}
 jobs:
   ping:
@@ -18,8 +24,11 @@ jobs:
             sleep 25
           done
       - name: Tick de recordatorios push
-        # Dispara los recordatorios amables de evaluaciones (12 sem/1 sem/3 días) y las alarmas de
-        # los recordatorios personales del alumno cuando llega su hora. Es idempotente (dedupe en la BD).
+        # Dispara los recordatorios de evaluaciones, las alarmas de los recordatorios personales y
+        # el aviso del reto de Runi. Es idempotente (dedupe en la BD), así que repetirlo no molesta
+        # a nadie: el servicio decide si toca avisar o no, mirando cuándo fue el último aviso.
+        # OJO: el backend NO puede programarse solo esto. Render free duerme a los ~15 min sin uso,
+        # así que hace falta que alguien de fuera lo despierte. Ese alguien es este workflow.
         run: |
           code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 70 -X POST https://evidentra-backend.onrender.com/api/v1/push/tick || echo 000)
           echo "push/tick -> HTTP $code"
